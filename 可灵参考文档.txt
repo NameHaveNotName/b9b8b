@@ -1,0 +1,122 @@
+图像生成
+图像生成
+测试中
+POST
+/kling/v1/images/generations
+请求参数
+Authorization
+在 Header 添加参数 Authorization，其值为在 Bearer 之后拼接 Token
+示例：
+Authorization: Bearer ********************
+Header 参数
+Content-Type
+string 
+可选
+示例:
+application/json
+Authorization
+string 
+可选
+示例:
+Bearer {{YOUR_API_KEY}}
+Body 参数
+application/json
+必填
+model_name
+string 
+必需
+模型名称 枚举值：kling-v1, kling-v1-5, kling-v2, kling-v2-new, kling-v2-1
+prompt
+string 
+必需
+正向文本提示词 不能超过2500个字符
+negative_prompt
+string 
+可选
+负向文本提示词 不能超过2500个字符
+image
+string 
+可选
+参考图像支持传入图片Base64编码或图片URL（确保可访问）
+image_reference
+string 
+可选
+图片参考类型
+枚举值：subject（角色特征参考）, face（人物长相参考）
+使用face（人物长相参考）时，上传图片需仅含1张人脸。
+使用 kling-v1-5 且 image 参数不为空时，当前参数必填
+image_fidelity
+number 
+可选
+生成过程中对用户上传图片的参考强度
+取值范围：[0,1]，数值越大参考强度越大
+human_fidelity
+number 
+可选
+面部参考强度，即参考图中人物五官相似度
+仅 image_reference 参数为 subject 时生效
+取值范围：[0,1]，数值越大参考强度越大
+resolution
+string 
+可选
+生成图片的清晰度
+枚举值：1k, 2k
+1k：1K标清
+2k：2K高清
+n
+integer 
+必需
+生成图片数量
+取值范围：[1,9]
+aspect_ratio
+string 
+可选
+生成图片的画面纵横比（宽:高）
+枚举值：16:9, 9:16, 1:1, 4:3, 3:4, 3:2, 2:3, 21:9
+callback_url
+string 
+可选
+示例
+{
+    "model_name": "kling-v1",
+    "prompt": "生成一张海边的图",
+    "negative_prompt": "",
+    "image": "",
+    "image_reference": "",
+    "image_fidelity": "0.5",
+    "human_fidelity": 0.45,
+    "resolution": "1k",
+    "n": 1,
+    "aspect_ratio": "16:9",
+    "callback_url": ""
+}
+请求示例代码
+cURL
+cURL-Windows
+Httpie
+wget
+PowerShell
+curl --location 'https://vip.123everything.com/kling/v1/images/generations' \
+--header 'Authorization: Bearer <token>' \
+--header 'Content-Type: application/json' \
+--data '{
+    "model_name": "kling-v1",
+    "prompt": "生成一张海边的图",
+    "negative_prompt": "",
+    "image": "",
+    "image_reference": "",
+    "image_fidelity": "0.5",
+    "human_fidelity": 0.45,
+    "resolution": "1k",
+    "n": 1,
+    "aspect_ratio": "16:9",
+    "callback_url": ""
+}'
+返回响应
+🟢200
+成功
+application/json
+object
+ 
+示例
+{}

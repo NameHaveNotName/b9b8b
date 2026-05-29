@@ -1,0 +1,122 @@
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getImageClient } from '@/lib/api-clients'
+import { getStyleRefUrl } from '@/lib/style-ref'
+import { IMAGE_MODELS } from '@/lib/models-config'
+
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  const body = await req.json().catch(() => ({}))
+  const { assetId, aspectRatio, imageModel } = body
+  if (!assetId || typeof assetId !== 'string') {
+    return NextResponse.json({ error: 'VALIDATION_001', message: '缺少 assetId' }, { status: 400 })
+  }
+  const newRatio = aspectRatio || '16:9'
+  const newModel = imageModel || IMAGE_MODELS.primary
+  console.log(`[REGENERATE-PARAMS] character: ${assetId}, 新比例: ${newRatio}, 新模型: ${newModel}`)
+
+  const step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'CHARACTER' } }
+  })
+  if (!step) {
+    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
+  }
+
+  const outputData = (step.outputData || {}) as any
+  const portraits: any[] = outputData.portraits || []
+
+  const targetIndex = portraits.findIndex((p: any) => p.assetId === assetId)
+  if (targetIndex < 0) {
+    return NextResponse.json({ error: 'NOT_FOUND', message: '未找到该角色' }, { status: 404 })
+  }
+
+  const targetPortrait = portraits[targetIndex]
+  const character = targetPortrait.character
+
+  console.log(`[CHARACTER-REGENERATE] 重新生成角色: assetId=${assetId}, char=${character?.name}`)
+
+  let styleRefUrl: string
+  let stylePrompt: string
+  try {
+    const ref = await getStyleRefUrl(params.id)
+    styleRefUrl = ref.styleRefUrl
+    stylePrompt = ref.stylePrompt
+  } catch (refErr: any) {
+    console.error('[CHARACTER-REGENERATE] 风格参考读取失败:', refErr?.message)
+    return NextResponse.json(
+      { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图 URL' },
+      { status: 400 }
+    )
+  }
+
+  try {
+    await prisma.asset.delete({ where: { id: assetId } })
+    console.log('[CHARACTER-REGENERATE] 旧 Asset 已删除:', assetId)
+  } catch (e: any) {
+    console.warn('[CHARACTER-REGENERATE] 删除旧 Asset 失败:', e?.message)
+  }
+
+  try {
+    const imageClient = await getImageClient()
+    const result = await imageClient.generateCharacterPortrait(
+      params.id,
+      character,
+      styleRefUrl,
+      stylePrompt,
+      newRatio,
+      newModel
+    )
+
+    const newAsset = await prisma.asset.create({
+      data: {
+        projectId: params.id,
+        stepId: step.id,
+        type: 'IMAGE',
+        mimeType: 'image/png',
+        storageKey: result.storageKey,
+        url: result.url,
+        metadata: {
+          characterId: character.id,
+          characterName: character.name,
+          styleRefUrl,
+          aspectRatio: newRatio,
+          imageModel: newModel,
+          regenerated: true,
+          originalAssetId: assetId,
+        },
+      },
+    })
+
+    const newPortraits = [...portraits]
+    newPortraits[targetIndex] = {
+      ...targetPortrait,
+      assetId: newAsset.id,
+      url: result.url,
+      regeneratedAt: new Date().toISOString(),
+    }
+
+    await prisma.workflowStep.update({
+      where: { id: step.id },
+      data: { outputData: { ...outputData, portraits: newPortraits } },
+    })
+
+    console.log('[CHARACTER-REGENERATE] 重新生成成功:', newAsset.id)
+    return NextResponse.json({ success: true, portrait: newPortraits[targetIndex] })
+  } catch (e: any) {
+    console.error('[CHARACTER-REGENERATE] 重新生成失败:', e?.message)
+    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+  }
+}

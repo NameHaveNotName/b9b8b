@@ -1,0 +1,10 @@
+{
+  "act1": null,
+  "act2": null,
+  "act3": null,
+  "merged": {
+    "success": false,
+    "error": "Unexpected token '`', \"```json\n[\n\"... is not valid JSON"
+  },
+  "totalDuration": 44931
+}

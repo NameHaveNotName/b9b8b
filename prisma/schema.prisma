@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 项目状态
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+// 12步工作流类型
+enum WorkflowStepType {
+  IDEATION       // 创意扩散
+  FRAMEWORK      // 框架搭建
+  STYLE          // 风格统一
+  CHARACTER      // 人物设计
+  CONCEPT        // 概念图生成
+  TRAILER        // 30s宣传片
+  STORYBOARD     // 分镜设计
+  KEYFRAMES      // 首尾帧
+  VIDEO_DIRECT   // 直生视频
+  VIDEO_RENDER   // AI渲染
+  CAMERA         // 电脑运镜
+  REVIEW         // 一致性检测/评测
+}
+
+// 步骤执行状态
+enum StepStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+// 资源类型
+enum AssetType {
+  IMAGE
+  VIDEO
+  TEXT
+  AUDIO
+  REFERENCE
+}
+
+// 评测维度
+enum EvaluationDimension {
+  CONSISTENCY    // 时序一致性
+  FIDELITY       // 语义保真度
+  AESTHETICS     // 视觉美学
+  SPEED          // 生成时效
+}
+
+// NextAuth.js v5 所需的 Account 模型
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+// NextAuth.js v5 所需的 Session 模型
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// NextAuth.js v5 所需的 VerificationToken 模型（Email Magic Link 用）
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  accounts      Account[]
+  sessions      Session[]
+  projects      Project[]
+  auditLogs     AuditLog[]
+  createdAt     DateTime  @default(now())
+}
+
+model Project {
+  id                String         @id @default(cuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title             String         @default("未命名项目")
+  rawIdea           String         @db.Text
+  selectedDirection Json?          // 选定的创意扩散方向
+  framework         Json?          // 框架搭建结果（背景/风格/角色/梗概/幕结构）
+  selectedStyleId   String?        // 关联 Asset.id
+  status            ProjectStatus  @default(ACTIVE)
+  steps             WorkflowStep[]
+  assets            Asset[]
+  comparisons       Comparison[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([userId, status])
+}
+
+model WorkflowStep {
+  id           String           @id @default(cuid())
+  projectId    String
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stepType     WorkflowStepType
+  status       StepStatus       @default(PENDING)
+  inputData    Json?            // 该步输入参数
+  outputData   Json?            // 该步输出结果
+  errorMessage String?          @db.Text
+  order        Int              // 步骤顺序（0-11）
+  retryCount   Int              @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  resultAssets Asset[]          // 关联生成的资源
+  createdAt    DateTime         @default(now())
+
+  @@unique([projectId, stepType]) // 一个项目同一步骤只能有一条记录
+  @@index([projectId, order])
+}
+
+model Asset {
+  id         String        @id @default(cuid())
+  projectId  String
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stepId     String?
+  step       WorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  type       AssetType
+  mimeType   String
+  storageKey String        // R2 上的唯一 key
+  url        String        // 预签名 URL（短期）
+  metadata   Json?         // { seed, modelUsed, prompt, duration, size, styleRef, characterRef }
+  createdAt  DateTime      @default(now())
+
+  @@index([projectId, type])
+  @@index([stepId])
+}
+
+model Evaluation {
+  id           String                @id @default(cuid())
+  assetId      String
+  comparisonId String?
+  dimension    EvaluationDimension
+  aiScore      Float?                // 自动评测 1-10
+  humanScore   Float?                // 人工评分 1-10
+  details      Json?                 // 帧级标记、差异说明等
+  createdAt    DateTime              @default(now())
+
+  @@index([assetId, dimension])
+}
+
+model Comparison {
+  id             String   @id @default(cuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scriptSnapshot Json     // 评测时的分镜脚本快照
+  modelResults   Json     // { modelName: { taskId, assetId, status, url, cost } }
+  overallScores  Json?    // 各模型总分
+  status         String   @default("PENDING") // PENDING, PROCESSING, COMPLETED
+  createdAt      DateTime @default(now())
+
+  @@index([projectId, status])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   // GENERATE_IMAGE, GENERATE_VIDEO, LOGIN, EXPORT 等
+  inputHash String?  // 输入提示词的 SHA256
+  outputUrl String?
+  modelUsed String?
+  ipAddress String?
+  userAgent String?
+  errorCode String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}

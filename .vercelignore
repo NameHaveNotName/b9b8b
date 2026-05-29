@@ -1,0 +1,4 @@
+public/mock-storage
+.kimi/backup
+.temp
+node_modules

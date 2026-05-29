@@ -1,0 +1,11 @@
+{
+  "model": "mock",
+  "prompt": "Cinematic wide shot, golden hour lighting, a lone samurai standing on a cliff overlooking a misty valley, cherry blossom petals drifting in the wind, atmospheric depth, film grain, 35mm photography style, 8K resolution",
+  "referenceUrl": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=512&h=512&fit=crop",
+  "aspectRatio": "16:9",
+  "isMock": true,
+  "lastError": "XIAOMI_API_KEY (or OPENAI_API_KEY) not configured in environment — 真实 API 不可用",
+  "elapsedSec": "0.0",
+  "fileSize": 57426,
+  "filename": "Grok_4_2___X平台_grok-4.2-image.png"
+}

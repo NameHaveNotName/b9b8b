@@ -1,0 +1,742 @@
+{
+  "act1": {
+    "success": true,
+    "duration": 36263,
+    "shotCount": 10,
+    "shots": [
+      {
+        "shotId": "shot_001",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "客观视角，清晨的街道，阳光透过树叶洒在斑驳的人行道上。",
+        "cameraMove": "固定镜头",
+        "duration": 5,
+        "characters": [],
+        "keyAction": "清晨的宁静"
+      },
+      {
+        "shotId": "shot_002",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "客观视角，主角A从一栋古老建筑中走出，背对镜头，步伐沉稳。",
+        "cameraMove": "固定镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A的出现"
+      },
+      {
+        "shotId": "shot_003",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "主观视角，主角A环顾四周，表情沉思。",
+        "cameraMove": "固定镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A的内心独白"
+      },
+      {
+        "shotId": "shot_004",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "跟镜头，主角A走进一家咖啡馆，坐在角落里。",
+        "cameraMove": "跟镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A选择休息"
+      },
+      {
+        "shotId": "shot_005",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "摇镜头，展示咖啡馆内部，顾客们各忙各的事。",
+        "cameraMove": "摇镜头",
+        "duration": 10,
+        "characters": [],
+        "keyAction": "咖啡馆的日常氛围"
+      },
+      {
+        "shotId": "shot_006",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "手持镜头，主角A端起咖啡，镜头跟随咖啡杯的倾斜。",
+        "cameraMove": "手持镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A品尝咖啡"
+      },
+      {
+        "shotId": "shot_007",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "移镜头，主角A放下咖啡杯，起身走向窗边。",
+        "cameraMove": "移镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A寻找灵感"
+      },
+      {
+        "shotId": "shot_008",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "升镜头，主角A透过窗户望向繁忙的街道，表情专注。",
+        "cameraMove": "升镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A在思考"
+      },
+      {
+        "shotId": "shot_009",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "拉镜头，主角A从窗边走回座位，坐下来。",
+        "cameraMove": "拉镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A回归现实"
+      },
+      {
+        "shotId": "shot_010",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "客观视角，镜头拉远，主角A坐在咖啡馆里，周围是忙碌的都市生活。",
+        "cameraMove": "拉镜头",
+        "duration": 10,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A融入城市"
+      }
+    ]
+  },
+  "act2": {
+    "success": true,
+    "duration": 36389,
+    "shotCount": 10,
+    "shots": [
+      {
+        "shotId": "shot_011",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "客观镜头，主角A在晨光中从睡梦中醒来，床单轻柔地覆盖在身上。",
+        "cameraMove": "固定镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A醒来"
+      },
+      {
+        "shotId": "shot_012",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "主观镜头，主角A从床头柜上拿起手机，屏幕上显示着未接电话和消息。",
+        "cameraMove": "手持镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A查看手机"
+      },
+      {
+        "shotId": "shot_013",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "客观镜头，镜头从主角A的脸部缓慢拉远，展示他站在窗前，凝视着远方的城市。",
+        "cameraMove": "拉镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A沉思"
+      },
+      {
+        "shotId": "shot_014",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "跟镜头，主角A走出房间，进入厨房，开始准备早餐。",
+        "cameraMove": "跟镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A准备早餐"
+      },
+      {
+        "shotId": "shot_015",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "摇镜头，镜头从主角A的脸部摇向厨房的餐桌，桌上摆满了早餐。",
+        "cameraMove": "摇镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A观察餐桌"
+      },
+      {
+        "shotId": "shot_016",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "移镜头，镜头从厨房移向客厅，展示主角A的妻子正在沙发上阅读。",
+        "cameraMove": "移镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A与妻子互动"
+      },
+      {
+        "shotId": "shot_017",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "升镜头，镜头从主角A的妻子身上升起，展示她手中的书页。",
+        "cameraMove": "升镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A妻子阅读"
+      },
+      {
+        "shotId": "shot_018",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "推镜头，镜头从主角A的妻子脸部推近，捕捉她专注的神情。",
+        "cameraMove": "推镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A妻子专注"
+      },
+      {
+        "shotId": "shot_019",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "手持镜头，镜头跟随主角A走进书房，展示他坐在书桌前，开始工作。",
+        "cameraMove": "手持镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A开始工作"
+      },
+      {
+        "shotId": "shot_020",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "客观镜头，镜头从主角A的肩膀上展示他正在书桌前工作的背影，窗外阳光透过窗户洒在他的身上。",
+        "cameraMove": "固定镜头",
+        "duration": 10,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A工作状态"
+      }
+    ]
+  },
+  "act3": {
+    "success": true,
+    "duration": 33572,
+    "shotCount": 10,
+    "shots": [
+      {
+        "shotId": "shot_021",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，主角A在街头奔跑，背景是追赶他的黑衣人。",
+        "cameraMove": "跟镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "追逐"
+      },
+      {
+        "shotId": "shot_022",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "主观视角，主角A的视角，他看到前方出现了一个小巷。",
+        "cameraMove": "手持镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "发现出路"
+      },
+      {
+        "shotId": "shot_023",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，主角A冲进小巷，黑衣人紧随其后。",
+        "cameraMove": "移镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "进入小巷"
+      },
+      {
+        "shotId": "shot_024",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "主观视角，黑衣人突然停下，主角A从背后看去，黑衣人手中出现了一把刀。",
+        "cameraMove": "手持镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "紧张对峙"
+      },
+      {
+        "shotId": "shot_025",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，黑衣人突然攻击，主角A闪避。",
+        "cameraMove": "摇镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "闪避攻击"
+      },
+      {
+        "shotId": "shot_026",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "主观视角，主角A反击，黑衣人倒地。",
+        "cameraMove": "手持镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "反击成功"
+      },
+      {
+        "shotId": "shot_027",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，主角A喘息着，小巷的尽头是出口。",
+        "cameraMove": "固定镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "喘息等待"
+      },
+      {
+        "shotId": "shot_028",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "主观视角，主角A冲出小巷，背后是追赶者的呼喊。",
+        "cameraMove": "手持镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "逃离现场"
+      },
+      {
+        "shotId": "shot_029",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，主角A在街头奔跑，镜头逐渐拉远，直到主角消失在街角。",
+        "cameraMove": "拉镜头",
+        "duration": 10,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "安全逃离"
+      },
+      {
+        "shotId": "shot_030",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，镜头缓缓上升，主角A的身影在远处渐行渐远，画面逐渐变暗。",
+        "cameraMove": "升镜头",
+        "duration": 10,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "结局"
+      }
+    ]
+  },
+  "merged": {
+    "success": true,
+    "totalShots": 30,
+    "shots": [
+      {
+        "shotId": "shot_001",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "客观视角，清晨的街道，阳光透过树叶洒在斑驳的人行道上。",
+        "cameraMove": "固定镜头",
+        "duration": 5,
+        "characters": [],
+        "keyAction": "清晨的宁静"
+      },
+      {
+        "shotId": "shot_002",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "客观视角，主角A从一栋古老建筑中走出，背对镜头，步伐沉稳。",
+        "cameraMove": "固定镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A的出现"
+      },
+      {
+        "shotId": "shot_003",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "主观视角，主角A环顾四周，表情沉思。",
+        "cameraMove": "固定镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A的内心独白"
+      },
+      {
+        "shotId": "shot_004",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "跟镜头，主角A走进一家咖啡馆，坐在角落里。",
+        "cameraMove": "跟镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A选择休息"
+      },
+      {
+        "shotId": "shot_005",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "摇镜头，展示咖啡馆内部，顾客们各忙各的事。",
+        "cameraMove": "摇镜头",
+        "duration": 10,
+        "characters": [],
+        "keyAction": "咖啡馆的日常氛围"
+      },
+      {
+        "shotId": "shot_006",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "手持镜头，主角A端起咖啡，镜头跟随咖啡杯的倾斜。",
+        "cameraMove": "手持镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A品尝咖啡"
+      },
+      {
+        "shotId": "shot_007",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "移镜头，主角A放下咖啡杯，起身走向窗边。",
+        "cameraMove": "移镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A寻找灵感"
+      },
+      {
+        "shotId": "shot_008",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "升镜头，主角A透过窗户望向繁忙的街道，表情专注。",
+        "cameraMove": "升镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A在思考"
+      },
+      {
+        "shotId": "shot_009",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "拉镜头，主角A从窗边走回座位，坐下来。",
+        "cameraMove": "拉镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A回归现实"
+      },
+      {
+        "shotId": "shot_010",
+        "actNumber": 1,
+        "sceneName": "场景1",
+        "description": "客观视角，镜头拉远，主角A坐在咖啡馆里，周围是忙碌的都市生活。",
+        "cameraMove": "拉镜头",
+        "duration": 10,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A融入城市"
+      },
+      {
+        "shotId": "shot_011",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "客观镜头，主角A在晨光中从睡梦中醒来，床单轻柔地覆盖在身上。",
+        "cameraMove": "固定镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A醒来"
+      },
+      {
+        "shotId": "shot_012",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "主观镜头，主角A从床头柜上拿起手机，屏幕上显示着未接电话和消息。",
+        "cameraMove": "手持镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A查看手机"
+      },
+      {
+        "shotId": "shot_013",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "客观镜头，镜头从主角A的脸部缓慢拉远，展示他站在窗前，凝视着远方的城市。",
+        "cameraMove": "拉镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A沉思"
+      },
+      {
+        "shotId": "shot_014",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "跟镜头，主角A走出房间，进入厨房，开始准备早餐。",
+        "cameraMove": "跟镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A准备早餐"
+      },
+      {
+        "shotId": "shot_015",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "摇镜头，镜头从主角A的脸部摇向厨房的餐桌，桌上摆满了早餐。",
+        "cameraMove": "摇镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A观察餐桌"
+      },
+      {
+        "shotId": "shot_016",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "移镜头，镜头从厨房移向客厅，展示主角A的妻子正在沙发上阅读。",
+        "cameraMove": "移镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A与妻子互动"
+      },
+      {
+        "shotId": "shot_017",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "升镜头，镜头从主角A的妻子身上升起，展示她手中的书页。",
+        "cameraMove": "升镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A妻子阅读"
+      },
+      {
+        "shotId": "shot_018",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "推镜头，镜头从主角A的妻子脸部推近，捕捉她专注的神情。",
+        "cameraMove": "推镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A妻子专注"
+      },
+      {
+        "shotId": "shot_019",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "手持镜头，镜头跟随主角A走进书房，展示他坐在书桌前，开始工作。",
+        "cameraMove": "手持镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A开始工作"
+      },
+      {
+        "shotId": "shot_020",
+        "actNumber": 2,
+        "sceneName": "场景3",
+        "description": "客观镜头，镜头从主角A的肩膀上展示他正在书桌前工作的背影，窗外阳光透过窗户洒在他的身上。",
+        "cameraMove": "固定镜头",
+        "duration": 10,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "主角A工作状态"
+      },
+      {
+        "shotId": "shot_021",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，主角A在街头奔跑，背景是追赶他的黑衣人。",
+        "cameraMove": "跟镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "追逐"
+      },
+      {
+        "shotId": "shot_022",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "主观视角，主角A的视角，他看到前方出现了一个小巷。",
+        "cameraMove": "手持镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "发现出路"
+      },
+      {
+        "shotId": "shot_023",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，主角A冲进小巷，黑衣人紧随其后。",
+        "cameraMove": "移镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "进入小巷"
+      },
+      {
+        "shotId": "shot_024",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "主观视角，黑衣人突然停下，主角A从背后看去，黑衣人手中出现了一把刀。",
+        "cameraMove": "手持镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "紧张对峙"
+      },
+      {
+        "shotId": "shot_025",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，黑衣人突然攻击，主角A闪避。",
+        "cameraMove": "摇镜头",
+        "duration": 3,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "闪避攻击"
+      },
+      {
+        "shotId": "shot_026",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "主观视角，主角A反击，黑衣人倒地。",
+        "cameraMove": "手持镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "反击成功"
+      },
+      {
+        "shotId": "shot_027",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，主角A喘息着，小巷的尽头是出口。",
+        "cameraMove": "固定镜头",
+        "duration": 7,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "喘息等待"
+      },
+      {
+        "shotId": "shot_028",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "主观视角，主角A冲出小巷，背后是追赶者的呼喊。",
+        "cameraMove": "手持镜头",
+        "duration": 5,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "逃离现场"
+      },
+      {
+        "shotId": "shot_029",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，主角A在街头奔跑，镜头逐渐拉远，直到主角消失在街角。",
+        "cameraMove": "拉镜头",
+        "duration": 10,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "安全逃离"
+      },
+      {
+        "shotId": "shot_030",
+        "actNumber": 3,
+        "sceneName": "场景5",
+        "description": "客观视角，镜头缓缓上升，主角A的身影在远处渐行渐远，画面逐渐变暗。",
+        "cameraMove": "升镜头",
+        "duration": 10,
+        "characters": [
+          "char_001"
+        ],
+        "keyAction": "结局"
+      }
+    ]
+  },
+  "totalDuration": 106225
+}

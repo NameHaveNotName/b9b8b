@@ -1,0 +1,68 @@
+{
+  "testTime": "2026-05-24T15:14:45.224Z",
+  "prompt": "Cinematic wide shot, golden hour lighting, a lone samurai standing on a cliff overlooking a misty valley, cherry blossom petals drifting in the wind, atmospheric depth, film grain, 35mm photography style, 8K resolution",
+  "referenceUrl": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=512&h=512&fit=crop",
+  "aspectRatio": "16:9",
+  "totalElapsed": "0.6",
+  "successCount": 0,
+  "mockCount": 7,
+  "failCount": 0,
+  "results": [
+    {
+      "modelId": "doubao-seedream-4.5",
+      "label": "即梦 4.5 · 中文优化",
+      "success": true,
+      "isMock": true,
+      "elapsed": "0.4",
+      "filename": "即梦_4_5___中文优化_doubao-seedream-4.5.png"
+    },
+    {
+      "modelId": "gpt-image-2",
+      "label": "GPT Image 2 · 高精度",
+      "success": true,
+      "isMock": true,
+      "elapsed": "0.0",
+      "filename": "GPT_Image_2___高精度_gpt-image-2.png"
+    },
+    {
+      "modelId": "flux.1-kontext-pro",
+      "label": "Flux Kontext · 参考图",
+      "success": true,
+      "isMock": true,
+      "elapsed": "0.0",
+      "filename": "Flux_Kontext___参考图_flux.1-kontext-pro.png"
+    },
+    {
+      "modelId": "kling-omni-image",
+      "label": "可灵 Omni · 全模态",
+      "success": true,
+      "isMock": true,
+      "elapsed": "0.0",
+      "filename": "可灵_Omni___全模态_kling-omni-image.png"
+    },
+    {
+      "modelId": "gemini-3.1-flash-image",
+      "label": "Gemini Flash · 快速",
+      "success": true,
+      "isMock": true,
+      "elapsed": "0.0",
+      "filename": "Gemini_Flash___快速_gemini-3.1-flash-image.png"
+    },
+    {
+      "modelId": "grok-4.2-image",
+      "label": "Grok 4.2 · X平台",
+      "success": true,
+      "isMock": true,
+      "elapsed": "0.0",
+      "filename": "Grok_4_2___X平台_grok-4.2-image.png"
+    },
+    {
+      "modelId": "qwen-image-max",
+      "label": "通义千问 Max · 阿里",
+      "success": true,
+      "isMock": true,
+      "elapsed": "0.0",
+      "filename": "通义千问_Max___阿里_qwen-image-max.png"
+    }
+  ]
+}

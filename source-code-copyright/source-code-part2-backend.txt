@@ -1,0 +1,1591 @@
+// FilmFlow 影视工作流系统 V1.0
+// 源代码文档（用于软件著作权申请）
+// 生成日期: 2026-05-24
+
+
+// ============================================================
+// FILE: app/api/projects/[id]/steps/style/route.ts
+// ============================================================
+
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getTextClient } from '@/lib/api-clients'
+import { loadPromptTemplate, extractJsonFromMarkdown, assignModelNoFallback } from '@/lib/prompts'
+import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { createQueue } from '@/lib/queue'
+import { processStyleGeneration } from '@/lib/style-processor'
+
+const styleQueue = createQueue('style-generation')
+
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  if (!await canExecuteStep(params.id, 'STYLE')) {
+    return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
+  }
+
+  const frameworkStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'FRAMEWORK' } }
+  })
+  if (!frameworkStep || frameworkStep.status !== 'COMPLETED') {
+    return NextResponse.json({ error: 'WORKFLOW_003' }, { status: 400 })
+  }
+
+  const step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'STYLE' } }
+  })
+  if (!step) {
+    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
+  }
+
+  const body = await req.json().catch(() => ({}))
+  const force = body?.force === true
+  const action: 'generate-prompts' | 'generate-images' = body?.action || 'generate-images'
+
+  // === generate-prompts: 只生成提示词，不生图 ===
+  if (action === 'generate-prompts') {
+    try {
+      console.log('[STYLE-PROMPT] 收到 generate-prompts 请求')
+
+      const framework = project.framework || (frameworkStep.outputData as any)
+      const storyBrief = framework?.synopsis || framework?.storyBrief || ''
+      const visualKeywords = framework?.visualStyle || framework?.styleGuide || framework?.visualKeywords || ''
+      const mood = framework?.mood || framework?.atmosphere || ''
+
+      const prompt = loadPromptTemplate('style-generation', {
+        STORY_BRIEF: storyBrief,
+        VISUAL_KEYWORDS: visualKeywords,
+        MOOD: mood,
+      })
+      const textClient = await getTextClient()
+      const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+      const parsed = extractJsonFromMarkdown(resultText)
+
+      let styleOptions: any[] = []
+      if (Array.isArray(parsed)) {
+        styleOptions = parsed
+      } else if (Array.isArray(parsed.styles)) {
+        styleOptions = parsed.styles.map((s: any, i: number) => ({
+          id: s.id || String(i + 1),
+          styleName: s.styleName || s.label || `风格 ${i + 1}`,
+          styleDescription: s.styleDescription || s.description || '',
+          prompt: s.prompt || s.stylePrompt || '',
+          modelNo: s.modelNo,
+        }))
+      } else if (Array.isArray(parsed.styleOptions)) {
+        styleOptions = parsed.styleOptions
+      }
+
+      // 工作指令.txt（2026-05-24）：modelNo 校验与兜底分配
+      styleOptions = assignModelNoFallback(styleOptions)
+      console.log('[STYLE-MODEL-ASSIGN] LLM 分配结果:', styleOptions.map((s: any) =>
+        ({ name: s.styleName, modelNo: s.modelNo })
+      ))
+
+      // 生成中英文提示词（保留 modelNo）
+      const prompts = styleOptions.map((s, i) => ({
+        id: `prompt_${i + 1}`,
+        chineseDesc: s.styleDescription || s.description || '',
+        englishPrompt: s.prompt || s.stylePrompt || '',
+        target: `style_sample_${i + 1}`,
+        styleName: s.styleName || `风格 ${i + 1}`,
+        styleId: s.id || String(i + 1),
+        modelNo: s.modelNo,
+      }))
+
+      // 暂存到 outputData.prompts
+
+// ===== [截断] 原文件共 463 行，此处截取前 100 行用于软著材料 =====
+
+// ============================================================
+// FILE: app/api/projects/[id]/steps/character/route.ts
+// ============================================================
+
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getTextClient, getImageClient } from '@/lib/api-clients'
+import { IMAGE_MODELS } from '@/lib/models-config'
+import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getStyleRefUrl } from '@/lib/style-ref'
+
+export async function POST(_req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+
+  // Demo 模式：允许操作 demo 用户的项目
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  if (!await canExecuteStep(params.id, 'CHARACTER')) {
+    return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
+  }
+
+  const frameworkStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'FRAMEWORK' } }
+  })
+  if (!frameworkStep || frameworkStep.status !== 'COMPLETED') {
+    return NextResponse.json({ error: 'WORKFLOW_003' }, { status: 400 })
+  }
+
+  const step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'CHARACTER' } }
+  })
+  if (!step) {
+    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
+  }
+
+  const body = await _req.json().catch(() => ({}))
+  const force = body?.force === true
+  const action: 'generate-prompts' | 'generate-images' = body?.action || 'generate-images'
+
+  // === generate-prompts: 只生成提示词，不生图 ===
+  if (action === 'generate-prompts') {
+    try {
+      console.log('[CHARACTER-PROMPT] 收到 generate-prompts 请求')
+
+      const framework = (project.framework || frameworkStep.outputData) as any
+      const allCharacters: Array<{ id: string; name: string; role: string; description: string }> =
+        framework?.characters || []
+      const characters = allCharacters.slice(0, 5)
+
+      const prompt = loadPromptTemplate('character', {
+        USER_INPUT: JSON.stringify(framework)
+      })
+      const textClient = await getTextClient()
+      const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+      const parsed = extractJsonFromMarkdown(resultText)
+      const parsedChars = parsed.characters || []
+
+      const prompts = characters.map((character, i) => {
+        const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
+        const charPrompt = charData?.imagePrompt || ''
+        return {
+          id: `prompt_${i + 1}`,
+          chineseDesc: character.description || '',
+          englishPrompt: charPrompt || `Character portrait: ${character.name}, ${character.role}`,
+          target: `character_${character.id}`,
+          characterName: character.name,
+          characterId: character.id,
+          role: character.role,
+        }
+      })
+
+      await prisma.workflowStep.update({
+
+// ===== [截断] 原文件共 340 行，此处截取前 80 行用于软著材料 =====
+
+// ============================================================
+// FILE: app/api/projects/[id]/steps/concept/route.ts
+// ============================================================
+
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getTextClient, getImageClient } from '@/lib/api-clients'
+import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getStyleRefUrl } from '@/lib/style-ref'
+import { IMAGE_MODELS } from '@/lib/models-config'
+
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+
+  // Demo 模式：允许操作 demo 用户的项目
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  if (!await canExecuteStep(params.id, 'CONCEPT')) {
+    return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
+  }
+
+  const frameworkStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'FRAMEWORK' } }
+  })
+  if (!frameworkStep || frameworkStep.status !== 'COMPLETED') {
+    return NextResponse.json({ error: 'WORKFLOW_003' }, { status: 400 })
+  }
+
+  const step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'CONCEPT' } }
+  })
+  if (!step) {
+    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
+  }
+
+  // 支持整体重做：force=true 时跳过缓存检查
+  const body = await req.json().catch(() => ({}))
+  const force = body?.force === true
+  const action: 'generate-prompts' | 'generate-images' = body?.action || 'generate-images'
+
+  // === generate-prompts: 只生成提示词，不生图 ===
+  if (action === 'generate-prompts') {
+    try {
+      console.log('[CONCEPT-PROMPT] 收到 generate-prompts 请求')
+
+      const framework = (project.framework || frameworkStep.outputData) as any
+      const acts = Array.isArray(framework?.acts) ? framework.acts : []
+
+      const prompt = loadPromptTemplate('concept', {
+        USER_INPUT: JSON.stringify({ framework })
+      })
+      const textClient = await getTextClient()
+      const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+      const parsed = extractJsonFromMarkdown(resultText)
+      const parsedScenes = parsed.scenes || []
+
+      const prompts: any[] = []
+      for (const act of acts) {
+        const actNo = act.actNo || act.actNumber || 1
+        const keyScenes = Array.isArray(act.keyScenes) ? act.keyScenes : (Array.isArray(act.scenes) ? act.scenes : [])
+        // 每幕概念图数量：基于 keyScenes 数量，至少1张，最多3张
+        const sceneCount = Math.max(1, Math.min(keyScenes.length || 1, 3))
+        for (let i = 0; i < sceneCount; i++) {
+          const sceneDesc = keyScenes[i] || `幕${actNo}场景${i + 1}`
+          const llmScene = parsedScenes.find(
+            (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
+          )
+          const imagePrompt = llmScene?.imagePrompt || sceneDesc
+          prompts.push({
+            id: `prompt_act${actNo}_scene${i + 1}`,
+            chineseDesc: sceneDesc,
+            englishPrompt: imagePrompt,
+
+// ===== [截断] 原文件共 384 行，此处截取前 80 行用于软著材料 =====
+
+// ============================================================
+// FILE: app/api/projects/[id]/steps/storyboard/route.ts
+// ============================================================
+
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getTextClient } from '@/lib/api-clients'
+import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { uploadFile, getSignedFileUrl } from '@/lib/r2'
+import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import sharp from 'sharp'
+import { IMAGE_MODELS } from '@/lib/models-config'
+
+async function generateStoryboardByAct(textClient: any, framework: any, act: any) {
+  const prompt = loadPromptTemplate('storyboard-act-dynamic', {
+    USER_INPUT: JSON.stringify(framework),
+    ACT_NUMBER: String(act.actNo || act.actNumber || 1),
+    ACT_TITLE: act.title || `第${act.actNo || act.actNumber || 1}幕`,
+    ACT_CONTENT: act.content || '',
+    ESTIMATED_SHOTS: String(typeof act.estimatedShots === 'number' ? act.estimatedShots : 10),
+    ACT_PACING: act.pacing || '张弛有度',
+    KEY_SCENES: Array.isArray(act.keyScenes) ? act.keyScenes.join('；') : '',
+  })
+  const text = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+  return extractJsonFromMarkdown(text) || []
+}
+
+export async function POST(_req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+
+  // Demo 模式：允许操作 demo 用户的项目
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  if (!await canExecuteStep(params.id, 'STORYBOARD')) {
+    return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
+  }
+
+  const step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } }
+  })
+  if (!step) {
+    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
+  }
+
+  const body = await _req.json().catch(() => ({}))
+  const force = body?.force === true
+  const action: 'generate-prompts' | 'generate-images' = body?.action || 'generate-images'
+
+  // === generate-prompts: 只生成分镜提示词，不生成草图 ===
+  if (action === 'generate-prompts') {
+    try {
+      console.log('[STORYBOARD-PROMPT] 收到 generate-prompts 请求')
+
+      const framework = project.framework as any
+      const acts = Array.isArray(framework?.acts) ? framework.acts : []
+      const textClient = await getTextClient()
+
+      // 动态遍历所有幕生成
+      const actResults = await Promise.all(
+        acts.map((act: any) => generateStoryboardByAct(textClient, framework, act))
+      )
+      const allShots = actResults.flat()
+      if (!Array.isArray(allShots) || allShots.length === 0) {
+        throw new Error('Failed to parse storyboard from LLM output')
+      }
+
+      // 构建提示词数组
+      const prompts = allShots.map((shot, i) => ({
+        id: `prompt_${shot.shotId || i + 1}`,
+        chineseDesc: shot.description || '',
+        englishPrompt: `${shot.cameraMove || '固定'} | ${shot.duration || 5}s | ${shot.description || ''}`,
+        target: `shot_${shot.shotId || i + 1}`,
+        shotId: shot.shotId || String(i + 1),
+
+// ===== [截断] 原文件共 376 行，此处截取前 80 行用于软著材料 =====
+
+// ============================================================
+// FILE: app/api/projects/[id]/steps/keyframes/route.ts
+// ============================================================
+
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getTextClient, getImageClient } from '@/lib/api-clients'
+import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getStyleRefUrl } from '@/lib/style-ref'
+import { IMAGE_MODELS } from '@/lib/models-config'
+
+export async function POST(_req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+
+  // Demo 模式：允许操作 demo 用户的项目
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  if (!await canExecuteStep(params.id, 'KEYFRAMES')) {
+    return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
+  }
+
+  const storyboardStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } }
+  })
+  if (!storyboardStep || storyboardStep.status !== 'COMPLETED') {
+    return NextResponse.json({ error: 'WORKFLOW_003' }, { status: 400 })
+  }
+
+  // Phase 4: 从分镜设计读取起始帧
+  const storyboardShots = (storyboardStep.outputData as any)?.shots || []
+  const shotsWithFirstFrame = storyboardShots.filter((s: any) => s.firstFrameUrl)
+  if (shotsWithFirstFrame.length === 0) {
+    return NextResponse.json(
+      { error: 'WORKFLOW_005', message: '请先完成分镜设计的视频生成模式，生成起始帧' },
+      { status: 400 }
+    )
+  }
+
+  let step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'KEYFRAMES' } }
+  })
+  if (!step) {
+    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
+  }
+
+  if (step.status === 'COMPLETED' && step.outputData) {
+    console.log('[KEYFRAMES] step already completed, returning cached result')
+    return NextResponse.json({ success: true, data: step.outputData, cached: true })
+  }
+
+  const body = await _req.json().catch(() => ({}))
+  const force = body?.force === true
+  const action: 'generate-prompts' | 'generate-images' = body?.action || 'generate-images'
+
+  // === generate-prompts: 只生成尾帧提示词，不生图 ===
+  if (action === 'generate-prompts') {
+    try {
+      console.log('[KEYFRAMES-PROMPT] 收到 generate-prompts 请求')
+
+      const imageClient = await getImageClient()
+      const textClient = await getTextClient()
+
+      let styleRefUrl: string
+      let selectedStylePrompt: string
+      try {
+        const ref = await getStyleRefUrl(params.id)
+        styleRefUrl = ref.styleRefUrl
+        selectedStylePrompt = ref.stylePrompt ||
+          'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
+      } catch (refErr: any) {
+        console.error('[KEYFRAMES-PROMPT] 风格图提取失败：', refErr?.message)
+        return NextResponse.json(
+
+// ===== [截断] 原文件共 369 行，此处截取前 80 行用于软著材料 =====
+
+// ============================================================
+// FILE: app/api/projects/[id]/steps/framework/route.ts
+// ============================================================
+
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getTextClient } from '@/lib/api-clients'
+import { extractJsonFromMarkdown } from '@/lib/prompts'
+import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+
+const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: string; shots: string; desc: string }> = {
+  sketch: { label: '速写', range: '1-3分钟', acts: '1-2幕', shots: '10-20镜', desc: '极快节奏，单一场景/单一冲突' },
+  short: { label: '短篇', range: '3-5分钟', acts: '2-3幕', shots: '20-40镜', desc: '紧凑叙事，一个完整人物弧线' },
+  medium: { label: '中篇', range: '5-10分钟', acts: '3幕', shots: '40-80镜', desc: '标准起承转合，可展开副线' },
+  feature: { label: '长片', range: '10-20分钟', acts: '3-4幕', shots: '80-150镜', desc: '复杂叙事，多场景切换' },
+  epic: { label: '史诗', range: '20-30分钟', acts: '4-5幕', shots: '150-250镜', desc: '宏大格局，群像/多线' },
+}
+
+function buildFrameworkPrompt(userInput: string, selectedDirection: any, storyLengthKey: string) {
+  const tier = STORY_LENGTH_MAP[storyLengthKey] || STORY_LENGTH_MAP.short
+
+  return `角色：高端艺术电影 AI 编剧与结构顾问
+
+目标：根据客户的原始灵感和选定的创意方向，输出一份完整的故事框架。你不要生成创意方向（directions），而是直接输出框架（framework）。
+
+【故事分档上下文】
+用户选定的故事分档为：${tier.label} · ${tier.range}
+该档位的特征：${tier.desc}
+推荐幕数：${tier.acts}，推荐镜头数：${tier.shots}
+
+【核心原则】
+1. 你必须自行判断这个故事需要几幕、每幕多长、每幕多少镜头。不要固定为三幕，也不要平均分配。
+2. 哪一幕可以快速带过（寥寥几个镜头），哪一幕需要细细展开（大量镜头），由你根据叙事需求自行决定。
+3. 判断需要几个核心场景/环境，每个环境服务于什么叙事功能。
+4. 决定整体节奏策略（哪里紧凑、哪里舒缓）。
+5. 动作/惊悚类 ASL 可低至 2-4s，情感/艺术片 ASL 可高至 8-15s，由你根据故事类型自行决定。
+6. 无论什么风格，都需要尽量谨慎地使用特效（包括闪光，火花，全息等），尽量避免出现相关内容。
+
+输出格式（严格 JSON，不要 Markdown 代码块）：
+{
+  "framework": {
+    "inspiration": "灵感阐释：形如论文的摘要，将影片的精彩点和大体故事进行简述...",
+    "styleGuide": "风格规范：简单分析整个故事的背景和剧情，对画面内容给出明确的规范要求...",
+    "background": "背景环境设定：根据故事内容分析整体故事发生的时代背景环境...",
+    "characters": [
+      {
+        "id": "char_001",
+        "name": "角色名",
+        "role": "主角/配角",
+        "description": "性格、形象等基本信息..."
+      }
+    ],
+    "synopsis": "用一段话概括整个故事的核心冲突和结局...",
+    "storyLength": "${storyLengthKey}",
+    "totalDuration": "预估总时长，如'4分钟'",
+    "acts": [
+      {
+        "actNo": 1,
+        "title": "幕标题（如'开端'）",
+        "content": "该幕的内容概述...",
+        "estimatedDuration": "该幕预估时长，如'1.5分钟'",
+        "estimatedShots": 15,
+        "pacing": "紧凑快切 / 舒缓长镜头 / 张弛有度",
+        "keyScenes": ["核心场景1", "核心场景2"]
+      }
+    ],
+    "environments": ["环境1", "环境2"],
+    "overallPacing": "整体节奏策略说明..."
+  }
+}
+
+客户的原始灵感：
+${userInput}
+
+用户选定的创意方向：
+标题：${selectedDirection.title}
+描述：${selectedDirection.description}
+`
+}
+
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+
+// ===== [截断] 原文件共 268 行，此处截取前 80 行用于软著材料 =====
+
+// ============================================================
+// FILE: app/api/projects/[id]/steps/ideation/route.ts
+// ============================================================
+
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getTextClient } from '@/lib/api-clients'
+import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { createStep, startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+
+export async function POST(_req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+
+  // Demo 模式：允许操作 demo 用户的项目
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  if (!await canExecuteStep(params.id, 'IDEATION')) {
+    return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
+  }
+
+  let step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'IDEATION' } }
+  })
+  if (!step) {
+    step = await createStep(params.id, 'IDEATION', 0)
+  }
+
+  // 幂等保护：已完成则直接返回历史结果，避免重复消耗 API 配额并覆盖结果
+  if (step.status === 'COMPLETED' && step.outputData) {
+    console.log('[IDEATION] step already completed, returning cached result')
+    return NextResponse.json({ success: true, data: step.outputData, cached: true })
+  }
+
+  await startStep(step.id)
+
+  try {
+    const prompt = loadPromptTemplate('ideation', { USER_INPUT: project.rawIdea })
+    const textClient = await getTextClient()
+    const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 12000 })
+
+    // 调试日志
+    console.log('[IDEATION] resultText length:', resultText.length)
+    console.log('[IDEATION] resultText preview:', resultText.slice(0, 200))
+
+// ===== [截断] 原文件共 158 行，此处截取前 50 行用于软著材料 =====
+
+// ============================================================
+// FILE: lib/api-clients/xiaomi.ts
+// ============================================================
+
+import { uploadFile, getSignedFileUrl } from '@/lib/r2'
+import { IMAGE_MODELS, MODEL_SIZE_MAP } from '@/lib/models-config'
+import fs from 'fs'
+import path from 'path'
+
+const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
+// 工作指令.txt（防御版）：API_KEY 兼容 OPENAI_API_KEY 兜底
+const API_KEY = process.env.XIAOMI_API_KEY || process.env.OPENAI_API_KEY
+
+// MiniMax 官方 API（2026-05-18）：当配置了 MINIMAX_API_KEY 时走官方 endpoint
+const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || ''
+const MINIMAX_BASE_URL = 'https://api.minimax.chat'
+
+// 工作指令.txt（防御版额外检查清单 #3）：prompt 软截断到 ≤ 900 字符
+const PROMPT_MAX_LEN = 900
+
+// 工作指令.txt（P0-1 2026-05-24）：供应商端模型名校正映射。
+// 供应商代理支持的模型名可能与业务层 ID 不同，在此维护映射关系。
+const PROVIDER_MODEL_MAP: Record<string, string> = {
+  'doubao-seedream-4.5': 'doubao-seedream-5.0-lite', // 供应商实际支持的模型名
+  'gpt-image-2': 'gpt-image-2',
+  'flux.1-kontext-pro': 'flux.1-kontext-pro',
+  'kling-omni-image': 'kling-omni-image',
+  'gemini-3.1-flash-image': 'gemini-3.1-flash-image',
+  'grok-4.2-image': 'grok-4.2-image',
+  'qwen-image-max': 'qwen-image-max',
+}
+
+/** 将业务层模型 ID 映射为供应商端实际模型名。无映射时原样返回。 */
+function applyProviderModelMap(modelId: string): string {
+  return PROVIDER_MODEL_MAP[modelId] || modelId
+}
+
+const RETRY_STATUS = [429, 502, 503, 504]
+// 工作指令.txt（Phase 2 修复）：超时已改为 180s 覆盖 140s+ 慢请求，重试减少到 1 次（4s 间隔），避免重复申请
+const BACKOFF_MS = [4000] // 指数退避：最多 1 次重试，间隔 4s
+
+/**
+ * 工作指令.txt（Round 13 修复二）：将任意图片路径/URL 转为 Base64 Data URL。
+ * - http(s) URL: 下载后转 base64
+ * - /mock-storage/...: 从 public/ 目录读文件转 base64
+ * - 绝对路径: 直接读文件转 base64
+ * - data: URL: 原样返回
+ */
+export async function resolveImageToBase64(urlOrPath: string): Promise<string> {
+  // 已经是 data: URL
+  if (urlOrPath.startsWith('data:')) {
+    return urlOrPath
+  }
+
+  // localhost/127.0.0.1 URL：直接从 public/ 目录读取（避免对 dev server 自身 fetch）
+  if (urlOrPath.includes('localhost') || urlOrPath.includes('127.0.0.1')) {
+    try {
+      const pathname = new URL(urlOrPath).pathname
+      const localPath = path.join(process.cwd(), 'public', pathname)
+      console.log('[BASE64] localhost URL → 本地直读:', localPath.slice(0, 120))
+      if (!fs.existsSync(localPath)) {
+        throw new Error(`[BASE64] 本地图片不存在: ${localPath}`)
+      }
+      const buffer = fs.readFileSync(localPath)
+      const ext = path.extname(localPath).toLowerCase()
+      const mimeMap: Record<string, string> = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+      }
+      const mime = mimeMap[ext] || 'image/jpeg'
+      return `data:${mime};base64,${buffer.toString('base64')}`
+    } catch (err: any) {
+      if (err.message?.startsWith('[BASE64]')) throw err
+      // URL 解析失败则 fallback 到通用 http 分支
+      console.warn('[BASE64] localhost URL 解析失败，尝试通用 fetch:', err?.message)
+    }
+  }
+
+  // 公网 URL：下载后转 base64
+  if (urlOrPath.startsWith('http')) {
+    console.log('[BASE64] 下载公网图片:', urlOrPath.slice(0, 120))
+    const res = await fetch(urlOrPath)
+    if (!res.ok) throw new Error(`[BASE64] 下载失败 ${res.status}: ${urlOrPath.slice(0, 120)}`)
+    const buffer = Buffer.from(await res.arrayBuffer())
+    const mime = res.headers.get('content-type') || 'image/jpeg'
+    return `data:${mime};base64,${buffer.toString('base64')}`
+  }
+
+  // 本地相对路径（如 /mock-storage/...）
+  let localPath = urlOrPath
+  if (urlOrPath.startsWith('/')) {
+    localPath = path.join(process.cwd(), 'public', urlOrPath)
+  }
+
+  console.log('[BASE64] 读取本地文件:', localPath)
+  if (!fs.existsSync(localPath)) {
+    throw new Error(`[BASE64] 本地图片不存在: ${localPath}`)
+  }
+
+  const buffer = fs.readFileSync(localPath)
+  const ext = path.extname(localPath).toLowerCase()
+  const mimeMap: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+  }
+  const mime = mimeMap[ext] || 'image/jpeg'
+
+  return `data:${mime};base64,${buffer.toString('base64')}`
+}
+
+class XiaomiHttpError extends Error {
+  status: number
+  body: string
+  constructor(status: number, body: string) {
+    super(`XiaomiAPI ${status}: ${body.slice(0, 300)}`)
+    this.status = status
+    this.body = body
+  }
+}
+
+async function xiaomiFetch(path: string, body: any, timeoutMs = 120000) {
+  if (!API_KEY) throw new Error('XIAOMI_API_KEY not configured in .env.local')
+
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    clearTimeout(id)
+
+
+// ===== [截断] 原文件共 2147 行，此处截取前 140 行用于软著材料 =====
+
+// ============================================================
+// FILE: lib/api-clients/mock-video.ts
+// ============================================================
+
+// ⭐ 运行期断言：禁止任何代码读取包含 "ideation" 的文件（拦截所有 fs 变体）
+import fsSync from 'fs'
+
+const _origReadFile = fsSync.readFile
+const _origReadFileSync = fsSync.readFileSync
+const _origOpen = fsSync.open
+const _origOpenSync = (fsSync as any).openSync
+const _origPromisesOpen = fsSync.promises?.open
+
+const blockIdeationRead = (path: any) => {
+  const p = (path?.toString?.() || '').toLowerCase()
+  if (p.includes('ideation')) {
+    const err = new Error(
+      `[ASSERT-BLOCKED] 禁止读取 ideation 文件: ${path}\n` +
+        `所有 ideation 数据必须从数据库 workflowStep (stepType='IDEATION') 读取。\n` +
+        `堆栈: ${new Error().stack}`
+    )
+    console.error(err)
+    throw err
+  }
+}
+
+// 拦截 fs.readFile
+fsSync.readFile = function (...args: any[]) {
+  blockIdeationRead(args[0])
+  return _origReadFile.apply(this, args as any)
+} as any
+
+// 拦截 fs.readFileSync
+fsSync.readFileSync = function (...args: any[]) {
+  blockIdeationRead(args[0])
+  return _origReadFileSync.apply(this, args as any)
+} as any
+
+// 拦截 fs.open
+fsSync.open = function (...args: any[]) {
+  blockIdeationRead(args[0])
+  return _origOpen.apply(this, args as any)
+} as any
+
+// 拦截 fs.openSync
+if (_origOpenSync) {
+  (fsSync as any).openSync = function (...args: any[]) {
+    blockIdeationRead(args[0])
+    return _origOpenSync.apply(this, args)
+  }
+}
+
+// 拦截 fs.promises.open
+if (_origPromisesOpen) {
+  fsSync.promises.open = function (...args: any[]) {
+    blockIdeationRead(args[0])
+    return _origPromisesOpen.apply(this, args as any)
+  } as any
+}
+
+// ⭐ 关键：fs/promises 是独立模块，必须单独拦截
+import fsPromises from 'fs/promises'
+const _origFsPromisesReadFile = fsPromises.readFile
+const _origFsPromisesOpen = fsPromises.open
+
+fsPromises.readFile = async function(...args: any[]) {
+  blockIdeationRead(args[0])
+  return _origFsPromisesReadFile.apply(this, args as any)
+} as any
+
+fsPromises.open = async function(...args: any[]) {
+  blockIdeationRead(args[0])
+  return _origFsPromisesOpen.apply(this, args as any)
+} as any
+
+console.log('[MOCK-VIDEO] 已启用 ideation 文件读取拦截（fs.readFile/readFileSync/open/openSync/promises.open + fs/promises.readFile/open）')
+
+/**
+ * 工作指令.txt（Round 7）：完整宣传片生成管线（图生视频 → 拼接 → 配乐 → 混音）
+ *
+ * 输入：6 张概念图（按创建顺序，对应 3 幕 × 2 场景）
+ *
+ * 工作流：
+ *   1) 文本模型为每张概念图生成 5s 视频提示词（含镜头运动）
+ *   2) 图生视频 API（Veo 3.1 Lite）每张生成 5s 视频片段；失败回退 Ken Burns Mock
+ *   3) ffmpeg concat 拼接 6 段为 30s 完整视频
+ *   4) 生成 30s 占位 BGM（lavfi 静音 AAC）
+ *   5) 视频 + BGM 混音
+ *   6) 上传最终 MP4 到 R2 + 返回 segments[] / musicUrl 元数据
+ *
+ * 兼容旧调用方（VideoClient.generateTrailer(conceptImageKeys, projectId)），
+ * 内部通过 prisma 查询丰富的 concept metadata 和 framework storyBrief。
+ */
+
+
+// ===== [截断] 原文件共 755 行，此处截取前 90 行用于软著材料 =====
+
+// ============================================================
+// FILE: lib/workflow-executor.ts
+// ============================================================
+
+import { prisma } from './prisma';
+import { WorkflowStepType, StepStatus } from '@prisma/client';
+import { getStepOrder } from './workflow';
+
+export async function createStep(projectId: string, stepType: WorkflowStepType, order: number) {
+  return prisma.workflowStep.create({
+    data: { projectId, stepType, order, status: 'PENDING' },
+  });
+}
+
+export async function startStep(stepId: string) {
+  return prisma.workflowStep.update({
+    where: { id: stepId },
+    data: { status: 'PROCESSING' as StepStatus, startedAt: new Date() },
+  });
+}
+
+// 2026-05-18：原子化 PENDING/FAILED → PROCESSING,避免两个并发请求都抢到锁导致重复提交供应商任务。
+// 返回 true = 抢锁成功(本次请求负责执行),false = 已被并发请求抢先或处于不可启动状态。
+export async function tryStartStep(stepId: string): Promise<boolean> {
+  const result = await prisma.workflowStep.updateMany({
+    where: { id: stepId, status: { in: ['PENDING', 'FAILED'] } },
+    data: { status: 'PROCESSING' as StepStatus, startedAt: new Date(), errorMessage: null },
+  });
+  return result.count === 1;
+}
+
+export async function completeStep(stepId: string, outputData: any) {
+  return prisma.workflowStep.update({
+    where: { id: stepId },
+    data: {
+      status: 'COMPLETED' as StepStatus,
+      completedAt: new Date(),
+      outputData,
+    },
+  });
+}
+
+export async function failStep(stepId: string, errorMessage: string) {
+  return prisma.workflowStep.update({
+    where: { id: stepId },
+    data: { status: 'FAILED' as StepStatus, errorMessage },
+  });
+}
+
+export async function getProjectSteps(projectId: string) {
+  return prisma.workflowStep.findMany({
+    where: { projectId },
+    orderBy: { order: 'asc' },
+    include: { resultAssets: true },
+  });
+}
+
+export async function canExecuteStep(projectId: string, targetStep: WorkflowStepType): Promise<boolean> {
+  const targetOrder = getStepOrder(targetStep);
+  if (targetOrder === 0) return true;
+
+  const steps = await getProjectSteps(projectId);
+  const prevStep = steps.find((s) => s.order === targetOrder - 1);
+  return prevStep?.status === 'COMPLETED' || prevStep?.status === 'SKIPPED';
+}
+
+export async function getStep(projectId: string, stepType: WorkflowStepType) {
+  return prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType } },
+  });
+}
+
+export async function getLatestCompletedStepOrder(projectId: string): Promise<number> {
+  const steps = await getProjectSteps(projectId);
+  const completed = steps.filter((s) => s.status === 'COMPLETED' || s.status === 'SKIPPED');
+  return completed.length > 0 ? Math.max(...completed.map((s) => s.order)) : -1;
+}
+
+
+// ============================================================
+// FILE: lib/models-config.ts
+// ============================================================
+
+// ==================== 图像模型（按业务模块组织 + 7模型可用列表）====================
+//
+// 2026-05-24: 7 模型接入 — doubao / GPT Image 2 / Flux Kontext / 可灵 Omni / Gemini Flash / Grok / 通义千问
+
+export const IMAGE_MODELS = {
+  // 主模型（默认）
+  primary: 'doubao-seedream-4.5' as const,
+
+  // 全部可用模型
+  available: [
+    {
+      id: 'doubao-seedream-4.5',
+      label: '即梦 4.5 · 中文优化',
+      provider: '字节跳动',
+      tags: ['中文优化', '多图输入', 'dall-e-3格式'],
+      defaultAspectRatio: '16:9',
+      supportedModes: ['text-to-image', 'image-to-image', 'multi-image'],
+    },
+    {
+      id: 'gpt-image-2',
+      label: 'GPT Image 2 · 高精度',
+      provider: 'OpenAI',
+      tags: ['高精度', 'edits', 'variations'],
+      defaultAspectRatio: '16:9',
+      supportedModes: ['text-to-image', 'image-to-image'],
+    },
+    {
+      id: 'flux.1-kontext-pro',
+      label: 'Flux Kontext · 参考图',
+      provider: 'Flux',
+      tags: ['参考图', '开源', '上下文'],
+      defaultAspectRatio: '16:9',
+      supportedModes: ['text-to-image', 'image-to-image'],
+    },
+    {
+      id: 'kling-omni-image',
+      label: '可灵 Omni · 全模态',
+      provider: '快手',
+      tags: ['全模态', '视频图像', '图文混输'],
+      defaultAspectRatio: '16:9',
+      supportedModes: ['text-to-image', 'image-to-image', 'multi-modal'],
+      // 工作指令.txt（P0-2 2026-05-24）：可灵使用异步任务协议（POST → task_id → 轮询），
+      // 当前系统仅支持同步 /v1/images/generations。暂时隐藏，待视频阶段接入异步协议后恢复。
+      disabled: true,
+    },
+    {
+      id: 'gemini-3.1-flash-image',
+      label: 'Gemini Flash · 快速',
+      provider: 'Google',
+      tags: ['快速', '多模态', '联合推理'],
+      defaultAspectRatio: '16:9',
+      supportedModes: ['text-to-image', 'image-to-image'],
+      // 工作指令.txt（P2 2026-05-24）：供应商代理层返回 503，未挂载 Gemini 渠道。
+      // 暂时禁用，待供应商确认支持后恢复。
+      disabled: true,
+    },
+    {
+      id: 'grok-4.2-image',
+      label: 'Grok 4.2 · X平台',
+      provider: 'X',
+      tags: ['高质量', 'OpenAI兼容'],
+      defaultAspectRatio: '16:9',
+      supportedModes: ['text-to-image', 'image-to-image'],
+    },
+    {
+      id: 'qwen-image-max',
+      label: '通义千问 Max · 阿里',
+      provider: '阿里云',
+      tags: ['Max系列', '中文场景'],
+      defaultAspectRatio: '16:9',
+      supportedModes: ['text-to-image', 'image-to-image'],
+    },
+  ],
+} as const;
+
+export type ImageModelId = typeof IMAGE_MODELS.available[number]['id'];
+
+/** 模型简称映射（角标显示用） */
+export const MODEL_SHORT_NAME: Record<string, string> = {
+  'doubao-seedream-4.5': '即梦4.5',
+
+// ===== [截断] 原文件共 300 行，此处截取前 80 行用于软著材料 =====
+
+// ============================================================
+// FILE: lib/prompts.ts
+// ============================================================
+
+import fs from 'fs'
+import path from 'path'
+
+const PROMPTS_DIR = path.join(process.cwd(), 'prompts')
+
+export function loadPromptTemplate(name: string, variables: Record<string, string>): string {
+  const filePath = path.join(PROMPTS_DIR, `${name}.txt`)
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Prompt template not found: ${filePath}`)
+  }
+  let template = fs.readFileSync(filePath, 'utf-8')
+  for (const [key, value] of Object.entries(variables)) {
+    // 支持 {{VAR}} 和 {{VAR:default}} 格式
+    template = template.replace(new RegExp(`{{${key}}}`, 'g'), value || '')
+  }
+  return template
+}
+
+// 辅助：将 LLM 返回的内容提取为 JSON 对象
+// 优先尝试直接解析（LLM 已按指令输出纯 JSON），失败再尝试提取 Markdown 代码块
+export function extractJsonFromMarkdown(text: string): any {
+  const trimmed = text.trim()
+
+  // 优先：直接解析纯 JSON
+  try {
+    return JSON.parse(trimmed)
+  } catch {}
+
+  // 兜底：提取 ```json 代码块
+  const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+  if (match) {
+    try {
+      return JSON.parse(match[1].trim())
+    } catch {}
+  }
+
+  // 最终兜底：返回原始文本包装
+  return { raw: text }
+}
+
+// 辅助：从文本中提取 "key: value" 或 "key —— value" 段落
+export function extractSection(text: string, sectionName: string): string {
+  // 支持中文冒号、英文冒号、横线等分隔符
+  const regex = new RegExp(`${sectionName}[\\s:：——\\-]*([\\s\\S]*?)(?=\\n\\d+\\.|\\n[A-Z]|\\n(?:风格规范|背景环境|主要角色|故事梗概|灵感阐释|$))`, 'i')
+  const match = text.match(regex)
+  return match ? match[1].trim() : ''
+}
+
+/**
+ * 工作指令.txt（2026-05-24）：风格统一 modelNo 校验与兜底分配。
+ * LLM 输出 3 个风格对象时，必须包含 modelNo 字段（1/2/3）。
+ * 如果缺少，默认按顺序分配 1、2、3；如果有重复，强制重排为 1、2、3 各一次。
+ */
+export function assignModelNoFallback(styleOptions: any[]): any[] {
+  if (!Array.isArray(styleOptions) || styleOptions.length === 0) return styleOptions
+
+  const result = styleOptions.map((s, i) => ({
+    ...s,
+    // 兜底：无 modelNo 时按索引分配 1/2/3
+    modelNo: typeof s.modelNo === 'number' ? s.modelNo : (i + 1),
+  }))
+
+  // 校验：如果 3 个 modelNo 有重复，强制重排为 1、2、3 各一次
+  const modelNos = result.map((s) => s.modelNo)
+  const uniqueNos = new Set(modelNos)
+  if (uniqueNos.size !== modelNos.length) {
+    console.warn('[STYLE-MODEL-ASSIGN] modelNo 有重复，强制重排为 1、2、3:', modelNos)
+    result.forEach((s, i) => { s.modelNo = i + 1 })
+  }
+
+  // 校验：modelNo 必须是 1/2/3
+  result.forEach((s) => {
+    if (![1, 2, 3].includes(s.modelNo)) {
+      console.warn('[STYLE-MODEL-ASSIGN] 非法 modelNo:', s.modelNo, '重置为 1')
+      s.modelNo = 1
+    }
+  })
+
+  return result
+}
+
+
+// ============================================================
+// FILE: lib/prisma.ts
+// ============================================================
+
+import { PrismaClient } from '@prisma/client'
+
+// Phase 5 演示模式：当 DATABASE_URL 为占位符或为空时，返回一个 Proxy Mock，
+// 让所有 prisma.* 调用返回安全的默认值（空数组、null、0），从而保证
+// 前端页面可以独立打开浏览，不会因为没有真实数据库而 500。
+
+function isPlaceholderUrl(url: string | undefined): boolean {
+  if (!url) return true
+  return url.includes('[password]') || url.includes('[project-ref]') || url.includes('[host]')
+}
+
+// Demo 用户：让 user.findUnique 等鉴权检查都能拿到一个稳定的"已登录用户"，
+// 进而让所有 (dashboard) 子页面里的 `if (!user) redirect('/login')` 不再触发。
+const DEMO_USER_RECORD = {
+  id: 'demo_user_local',
+  name: '本地体验用户',
+  email: 'demo@ai-film.local',
+  image: null as string | null,
+  emailVerified: null as Date | null,
+  createdAt: new Date(),
+}
+
+// ============ Mock Prisma 本地文件持久化（2026-05-19）============
+// 工作指令.txt：解决 Mock 数据在 dev server 重启后丢失的问题。
+// 每次写操作(create/update/delete)后自动同步到 JSON 文件，启动时自动恢复。
+// 注意：使用条件 require 加载 fs/path，兼容 Next.js Edge Runtime（Edge 下不执行持久化）。
+
+let _fs: typeof import('fs') | undefined
+let _path: typeof import('path') | undefined
+
+function getFs() {
+  if (!_fs && typeof require !== 'undefined') {
+    try { _fs = require('fs') } catch {}
+  }
+  return _fs
+}
+
+function getPath() {
+  if (!_path && typeof require !== 'undefined') {
+    try { _path = require('path') } catch {}
+  }
+  return _path
+}
+
+function getDbFile(): string | undefined {
+  const pathMod = getPath()
+  if (!pathMod) return undefined
+  return pathMod.join(process.cwd(), 'public', 'mock-storage', 'db.json')
+}
+
+
+// ===== [截断] 原文件共 610 行，此处截取前 50 行用于软著材料 =====
+
+// ============================================================
+// FILE: lib/r2.ts
+// ============================================================
+
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import fs from "fs/promises";
+import path from "path";
+
+// 工作指令.txt 修复五：DEMO 模式（R2 凭据为占位符）下，把 uploadFile / getSignedFileUrl
+// 切换到本地 public/mock-storage 兜底，让宣传片管线能跑通而不抛 STORAGE_001。
+// 真实 R2 凭据生效（不再是 your-* / [account-id]）时自动切回 AWS SDK。
+
+function isPlaceholder(v: string | undefined): boolean {
+  if (!v) return true
+  if (v.startsWith('your-')) return true
+  if (v.includes('[account-id]') || v.includes('[host]')) return true
+  return false
+}
+
+const isR2DemoMode =
+  isPlaceholder(process.env.R2_ACCOUNT_ID) ||
+  isPlaceholder(process.env.R2_ACCESS_KEY_ID) ||
+  isPlaceholder(process.env.R2_SECRET_ACCESS_KEY) ||
+  isPlaceholder(process.env.R2_ENDPOINT) ||
+  isPlaceholder(process.env.R2_BUCKET_NAME)
+
+const MOCK_STORAGE_ROOT = path.join(process.cwd(), 'public', 'mock-storage')
+
+if (isR2DemoMode) {
+  console.warn('[R2] DEMO 模式：R2 凭据为占位符，使用 public/mock-storage/ 本地兜底')
+}
+
+const R2 = isR2DemoMode
+  ? null
+  : new S3Client({
+      region: "auto",
+      endpoint: process.env.R2_ENDPOINT!,
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+      },
+    });
+
+async function ensureLocalDir(filePath: string) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+}
+
+export async function uploadFile(key: string, body: Buffer, contentType: string) {
+  if (isR2DemoMode) {
+    try {
+      const localPath = path.join(MOCK_STORAGE_ROOT, key)
+      await ensureLocalDir(localPath)
+      await fs.writeFile(localPath, body)
+      console.log(`[R2-MOCK] uploadFile → ${localPath} (${body.length} bytes, ${contentType})`)
+      return { key }
+    } catch (error: any) {
+      throw new Error(`STORAGE_001: 本地兜底写入失败 - ${error.message}`)
+    }
+  }
+  try {
+    const command = new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME!,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    });
+    await R2!.send(command);
+    return { key };
+  } catch (error: any) {
+    throw new Error(`STORAGE_001: 文件上传失败 - ${error.message}`);
+  }
+}
+
+export async function getSignedFileUrl(key: string, expiresIn: number = 3600) {
+  if (isR2DemoMode) {
+    // Next.js 会把 public/* 静态托管到根路径，所以 mock-storage/<key> 在浏览器可直接访问
+    const url = `/mock-storage/${key.split('\\').join('/')}`
+    return url
+  }
+  try {
+    const command = new GetObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME!,
+      Key: key,
+    });
+    return await getSignedUrl(R2!, command, { expiresIn });
+  } catch (error: any) {
+    throw new Error(`STORAGE_002: 预签名 URL 生成失败 - ${error.message}`);
+  }
+}
+
+export async function deleteFile(key: string) {
+  if (isR2DemoMode) {
+    try {
+      const localPath = path.join(MOCK_STORAGE_ROOT, key)
+      await fs.unlink(localPath).catch(() => {})
+      return { key }
+    } catch (error: any) {
+      throw new Error(`STORAGE_001: 本地兜底删除失败 - ${error.message}`)
+    }
+  }
+  try {
+    const command = new DeleteObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME!,
+      Key: key,
+    });
+    await R2!.send(command);
+    return { key };
+  } catch (error: any) {
+    throw new Error(`STORAGE_001: 文件删除失败 - ${error.message}`);
+  }
+}
+
+
+// ============================================================
+// FILE: lib/queue.ts
+// ============================================================
+
+import { Queue, Worker } from 'bullmq';
+import IORedis from 'ioredis';
+
+const redisUrl = process.env.UPSTASH_REDIS_URL || 'redis://localhost:6379';
+const isPlaceholder = redisUrl.includes('[host]') || redisUrl.includes('[token]');
+
+// [DASHBOARD-FIX] DEMO 模式检测：无真实 Redis 时短路 BullMQ，避免 ECONNREFUSED
+export const isDemoMode = isPlaceholder || !process.env.UPSTASH_REDIS_URL;
+
+// ============================================================
+// DEMO 模式：Mock 对象（不连接 Redis）
+// ============================================================
+
+function createMockQueue(name: string) {
+  return {
+    name,
+    add: async (_name: string, _data: any) => ({ id: 'mock-job', getState: async () => 'completed' as const }),
+    getJob: async (_id: string) => null,
+    getJobs: async () => [] as any[],
+    getJobCounts: async () => ({ completed: 0, failed: 0, active: 0, waiting: 0, delayed: 0 }),
+    pause: async () => {},
+    resume: async () => {},
+    drain: async () => {},
+    close: async () => {},
+  } as unknown as Queue;
+}
+
+function createMockWorker(_name: string, _processor: any) {
+  return {
+    name: _name,
+    on: () => {},
+    close: async () => {},
+    pause: async () => {},
+    resume: async () => {},
+  } as unknown as Worker;
+}
+
+const mockConnection = {
+  status: 'demo',
+  on: () => {},
+  disconnect: () => {},
+} as unknown as IORedis;
+
+// ============================================================
+// 真实 Redis 连接
+// ============================================================
+
+function createRealConnection() {
+  return new IORedis(redisUrl, {
+    tls: redisUrl.startsWith('rediss') ? {} : undefined,
+    maxRetriesPerRequest: null,
+    retryStrategy: (times) => Math.min(times * 500, 2000),
+    enableOfflineQueue: false,
+  });
+}
+
+// ============================================================
+// 导出：根据模式选择实现
+// ============================================================
+
+export const redisConnection = isDemoMode
+  ? (() => { console.log('[DASHBOARD-FIX][QUEUE] DEMO模式，Redis队列短路'); return mockConnection; })()
+  : createRealConnection();
+
+export function createQueue(name: string) {
+  return isDemoMode ? createMockQueue(name) : new Queue(name, { connection: redisConnection });
+}
+
+export function createWorker(name: string, processor: any) {
+  return isDemoMode ? createMockWorker(name, processor) : new Worker(name, processor, { connection: redisConnection });
+}
+
+
+// ============================================================
+// FILE: prisma/schema.prisma
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 项目状态
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+// 12步工作流类型
+enum WorkflowStepType {
+  IDEATION       // 创意扩散
+  FRAMEWORK      // 框架搭建
+  STYLE          // 风格统一
+  CHARACTER      // 人物设计
+  CONCEPT        // 概念图生成
+  TRAILER        // 30s宣传片
+  STORYBOARD     // 分镜设计
+  KEYFRAMES      // 首尾帧
+  VIDEO_DIRECT   // 直生视频
+  VIDEO_RENDER   // AI渲染
+  CAMERA         // 电脑运镜
+  REVIEW         // 一致性检测/评测
+}
+
+// 步骤执行状态
+enum StepStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+// 资源类型
+enum AssetType {
+  IMAGE
+  VIDEO
+  TEXT
+  AUDIO
+  REFERENCE
+}
+
+// 评测维度
+enum EvaluationDimension {
+  CONSISTENCY    // 时序一致性
+  FIDELITY       // 语义保真度
+  AESTHETICS     // 视觉美学
+  SPEED          // 生成时效
+}
+
+// NextAuth.js v5 所需的 Account 模型
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+// NextAuth.js v5 所需的 Session 模型
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// NextAuth.js v5 所需的 VerificationToken 模型（Email Magic Link 用）
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  accounts      Account[]
+  sessions      Session[]
+  projects      Project[]
+  auditLogs     AuditLog[]
+  createdAt     DateTime  @default(now())
+}
+
+model Project {
+  id                String         @id @default(cuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title             String         @default("未命名项目")
+  rawIdea           String         @db.Text
+  selectedDirection Json?          // 选定的创意扩散方向
+  framework         Json?          // 框架搭建结果（背景/风格/角色/梗概/幕结构）
+  selectedStyleId   String?        // 关联 Asset.id
+  status            ProjectStatus  @default(ACTIVE)
+  steps             WorkflowStep[]
+  assets            Asset[]
+  comparisons       Comparison[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([userId, status])
+}
+
+model WorkflowStep {
+  id           String           @id @default(cuid())
+  projectId    String
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stepType     WorkflowStepType
+  status       StepStatus       @default(PENDING)
+  inputData    Json?            // 该步输入参数
+  outputData   Json?            // 该步输出结果
+  errorMessage String?          @db.Text
+  order        Int              // 步骤顺序（0-11）
+  retryCount   Int              @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  resultAssets Asset[]          // 关联生成的资源
+  createdAt    DateTime         @default(now())
+
+  @@unique([projectId, stepType]) // 一个项目同一步骤只能有一条记录
+  @@index([projectId, order])
+}
+
+model Asset {
+  id         String        @id @default(cuid())
+  projectId  String
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+// ===== [截断] 原文件共 206 行，此处截取前 150 行用于软著材料 =====
+
+// ============================================================
+// FILE: lib/workflow.ts
+// ============================================================
+
+import { WorkflowStepType as PrismaStepType } from '@prisma/client';
+
+// ============================================================
+// 1. 步骤元数据定义（顺序、名称、图标、描述）
+// ============================================================
+export const WORKFLOW_STEPS = [
+  { type: 'IDEATION' as const,     label: '创意扩散',   order: 0,  description: '基于元构思联想扩展',       icon: 'Lightbulb' },
+  { type: 'FRAMEWORK' as const,    label: '框架搭建',   order: 1,  description: '设计背景、风格、角色、梗概', icon: 'Layout' },
+  { type: 'STYLE' as const,        label: '风格统一',   order: 2,  description: '探索并确定统一视觉风格',    icon: 'Palette' },
+  { type: 'CHARACTER' as const,    label: '人物设计',   order: 3,  description: '生成角色人设与概念图',      icon: 'User' },
+  { type: 'CONCEPT' as const,      label: '概念图',     order: 4,  description: '每幕生成代表性场景',        icon: 'Image' },
+  { type: 'TRAILER' as const,      label: '宣传片',     order: 5,  description: '30s先导样例参考片',        icon: 'Play' },
+  { type: 'STORYBOARD' as const,   label: '分镜设计',   order: 6,  description: '绘制分镜草图',             icon: 'Grid' },
+  { type: 'KEYFRAMES' as const,    label: '生成尾帧',   order: 7,  description: '基于分镜起始帧生成尾帧',     icon: 'Frame' },
+  { type: 'VIDEO_DIRECT' as const, label: '直生视频',   order: 8,  description: '基于起始帧/尾帧生成视频',      icon: 'Video' },
+  { type: 'VIDEO_RENDER' as const, label: 'AI渲染',     order: 9,  description: '实拍视频风格化（大动作）',   icon: 'Wand' },
+  { type: 'CAMERA' as const,       label: '电脑运镜',   order: 10, description: '预设镜头运动+AI渲染',       icon: 'Camera' },
+  { type: 'REVIEW' as const,       label: '评测优化',   order: 11, description: '一致性检测与情感审核',       icon: 'CheckCircle' },
+] as const;
+
+export type WorkflowStepType = typeof WORKFLOW_STEPS[number]['type'];
+
+// ============================================================
+// 2. 可见步骤配置（前端工作流看板只渲染这 9 步）
+// ============================================================
+export const VISIBLE_STEP_TYPES = [
+  'IDEATION',
+  'FRAMEWORK',
+  'STYLE',
+  'CHARACTER',
+  'CONCEPT',
+  'TRAILER',
+  'STORYBOARD',
+  'KEYFRAMES',
+  'VIDEO_DIRECT',
+] as const;
+
+export type VisibleStepType = typeof VISIBLE_STEP_TYPES[number];
+
+// 日志：确认可见步骤顺序
+console.log('[WORKFLOW-REORG] 可见步骤:', JSON.stringify(VISIBLE_STEP_TYPES));
+
+// ============================================================
+// 3. 状态流转校验函数
+// ============================================================
+
+/** 获取下一步 */
+export function getNextStep(current: WorkflowStepType): WorkflowStepType | null {
+  const idx = WORKFLOW_STEPS.findIndex(s => s.type === current);
+  return idx >= 0 && idx < WORKFLOW_STEPS.length - 1 ? WORKFLOW_STEPS[idx + 1].type : null;
+}
+
+/** 获取上一步 */
+export function getPrevStep(current: WorkflowStepType): WorkflowStepType | null {
+  const idx = WORKFLOW_STEPS.findIndex(s => s.type === current);
+  return idx > 0 ? WORKFLOW_STEPS[idx - 1].type : null;
+}
+
+/** 判断是否可以跳转到目标步骤（目标在当前之后） */
+export function canSkipTo(target: WorkflowStepType, current: WorkflowStepType): boolean {
+  const targetIdx = WORKFLOW_STEPS.findIndex(s => s.type === target);
+  const currentIdx = WORKFLOW_STEPS.findIndex(s => s.type === current);
+  // 允许向前跳过（但不可跳过未解锁的步骤，具体规则由业务层控制）
+  return targetIdx > currentIdx;
+}
+
+/** 判断某步骤是否可访问：第 0 步永远可访问；其他步骤需前一步已完成或自身已完成/跳过 */
+export function isStepAccessible(step: WorkflowStepType, completedSteps: WorkflowStepType[]): boolean {
+  const idx = WORKFLOW_STEPS.findIndex(s => s.type === step);
+  if (idx === 0) return true;
+  const prev = WORKFLOW_STEPS[idx - 1].type;
+  return completedSteps.includes(prev) || completedSteps.includes(step);
+}
+
+/** 获取步骤的元数据 */
+export function getStepMeta(step: WorkflowStepType) {
+  return WORKFLOW_STEPS.find(s => s.type === step);
+}
+
+/** 获取步骤顺序索引 */
+
+// ===== [截断] 原文件共 107 行，此处截取前 80 行用于软著材料 =====

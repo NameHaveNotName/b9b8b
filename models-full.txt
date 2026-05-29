@@ -1,0 +1,26 @@
+◇ injected env (15) from .env.local // tip: ⌁ auth for agents [www.vestauth.com]
+HTTP 200 内容长度 106407
+
+=== 音乐相关模型 ===
+  - minimax-m2.1
+  - gpt-4o-mini-audio-preview
+  - MiniMax-M2.5
+  - minimax-m2
+  - gpt-4o-mini-audio-preview-2024-12-17
+  - kling-audio
+  - MiniMax-Hailuo-2.3
+  - audio1.0
+  - MiniMax-M2
+  - gpt-4o-audio-preview-2024-12-17
+  - MiniMax-Hailuo-02
+  - MiniMax-Voice-Clone
+  - gpt-audio-2025-08-28
+  - minimax-m2.5
+  - MiniMax-M2.7
+  - MiniMax-File-Upload
+  - Minimax-M2.5
+  - MiniMax-M2.1
+  - gpt-4o-audio-preview
+  - MiniMax-Voice-Design
+
+(总模型数 453,音乐相关 20)

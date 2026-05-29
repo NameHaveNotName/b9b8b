@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI影视创作平台 - UI测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1a1a1a;
+            margin-bottom: 20px;
+        }
+        .test-section {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        button {
+            background: #1a73e8;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1557b0;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .project-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            background: white;
+        }
+        .step-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .badge-pending {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        .badge-processing {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+        .badge-completed {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 AI影视创作平台 - UI测试</h1>
+
+        <div class="test-section">
+            <h2>1. 项目创建测试</h2>
+            <button onclick="createProject()">创建新项目</button>
+            <div id="project-result"></div>
+            <div id="projects-list"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>2. 工作流测试（模拟）</h2>
+            <p>由于API认证限制，这里展示UI界面的测试</p>
+            <div class="project-card">
+                <h3>测试项目: 小机器人的冒险</h3>
+                <p>创意扩散 → 框架搭建 → 风格统一 → 人物设计 → 概念图 → 宣传片 → 分镜设计 → 首尾帧 → 直生视频 → AI渲染 → 电脑运镜 → 评测优化</p>
+                <div id="workflow-steps"></div>
+                <button onclick="testWorkflow()">模拟工作流执行</button>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>3. API响应测试</h2>
+            <button onclick="testAPIs()">测试所有API端点</button>
+            <div id="api-results"></div>
+        </div>
+    </div>
+
+    <script>
+        // 创建项目
+        async function createProject() {
+            const btn = event.target;
+            const resultDiv = document.getElementById('project-result');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> 创建中...';
+
+            try {
+                const response = await fetch('http://localhost:3000/api/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rawIdea: '测试AI电影创作：一个小机器人寻找主人的温馨故事'
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.project) {
+                    resultDiv.innerHTML = `
+                        <div class="test-result success">
+✅ 项目创建成功！
+项目ID: ${data.project.id}
+标题: ${data.project.title}
+创建时间: ${new Date().toLocaleString()}
+                        </div>
+                    `;
+                    loadProjects();
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="test-result error">
+❌ 项目创建失败: ${JSON.stringify(data)}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="test-result error">
+❌ 网络错误: ${error.message}
+                    </div>
+                `;
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = '创建新项目';
+        }
+
+        // 加载项目列表
+        async function loadProjects() {
+            try {
+                const response = await fetch('http://localhost:3000/api/projects');
+                const data = await response.json();
+
+                const listDiv = document.getElementById('projects-list');
+
+                if (data.projects.length > 0) {
+                    listDiv.innerHTML = '<h3>项目列表:</h3>' +
+                        data.projects.map(p => `
+                            <div class="project-card">
+                                <h4>${p.title}</h4>
+                                <p>${p.rawIdea}</p>
+                                <p>创建时间: ${new Date(p.createdAt).toLocaleString()}</p>
+                                <p>资产数量: ${p._count.assets}</p>
+                            </div>
+                        `).join('');
+                } else {
+                    listDiv.innerHTML = '<p>暂无项目</p>';
+                }
+            } catch (error) {
+                console.error('加载项目失败:', error);
+            }
+        }
+
+        // 模拟工作流执行
+        function testWorkflow() {
+            const stepsDiv = document.getElementById('workflow-steps');
+            const steps = [
+                { name: '创意扩散', status: 'pending' },
+                { name: '框架搭建', status: 'pending' },
+                { name: '风格统一', status: 'pending' },
+                { name: '人物设计', status: 'pending' },
+                { name: '概念图', status: 'pending' },
+                { name: '宣传片', status: 'pending' },
+                { name: '分镜设计', status: 'pending' },
+                { name: '首尾帧', status: 'pending' },
+                { name: '直生视频', status: 'pending' },
+                { name: 'AI渲染', status: 'pending' },
+                { name: '电脑运镜', status: 'pending' },
+                { name: '评测优化', status: 'pending' }
+            ];
+
+            // 模拟步骤执行
+            let currentIndex = 0;
+
+            function executeNextStep() {
+                if (currentIndex >= steps.length) {
+                    stepsDiv.innerHTML += '<p style="color: green; margin-top: 20px;">🎉 所有步骤执行完成！</p>';
+                    return;
+                }
+
+                const step = steps[currentIndex];
+                step.status = 'processing';
+
+                stepsDiv.innerHTML = steps.map((s, i) => {
+                    const badgeClass = s.status === 'completed' ? 'badge-completed' :
+                                     s.status === 'processing' ? 'badge-processing' :
+                                     'badge-pending';
+                    const statusText = s.status === 'completed' ? '已完成' :
+                                     s.status === 'processing' ? '执行中' : '待开始';
+
+                    return `
+                        <div style="margin: 5px 0;">
+                            ${i + 1}. ${s.name}
+                            <span class="step-badge ${badgeClass}">${statusText}</span>
+                        </div>
+                    `;
+                }).join('');
+
+                setTimeout(() => {
+                    step.status = 'completed';
+                    currentIndex++;
+                    executeNextStep();
+                }, 1500);
+            }
+
+            executeNextStep();
+        }
+
+        // 测试API端点
+        async function testAPIs() {
+            const resultsDiv = document.getElementById('api-results');
+            const endpoints = [
+                { url: '/api/projects', method: 'GET', name: '获取项目列表' },
+                { url: '/api/projects', method: 'POST', name: '创建项目', body: { rawIdea: '测试项目' } },
+                { url: '/api/projects/mock_1777786235408_qsy06t', method: 'GET', name: '获取项目详情' },
+                { url: '/api/projects/mock_1777786235408_qsy06t/steps/ideation', method: 'POST', name: '创意扩散步骤' }
+            ];
+
+            resultsDiv.innerHTML = '<h3>API测试结果:</h3>';
+
+            for (const endpoint of endpoints) {
+                try {
+                    const options = {
+                        method: endpoint.method,
+                        headers: { 'Content-Type': 'application/json' }
+                    };
+
+                    if (endpoint.body) {
+                        options.body = JSON.stringify(endpoint.body);
+                    }
+
+                    const response = await fetch(`http://localhost:3000${endpoint.url}`, options);
+                    const data = await response.text();
+
+                    resultsDiv.innerHTML += `
+                        <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                            <strong>${endpoint.name}</strong> (${endpoint.method} ${endpoint.url})
+                            <br>状态: ${response.status} ${response.statusText}
+                            <br>响应: ${data.substring(0, 200)}${data.length > 200 ? '...' : ''}
+                        </div>
+                    `;
+                } catch (error) {
+                    resultsDiv.innerHTML += `
+                        <div style="margin: 10px 0; padding: 10px; background: #ffebee; border-radius: 4px;">
+                            <strong>${endpoint.name}</strong>
+                            <br>❌ 错误: ${error.message}
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // 页面加载时初始化
+        window.onload = function() {
+            loadProjects();
+        };
+    </script>
+</body>
+</html>

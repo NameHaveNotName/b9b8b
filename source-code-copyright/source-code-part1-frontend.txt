@@ -1,0 +1,1386 @@
+// FilmFlow 影视工作流系统 V1.0
+// 源代码文档（用于软件著作权申请）
+// 生成日期: 2026-05-24
+
+
+// ============================================================
+// FILE: app/(dashboard)/project/[id]/workflow/page.tsx
+// ============================================================
+
+'use client'
+
+import { useState, useCallback, useEffect, useRef } from 'react'
+import Link from 'next/link'
+import useSWR from 'swr'
+import {
+  LoaderCircle,
+  ArrowRight,
+  Play,
+  Image as ImageIcon,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Check,
+  RefreshCw,
+  Sparkles,
+  Eye,
+  EyeOff,
+  Film,
+  Download,
+  FileJson,
+  FileSpreadsheet,
+} from 'lucide-react'
+// @ts-ignore — xlsx 包类型定义不完整，运行时可用
+import * as XLSX from 'xlsx'
+import TopStepper from './_components/TopStepper'
+import IdeaAnchor from '@/components/workflow/IdeaAnchor'
+import QueueMonitor from '@/components/generation/QueueMonitor'
+import MarkdownRenderer from '@/components/ui/MarkdownRenderer'
+import { VISIBLE_STEP_TYPES } from '@/lib/workflow'
+import { IMAGE_MODELS, MODEL_SHORT_NAME, STYLE_MODEL_POOL } from '@/lib/models-config'
+import HoverImageBadge from '@/components/generation/HoverImageBadge'
+import { ClickToEdit } from '@/components/ui/ClickToEdit'
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
+
+const STEP_LABELS: Record<string, string> = {
+  IDEATION: '创意扩散',
+  FRAMEWORK: '框架搭建',
+  STYLE: '风格统一',
+  CHARACTER: '人物设计',
+  CONCEPT: '概念图',
+  TRAILER: '宣传片',
+  STORYBOARD: '分镜设计',
+  KEYFRAMES: '生成尾帧',
+  VIDEO_DIRECT: '直生视频',
+  VIDEO_RENDER: 'AI渲染',
+  CAMERA: '电脑运镜',
+  REVIEW: '评测优化',
+}
+
+const API_STEP_MAP: Record<string, string> = {
+  IDEATION: 'ideation',
+  FRAMEWORK: 'framework',
+  STYLE: 'style',
+  CHARACTER: 'character',
+  CONCEPT: 'concept',
+  TRAILER: 'trailer',
+  STORYBOARD: 'storyboard',
+  KEYFRAMES: 'keyframes',
+  VIDEO_DIRECT: 'video-direct',
+  VIDEO_RENDER: 'video-render',
+  CAMERA: 'camera',
+  REVIEW: 'review',
+}
+
+export default function WorkflowPage({ params }: { params: { id: string } }) {
+  const { data, error, mutate, isLoading } = useSWR(`/api/projects/${params.id}`, fetcher, {
+    refreshInterval: 3000,
+  })
+
+  const [activeStepType, setActiveStepType] = useState<string | null>(null)
+  const [executing, setExecuting] = useState<string | null>(null)
+  const [lastError, setLastError] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  // [WORKFLOW-FIX] 分镜模式选择（工作流看板层级）
+  const [storyboardMode, setStoryboardMode] = useState<'reference' | 'keyframe'>('keyframe')
+
+  const project = data?.project
+  const steps = project?.steps || []
+
+  // 调试日志：确认数据流向
+  if (data) console.log('[workflow] steps:', steps.length, 'project:', !!project)
+
+  // 自动设置激活步骤
+  const currentActive =
+    activeStepType ||
+    steps.find((s: any) => s.status === 'PROCESSING')?.stepType ||
+    steps.find((s: any) => s.status === 'PENDING')?.stepType ||
+    steps[steps.length - 1]?.stepType
+
+  const currentStep = steps.find((s: any) => s.stepType === currentActive)
+
+  const executeStep = useCallback(
+    async (stepType: string, body?: any) => {
+      const apiPath = API_STEP_MAP[stepType]
+      if (!apiPath) return
+      setExecuting(stepType)
+      setLastError(null)
+
+      // 调试日志
+      console.log(`[executeStep] starting ${stepType}`, { body, isExecuting: executing })
+
+      try {
+        const res = await fetch(`/api/projects/${params.id}/steps/${apiPath}`, {
+          method: 'POST',
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        })
+
+        // 调试日志：响应状态
+        console.log(`[executeStep] ${stepType} response status:`, res.status)
+
+        const result = await res.json()
+        console.log(`[executeStep] ${stepType} response:`, JSON.stringify(result).slice(0, 500))
+
+        if (!result.success) {
+          const errorMsg = `执行失败：${result.error || '未知错误'}${result.message ? ' — ' + result.message.slice(0, 100) : ''}`
+          setLastError(errorMsg)
+          return
+        }
+
+        // 调试日志：成功
+        console.log(`[executeStep] ${stepType} completed successfully`)
+        await mutate()
+      } catch (e: any) {
+        console.error(`[executeStep] ${stepType} error:`, e)
+        setLastError('网络错误：' + e.message)
+      } finally {
+        setExecuting(null)
+      }
+    },
+    [params.id, mutate, executing]
+  )
+
+  // [WORKFLOW-FIX] 跳过步骤
+  const skipStep = useCallback(
+    async (stepType: string) => {
+      try {
+        const res = await fetch(`/api/projects/${params.id}/steps/skip`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stepType }),
+        })
+        const result = await res.json()
+        if (!res.ok || !result.success) {
+          setToast({ kind: 'error', message: `跳过失败：${result.error || '未知错误'}` })
+          return
+        }
+        setToast({ kind: 'success', message: result.message || '已跳过' })
+        // 自动跳转至下一步
+        if (result.nextStepType) setActiveStepType(result.nextStepType)
+        await mutate()
+      } catch (e: any) {
+        setToast({ kind: 'error', message: '跳过失败：' + e.message })
+      }
+    },
+    [params.id, mutate]
+  )
+
+  const selectStyle = useCallback(
+    async (styleId: string, styleRefUrl?: string) => {
+      // 【强制日志5】确认前端传的值
+      console.log('[SELECT-STYLE-FRONT] 点击 styleId:', styleId)
+      console.log('[SELECT-STYLE-FRONT] 点击 styleRefUrl:', styleRefUrl)
+      console.log('[SELECT-STYLE-FRONT] styleRefUrl 类型:', typeof styleRefUrl)
+      console.log('[SELECT-STYLE-FRONT] styleRefUrl 是否http:', styleRefUrl?.startsWith?.('http'))
+      // 工作指令.txt（修复一）：放宽校验。图片已能显示说明 URL 浏览器认为有效；
+      // 不再要求 http(s) 前缀（data: URL / 签名 URL 都允许）。
+      if (!styleRefUrl || typeof styleRefUrl !== 'string' || styleRefUrl.trim() === '') {
+        setToast({ kind: 'error', message: '该风格图尚未生成完成，无法选择' })
+        return
+      }
+      try {
+        const res = await fetch(`/api/projects/${params.id}/steps/style`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selectedStyleId: styleId, styleRefUrl }),
+        })
+        // 工作指令.txt（Round 5 修复 #1）：res.text() 容错解析。
+        // Next.js 在路由错误 / 中间件异常时可能返回空 body / HTML 错误页，
+        // 直接 res.json() 会抛 "Unexpected end of JSON input"。
+        const responseText = await res.text()
+        console.log('[SELECT-STYLE-FRONT] PATCH 状态:', res.status, '原始响应前200字符:', responseText.slice(0, 200))
+        let result: any = {}
+        if (responseText.trim()) {
+          try {
+            result = JSON.parse(responseText)
+          } catch {
+            console.warn('[SELECT-STYLE-FRONT] 响应非 JSON，按 res.ok 判断成败')
+          }
+        }
+        if (!res.ok) throw new Error(result.error || result.message || `HTTP ${res.status}`)
+        await mutate()
+        setToast({ kind: 'success', message: '已保存为统一视觉基准' })
+      } catch (e: any) {
+        setToast({ kind: 'error', message: '选择风格失败：' + e.message })
+      }
+    },
+    [params.id, mutate]
+  )
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  function goToNextStep() {
+    if (!currentStep) return
+    const next = steps.find((s: any) => s.order === currentStep.order + 1)
+    if (next) setActiveStepType(next.stepType)
+  }
+
+  if (isLoading) return <LoadingBlock />
+  if (error) return <ErrorBlock message={error.message} />
+  if (!project) return <ErrorBlock message="项目未找到，请从仪表盘重新进入" />
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-6">
+      {/* Toast：风格选中等成功/失败的瞬时反馈 */}
+      {toast && (
+        <div
+          className={`fixed left-1/2 top-6 z-50 -translate-x-1/2 rounded-lg px-5 py-2.5 text-sm font-medium shadow-lg transition ${
+            toast.kind === 'success'
+              ? 'bg-amber-500 text-white'
+              : 'bg-red-500 text-white'
+          }`}
+          role="status"
+        >
+          {toast.kind === 'success' ? '✓ ' : '⚠ '}
+          {toast.message}
+        </div>
+      )}
+      {/* 头部 */}
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/project/${params.id}`}
+            className="text-sm text-stone-500 transition hover:text-stone-800"
+          >
+            ← 返回总览
+          </Link>
+        </div>
+      </div>
+
+      <div className="mb-2">
+        <h1 className="text-2xl font-bold text-stone-800">{project.title}</h1>
+        <p className="mt-1 text-sm text-stone-500">工作流看板 — 共 {VISIBLE_STEP_TYPES.length} 步</p>
+      </div>
+
+      {/* TopStepper */}
+      <TopStepper
+        steps={steps}
+        activeStepType={currentActive}
+        onStepClick={(type) => setActiveStepType(type)}
+      />
+
+      {/* 步骤内容区 */}
+      {currentStep && (
+        <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+          <StepHeader
+            step={currentStep}
+            executing={executing}
+            onExecute={() => executeStep(currentStep.stepType)}
+            onRetry={() => executeStep(currentStep.stepType)}
+            onNext={goToNextStep}
+          />
+
+          {lastError && (
+            <ErrorBanner message={lastError} onDismiss={() => setLastError(null)} />
+          )}
+
+          <div className="mt-6">
+            <StepContent
+              step={currentStep}
+              project={project}
+              executing={executing}
+              onExecute={executeStep}
+              onSelectStyle={selectStyle}
+              onError={setLastError}
+              mutate={mutate}
+              setToast={setToast}
+              skipStep={skipStep}
+              storyboardMode={storyboardMode}
+              setStoryboardMode={setStoryboardMode}
+            />
+          </div>
+
+          {/* 底部导航 */}
+          {currentStep.status === 'COMPLETED' && (
+            <div className="mt-6 border-t border-stone-100 pt-4">
+              {currentStep.stepType === 'STYLE' && !project.selectedStyleId ? (
+                <button
+                  disabled
+                  className="flex cursor-not-allowed items-center gap-2 rounded-lg bg-stone-300 px-5 py-2.5 text-sm font-medium text-white"
+                >
+                  请先选择一张风格图作为基准
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={goToNextStep}
+                  className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
+                >
+                  下一步
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 队列监控（固定右下角） */}
+      <QueueMonitor projectId={params.id} steps={steps} />
+    </div>
+  )
+}
+
+/* ============================================================
+   子组件
+   ============================================================ */
+
+function LoadingBlock() {
+  return (
+    <div className="flex items-center justify-center p-20">
+      <LoaderCircle className="h-8 w-8 animate-spin text-stone-400" />
+      <span className="ml-3 text-stone-500">加载中...</span>
+    </div>
+  )
+}
+
+function ErrorBlock({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+      <p className="text-sm font-medium text-red-700">{message}</p>
+    </div>
+  )
+}
+
+function ErrorBanner({
+  message,
+  onDismiss,
+}: {
+  message: string
+  onDismiss: () => void
+}) {
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+      <div className="flex items-start gap-3">
+        <p className="flex-1 text-sm font-medium text-red-700">{message}</p>
+        <button
+          onClick={onDismiss}
+          className="shrink-0 text-red-400 transition hover:text-red-600"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function StepHeader({
+  step,
+  executing,
+  onExecute,
+  onRetry,
+  onNext,
+}: {
+  step: any
+  executing: string | null
+  onExecute: () => void
+  onRetry: () => void
+  onNext: () => void
+}) {
+  const isExecuting = executing === step.stepType
+
+  const statusConfig: Record<
+    string,
+    { label: string; className: string }
+  > = {
+    PENDING: { label: '待开始', className: 'bg-stone-100 text-stone-500' },
+    PROCESSING: { label: '进行中', className: 'bg-blue-50 text-blue-600' },
+    COMPLETED: { label: '已完成', className: 'bg-green-50 text-green-600' },
+    FAILED: { label: '失败', className: 'bg-red-50 text-red-600' },
+    SKIPPED: { label: '已跳过', className: 'bg-stone-50 text-stone-400' },
+  }
+
+  const config = statusConfig[step.status] || statusConfig.PENDING
+
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight text-stone-800">
+          {STEP_LABELS[step.stepType]}
+        </h2>
+        <span
+          className={`mt-1 inline-block rounded-full px-3 py-0.5 text-xs font-medium ${config.className}`}
+
+// ===== [截断] 原文件共 3248 行，此处截取前 400 行用于软著材料 =====
+
+// ============================================================
+// FILE: app/(dashboard)/project/[id]/storyboard/page.tsx
+// ============================================================
+
+'use client'
+
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import useSWR from 'swr'
+import { useParams } from 'next/navigation'
+import {
+  LayoutGrid,
+  Table2,
+  ArrowLeft,
+  Film,
+  Loader2,
+  AlertCircle,
+  Download,
+  FileJson,
+  FileSpreadsheet,
+} from 'lucide-react'
+// @ts-ignore — xlsx 包类型定义不完整，运行时可用
+import * as XLSX from 'xlsx'
+import StoryboardTable, { type Shot, type Asset } from './_components/StoryboardTable'
+import StoryboardCanvas from './_components/StoryboardCanvas'
+
+type ShotMode = 'reference' | 'keyframe'
+
+interface StoryboardData {
+  status: string
+  outputData?: {
+    shots?: Shot[]
+    shotAssets?: { shotId: string; assetId: string }[]
+    mode?: ShotMode
+  }
+  assets: Asset[]
+}
+
+interface ProjectData {
+  project: {
+    id: string
+    title: string
+    framework?: {
+      characters?: { id: string; name: string }[]
+    } | null
+  }
+}
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
+
+export default function StoryboardPage() {
+  const { id } = useParams<{ id: string }>()
+  const [viewMode, setViewMode] = useState<'table' | 'canvas'>('table')
+  // Phase 2: 双模式状态
+  const [shotMode, setShotMode] = useState<ShotMode>('keyframe')
+
+  const {
+    data: projectRes,
+    error: projectError,
+    isLoading: projectLoading,
+  } = useSWR<ProjectData>(`/api/projects/${id}`, fetcher)
+
+  const {
+    data: storyboardRes,
+    error: storyboardError,
+    isLoading: storyboardLoading,
+  } = useSWR<StoryboardData>(`/api/projects/${id}/steps/storyboard`, fetcher)
+
+  const shots: Shot[] = storyboardRes?.outputData?.shots || []
+  const assets: Asset[] = storyboardRes?.assets || []
+
+  const characterMap: Record<string, string> = {}
+  const chars = projectRes?.project?.framework?.characters || []
+  for (const c of chars) {
+    characterMap[c.id] = c.name
+  }
+
+  const [localShots, setLocalShots] = useState<Shot[]>([])
+  const [hasSynced, setHasSynced] = useState(false)
+
+  // SWR 数据首次到达时同步到本地状态 + 模式
+  useEffect(() => {
+    if (shots.length > 0 && !hasSynced) {
+      setLocalShots(shots)
+      setHasSynced(true)
+      // 从 outputData 读取已保存的模式，默认 keyframe
+      const savedMode = storyboardRes?.outputData?.mode as ShotMode | undefined
+      if (savedMode) setShotMode(savedMode)
+    }
+  }, [shots, hasSynced, storyboardRes?.outputData?.mode])
+
+  function handleShotsChange(next: Shot[]) {
+    setLocalShots(next)
+  }
+
+  // Phase 2: 模式切换保存（含 mode 字段）— 已移至工作流看板选择，此处仅保留写入
+  async function saveShotsModeAware(shotsToSave: Shot[]) {
+    console.log('[STORYBOARD-SAVE] 保存 shots, 数量:', shotsToSave.length, 'mode:', shotMode)
+    try {
+      const res = await fetch(`/api/projects/${id}/steps/storyboard`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shots: shotsToSave, mode: shotMode }),
+      })
+      const data = await res.json().catch(() => null)
+      console.log('[STORYBOARD-SAVE] API 响应:', res.status, data)
+    } catch (err: any) {
+      console.error('[STORYBOARD-SAVE] 保存失败:', err?.message || err)
+    }
+  }
+
+  const isLoading = projectLoading || storyboardLoading
+  const hasError = projectError || storyboardError
+
+  // Phase 3: 解读并导出分镜（支持 JSON / Excel 双格式）
+  function handleExport(format: 'json' | 'excel') {
+    console.log('[STORYBOARD-EXPORT] handler触发, format:', format)
+    if (typeof window === 'undefined') {
+      console.log('[STORYBOARD-EXPORT] SSR环境，跳过')
+      return
+    }
+
+    const projectName = projectRes?.project?.title || 'project'
+    console.log('[STORYBOARD-EXPORT] projectName:', projectName, 'shots数量:', localShots.length, 'mode:', shotMode)
+
+    const data = {
+      projectName,
+      exportType: 'storyboard',
+      mode: shotMode,
+      exportTime: new Date().toISOString(),
+      totalShots: localShots.length,
+      shots: localShots.map((shot, index) => ({
+        镜头序号: index + 1,
+        镜头描述: shot.description || '',
+        运镜方式: shot.cameraMove || '',
+        时长: shot.duration || '',
+        角色: (shot.characters || []).join(', '),
+        图片URL: shotMode === 'reference' ? (shot.referenceImageUrl || '') : (shot.firstFrameUrl || ''),
+        尾帧URL: shot.lastFrameUrl || '',
+      }))
+    }
+
+    if (format === 'json') {
+      try {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${projectName}_分镜解读_${new Date().toISOString().slice(0, 10)}.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        console.log('[STORYBOARD-EXPORT] JSON 下载触发成功')
+      } catch (err: any) {
+        console.error('[STORYBOARD-EXPORT] JSON 导出失败:', err?.message || err)
+      }
+    } else if (format === 'excel') {
+      try {
+        const worksheetData = data.shots
+        const worksheet = XLSX.utils.json_to_sheet(worksheetData)
+
+        const colWidths = [
+          { wch: 8 },  // 镜头序号
+          { wch: 40 }, // 镜头描述
+          { wch: 12 }, // 运镜方式
+          { wch: 8 },  // 时长
+          { wch: 12 }, // 角色
+          { wch: 60 }, // 图片URL
+          { wch: 60 }, // 尾帧URL
+        ]
+        worksheet['!cols'] = colWidths
+
+        const workbook = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(workbook, worksheet, '分镜表')
+
+        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
+        const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${projectName}_分镜解读_${new Date().toISOString().slice(0, 10)}.xlsx`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        console.log('[STORYBOARD-EXPORT] Excel 下载触发成功')
+      } catch (err: any) {
+        console.error('[STORYBOARD-EXPORT] Excel 导出失败:', err?.message || err)
+      }
+    }
+  }
+
+  // 按钮显示条件：分镜已完成且有镜头数据
+  const hasShots = localShots.length > 0
+  // 是否有至少一个镜头带图片
+  const hasAnyImage = localShots.some(s =>
+    shotMode === 'reference' ? s.referenceImageUrl : s.firstFrameUrl
+  )
+
+  console.log('[STORYBOARD-EXPORT] 渲染诊断: hasShots=', hasShots, 'hasAnyImage=', hasAnyImage, 'shotMode=', shotMode)
+
+  return (
+    <div className="mx-auto max-w-7xl">
+      {/* 顶部导航 */}
+      <div className="mb-6 flex items-center gap-3">
+        <Link
+          href={`/project/${id}`}
+          className="flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-700"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          返回项目
+        </Link>
+        <span className="text-stone-300">/</span>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-stone-700">
+          <Film className="h-4 w-4 text-amber-600" />
+          分镜编辑器
+        </span>
+      </div>
+
+      {/* 页面标题 + 模式标签（只读）+ 导出按钮 + 视图切换 */}
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-stone-800">
+            {projectRes?.project?.title || '分镜编辑器'}
+          </h1>
+          <p className="mt-1 text-sm text-stone-500">
+            {localShots.length > 0
+              ? `共 ${localShots.length} 个镜头`
+              : '管理、编辑和预览分镜'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* [WORKFLOW-FIX] 模式标签（只读）— 切换需回到工作流看板 */}
+          <div className="flex items-center rounded-lg border border-stone-200 bg-white px-3 py-1.5 shadow-sm">
+            <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${
+              shotMode === 'reference' ? 'text-emerald-600' : 'text-amber-600'
+            }`}>
+              <Film className="h-3.5 w-3.5" />
+              当前：{shotMode === 'reference' ? '实拍参考模式' : '视频生成模式'}
+            </span>
+          </div>
+
+          {/* 📥 解读并导出分镜按钮 — JSON + Excel 双格式 */}
+          {hasShots && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleExport('json')}
+                disabled={!hasShots}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+                  hasAnyImage
+                    ? 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50'
+                    : 'border-stone-200 bg-stone-50 text-stone-400 cursor-not-allowed'
+                }`}
+              >
+                <FileJson className="h-4 w-4" />
+                JSON
+              </button>
+              <button
+                onClick={() => handleExport('excel')}
+                disabled={!hasShots}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+                  hasAnyImage
+                    ? 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50'
+                    : 'border-stone-200 bg-stone-50 text-stone-400 cursor-not-allowed'
+                }`}
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Excel
+              </button>
+            </div>
+          )}
+
+          {/* 视图切换 */}
+          <div className="flex items-center rounded-lg border border-stone-200 bg-white p-1 shadow-sm">
+            <button
+              onClick={() => setViewMode('table')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                viewMode === 'table'
+                  ? 'bg-stone-900 text-white'
+                  : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'
+              }`}
+            >
+              <Table2 className="h-4 w-4" />
+              表格视图
+            </button>
+            <button
+              onClick={() => setViewMode('canvas')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                viewMode === 'canvas'
+                  ? 'bg-stone-900 text-white'
+                  : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'
+              }`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+              画布视图
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 加载状态 */}
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-stone-200 bg-white py-20 shadow-sm">
+          <Loader2 className="h-8 w-8 animate-spin text-amber-600" />
+          <p className="mt-3 text-sm text-stone-500">加载分镜数据中...</p>
+        </div>
+      )}
+
+      {/* 错误状态 */}
+      {hasError && !isLoading && (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-red-200 bg-red-50 py-20">
+          <AlertCircle className="h-10 w-10 text-red-400" />
+          <p className="mt-3 text-sm font-medium text-red-700">加载失败</p>
+          <p className="mt-1 text-xs text-red-500">请检查网络连接后刷新页面</p>
+        </div>
+      )}
+
+      {/* 内容区 */}
+      {!isLoading && !hasError && (
+        <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
+          {viewMode === 'table' ? (
+            <StoryboardTable
+              shots={localShots}
+              assets={assets}
+              characterMap={characterMap}
+              projectId={id}
+              onShotsChange={handleShotsChange}
+              mode={shotMode}
+            />
+          ) : (
+            <StoryboardCanvas
+              shots={localShots}
+              assets={assets}
+              mode={shotMode}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ============================================================
+// FILE: app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable.tsx
+// ============================================================
+
+'use client'
+
+import { useState } from 'react'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { GripVertical, Image as ImageIcon, Trash2, Maximize2 } from 'lucide-react'
+import ImageLightbox from '@/components/generation/ImageLightbox'
+
+export interface Shot {
+  shotId: string
+  actNumber: number
+  sceneName: string
+  description: string
+  cameraMove: string
+  duration: number
+  characters: string[]
+  keyAction: string
+  actionChange?: string
+  // Phase 1/2: 双模式扩展字段（兼容旧数据）
+  mode?: 'reference' | 'keyframe'
+  referenceImageUrl?: string  // 实拍参考模式产出（原代表画面）
+  firstFrameUrl?: string      // 视频生成模式产出（原起始帧）
+  lastFrameUrl?: string       // 生成尾帧模式产出（尾帧）
+}
+
+export interface Asset {
+  id: string
+  url: string
+  metadata?: {
+    shotId?: string
+    [key: string]: unknown
+  }
+}
+
+interface StoryboardTableProps {
+  shots: Shot[]
+  assets: Asset[]
+  characterMap: Record<string, string>
+  projectId: string
+  onShotsChange: (shots: Shot[]) => void
+  mode: 'reference' | 'keyframe'  // Phase 2
+}
+
+const CAMERA_MOVES = ['推镜头', '拉镜头', '摇镜头', '移镜头', '跟镜头', '升镜头', '降镜头', '固定']
+const DURATIONS = [3, 5, 7]
+
+/* ============================================================
+   可排序行
+   ============================================================ */
+
+function SortableRow({
+  shot,
+  asset,
+  characterMap,
+  onUpdate,
+  onDelete,
+  mode,
+}: {
+  shot: Shot
+  asset?: Asset
+  characterMap: Record<string, string>
+  onUpdate: (updated: Shot) => void
+  onDelete: (shotId: string) => void
+  mode: 'reference' | 'keyframe'
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: shot.shotId })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  const [editingDesc, setEditingDesc] = useState(false)
+  const [descValue, setDescValue] = useState(shot.description)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+
+  function saveDesc() {
+    setEditingDesc(false)
+    if (descValue !== shot.description) {
+      onUpdate({ ...shot, description: descValue })
+    }
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-3 rounded-lg border bg-white p-3 transition ${
+        isDragging ? 'border-amber-300 shadow-lg' : 'border-stone-200'
+      }`}
+    >
+      {/* 拖拽手柄 */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="shrink-0 cursor-grab rounded p-1 text-stone-400 transition hover:bg-stone-100 active:cursor-grabbing"
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+
+      {/* 缩略图 — 模式特定 */}
+      <div className="group relative shrink-0">
+        {mode === 'reference' ? (
+          <>
+            {shot.referenceImageUrl ? (
+              <>
+                <img
+                  src={shot.referenceImageUrl}
+                  alt="代表画面"
+                  className="h-16 w-24 cursor-zoom-in rounded-md object-cover"
+                  loading="lazy"
+                  onClick={() => setLightboxOpen(true)}
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.onerror = null;
+                    target.style.display = 'none';
+                    const placeholder = document.createElement('div');
+                    placeholder.className = 'flex h-16 w-24 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500';
+                    placeholder.textContent = '加载失败';
+                    target.parentNode?.insertBefore(placeholder, target.nextSibling);
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 transition group-hover:bg-black/20">
+                  <Maximize2 className="h-3.5 w-3.5 scale-90 text-white opacity-0 transition group-hover:scale-100 group-hover:opacity-100" />
+                </div>
+              </>
+            ) : (
+              <div className="flex h-16 w-24 items-center justify-center rounded-md bg-stone-100">
+                <ImageIcon className="h-5 w-5 text-stone-300" />
+              </div>
+            )}
+            <span className="absolute bottom-0.5 left-0.5 rounded bg-amber-600 px-1 text-[9px] text-white">参考</span>
+          </>
+        ) : (
+          <>
+            {shot.firstFrameUrl ? (
+              <>
+                <img
+                  src={shot.firstFrameUrl}
+                  alt="起始帧"
+                  className="h-16 w-24 cursor-zoom-in rounded-md object-cover"
+                  loading="lazy"
+                  onClick={() => setLightboxOpen(true)}
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.onerror = null;
+                    target.style.display = 'none';
+                    const placeholder = document.createElement('div');
+                    placeholder.className = 'flex h-16 w-24 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500';
+                    placeholder.textContent = '加载失败';
+                    target.parentNode?.insertBefore(placeholder, target.nextSibling);
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 transition group-hover:bg-black/20">
+                  <Maximize2 className="h-3.5 w-3.5 scale-90 text-white opacity-0 transition group-hover:scale-100 group-hover:opacity-100" />
+                </div>
+              </>
+            ) : (
+              <div className="flex h-16 w-24 items-center justify-center rounded-md bg-stone-100">
+                <ImageIcon className="h-5 w-5 text-stone-300" />
+              </div>
+            )}
+            <span className="absolute bottom-0.5 left-0.5 rounded bg-blue-600 px-1 text-[9px] text-white">首帧</span>
+          </>
+        )}
+      </div>
+
+      {/* Shot ID */}
+      <div className="w-20 shrink-0 font-mono text-xs text-stone-500">
+        {shot.shotId}
+      </div>
+
+      {/* 描述（可编辑） */}
+      <div className="min-w-0 flex-1">
+        {editingDesc ? (
+          <textarea
+            value={descValue}
+            onChange={(e) => setDescValue(e.target.value)}
+            onBlur={saveDesc}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                saveDesc()
+              }
+              if (e.key === 'Escape') {
+                setEditingDesc(false)
+                setDescValue(shot.description)
+              }
+            }}
+            className="w-full resize-none rounded-md border border-stone-300 p-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            autoFocus
+            rows={2}
+          />
+        ) : (
+          <p
+            onClick={() => {
+              setEditingDesc(true)
+              setDescValue(shot.description)
+            }}
+            className="cursor-text rounded p-1 text-sm leading-relaxed text-stone-600 transition hover:bg-stone-50"
+          >
+            {shot.description}
+          </p>
+        )}
+      </div>
+
+      {/* 运镜下拉 */}
+      <select
+        value={shot.cameraMove}
+        onChange={(e) => onUpdate({ ...shot, cameraMove: e.target.value })}
+        className="w-20 shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 focus:border-amber-500 focus:outline-none"
+      >
+        {CAMERA_MOVES.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+
+      {/* 时长下拉 */}
+      <select
+        value={shot.duration}
+        onChange={(e) => onUpdate({ ...shot, duration: Number(e.target.value) })}
+        className="w-14 shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 focus:border-amber-500 focus:outline-none"
+      >
+        {DURATIONS.map((d) => (
+          <option key={d} value={d}>
+            {d}s
+          </option>
+        ))}
+      </select>
+
+      {/* 角色 Badge */}
+      <div className="flex w-28 shrink-0 flex-wrap gap-1">
+        {shot.characters.map((cid) => (
+          <span
+            key={cid}
+            className="truncate rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-600"
+            title={characterMap[cid] || cid}
+          >
+            {characterMap[cid] || cid}
+          </span>
+        ))}
+      </div>
+
+      {/* 删除操作 */}
+      <button
+        onClick={() => onDelete(shot.shotId)}
+        disabled
+        title="删除功能将在后续版本开放"
+        className="shrink-0 rounded p-1.5 text-stone-300 transition hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+
+      {/* 图片灯箱 — 模式特定 */}
+      {mode === 'reference' && shot.referenceImageUrl && (
+        <ImageLightbox
+          src={shot.referenceImageUrl}
+          alt={shot.description}
+          isOpen={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
+      {mode === 'keyframe' && shot.firstFrameUrl && (
+        <ImageLightbox
+          src={shot.firstFrameUrl}
+          alt={shot.description}
+          isOpen={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+/* ============================================================
+   表格视图主组件
+   ============================================================ */
+
+export default function StoryboardTable({
+  shots,
+  assets,
+  characterMap,
+  projectId,
+  onShotsChange,
+  mode,
+}: StoryboardTableProps) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  async function saveShots(nextShots: Shot[]) {
+    console.log('[STORYBOARD-SAVE] 保存 shots, 数量:', nextShots.length)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/storyboard`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shots: nextShots }),
+      })
+      const data = await res.json().catch(() => null)
+      console.log('[STORYBOARD-SAVE] API 响应:', res.status, data)
+    } catch (err: any) {
+      console.error('[STORYBOARD-SAVE] 保存失败:', err?.message || err)
+    }
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      const oldIndex = shots.findIndex((s) => s.shotId === active.id)
+      const newIndex = shots.findIndex((s) => s.shotId === over.id)
+      const next = arrayMove(shots, oldIndex, newIndex)
+      onShotsChange(next)
+      saveShots(next)
+    }
+  }
+
+  function handleUpdateShot(updated: Shot) {
+    const next = shots.map((s) => (s.shotId === updated.shotId ? updated : s))
+    onShotsChange(next)
+    saveShots(next)
+  }
+
+
+// ===== [截断] 原文件共 406 行，此处截取前 350 行用于软著材料 =====
+
+// ============================================================
+// FILE: components/ui/ClickToEdit.tsx
+// ============================================================
+
+'use client'
+
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { cn } from '@/lib/utils'
+
+interface ClickToEditProps {
+  value: string
+  onSave: (newValue: string) => void
+  multiline?: boolean
+  className?: string
+  placeholder?: string
+}
+
+export function ClickToEdit({ value, onSave, multiline = true, className, placeholder }: ClickToEditProps) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState(value)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // 进入编辑状态时聚焦并调整高度
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      textareaRef.current.focus()
+      // 将光标移到末尾
+      const len = editValue.length
+      textareaRef.current.setSelectionRange(len, len)
+      // 自适应高度
+      adjustHeight(textareaRef.current)
+    }
+  }, [isEditing])
+
+  // 自适应高度函数
+  const adjustHeight = useCallback((el: HTMLTextAreaElement) => {
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [])
+
+  const handleBlur = () => {
+    setIsEditing(false)
+    if (editValue !== value) {
+      onSave(editValue)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setEditValue(value) // 取消编辑，恢复原值
+      setIsEditing(false)
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !multiline) {
+      e.preventDefault()
+      handleBlur()
+    }
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setEditValue(e.target.value)
+    adjustHeight(e.target)
+  }
+
+  if (isEditing) {
+    return (
+      <textarea
+        ref={textareaRef}
+        value={editValue}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          "w-full resize-none border rounded-md p-2 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-black/10 bg-white",
+          className
+        )}
+        style={{ minHeight: '40px', maxHeight: '300px' }}
+        placeholder={placeholder}
+      />
+    )
+  }
+
+  return (
+    <div
+      onClick={() => setIsEditing(true)}
+      className={cn(
+        "cursor-text hover:bg-stone-50 rounded-md p-1 -m-1 transition-colors group",
+        !value && "text-stone-400 italic",
+        className
+      )}
+      title="点击编辑"
+    >
+      <span className="group-hover:underline decoration-dotted underline-offset-2">
+        {value || placeholder || '点击编辑...'}
+      </span>
+    </div>
+  )
+}
+
+
+// ============================================================
+// FILE: app/(dashboard)/dashboard/page.tsx
+// ============================================================
+
+import { redirect } from 'next/navigation'
+import { prisma } from '@/lib/prisma'
+import { WORKFLOW_STEPS } from '@/lib/workflow'
+import { getCurrentUser } from '@/lib/auth-helpers'
+import Link from 'next/link'
+import {
+  PlusCircle,
+  FolderOpen,
+  ImageIcon,
+  Video,
+  BarChart3,
+  Clock,
+  Film,
+} from 'lucide-react'
+import ProjectList from './_components/ProjectList'
+
+function getStartOfWeek(date: Date): Date {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day
+  d.setDate(diff)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function getProgressText(steps: { order: number; status: string }[]): string {
+  if (steps.length === 0) return '刚创建'
+  const maxCompleted = Math.max(
+    -1,
+    ...steps
+      .filter((s) => s.status === 'COMPLETED' || s.status === 'SKIPPED')
+      .map((s) => s.order)
+  )
+  const currentOrder = maxCompleted + 1
+  if (currentOrder >= WORKFLOW_STEPS.length) return '已完成'
+  const step = WORKFLOW_STEPS[currentOrder]
+  return `第 ${currentOrder + 1} 步：${step.label}`
+}
+
+export default async function DashboardPage() {
+  const user = await getCurrentUser()
+  if (!user) redirect('/login')
+
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+  const [activeProjectsCount, weeklyAssetsCount, videoAssetsCount, userAssets] =
+    await Promise.all([
+      prisma.project.count({ where: { status: 'ACTIVE' } }),
+      prisma.asset.count({
+        where: {
+          createdAt: { gte: weekAgo },
+        },
+      }),
+      prisma.asset.count({
+        where: {
+          type: 'VIDEO',
+        },
+      }),
+      prisma.asset.findMany({
+        select: { id: true, projectId: true },
+      }),
+    ])
+
+  const evaluationsCount = userAssets.length > 0
+    ? await prisma.evaluation.count({
+        where: { assetId: { in: userAssets.map((a) => a.id) } },
+      })
+    : 0
+
+  const projects = await prisma.project.findMany({
+    where: { status: 'ACTIVE' },
+    orderBy: { updatedAt: 'desc' },
+    take: 20,
+    include: {
+      _count: { select: { assets: true } },
+      steps: { select: { order: true, status: true } },
+    },
+  })
+
+  const stats = [
+    { label: '进行中的项目', value: activeProjectsCount, icon: FolderOpen, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: '本周生成资产', value: weeklyAssetsCount, icon: ImageIcon, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: '已完成视频片段', value: videoAssetsCount, icon: Video, color: 'text-violet-600', bg: 'bg-violet-50' },
+    { label: '最近评测次数', value: evaluationsCount, icon: BarChart3, color: 'text-amber-600', bg: 'bg-amber-50' },
+  ]
+
+  return (
+    <div className="space-y-8">
+      {/* 顶部欢迎 + 新建按钮 */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-stone-800">
+            欢迎回来，{user.name || '创作者'}
+          </h1>
+          <p className="mt-1 text-sm text-stone-500">管理你的 AI 影视创作项目</p>
+        </div>
+        <Link
+          href="/project/new"
+          className="inline-flex items-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-stone-800"
+        >
+          <PlusCircle className="h-4 w-4" />
+          新建项目
+        </Link>
+      </div>
+
+      {/* 统计卡片 */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {stats.map((s) => {
+          const Icon = s.icon
+          return (
+            <div
+              key={s.label}
+              className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm"
+            >
+              <div className="flex items-center gap-3">
+                <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${s.bg}`}>
+                  <Icon className={`h-4 w-4 ${s.color}`} />
+                </div>
+                <div>
+                  <p className="text-xs text-stone-500">{s.label}</p>
+                  <p className="text-xl font-bold text-stone-800">{s.value}</p>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* 项目列表 */}
+      <div>
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-stone-500">
+          最近项目
+        </h2>
+
+        {projects.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-stone-300 bg-white py-16 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-stone-100">
+              <Film className="h-7 w-7 text-stone-400" />
+            </div>
+            <h3 className="mt-4 text-base font-semibold text-stone-700">
+              开始你的第一个 AI 影视项目
+            </h3>
+            <p className="mt-1 max-w-sm text-sm text-stone-500">
+              输入灵感，让 AI 帮你完成从创意到成片的全流程创作
+            </p>
+            <Link
+              href="/project/new"
+              className="mt-5 inline-flex items-center gap-2 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-800"
+            >
+              <PlusCircle className="h-4 w-4" />
+              新建项目
+            </Link>
+          </div>
+        ) : (
+          <ProjectList
+            initialProjects={projects.map((p) => ({
+              id: p.id,
+              title: p.title,
+              rawIdea: p.rawIdea,
+              createdAt: new Date(p.createdAt).toISOString(),
+              assetCount: p._count.assets,
+              progressText: getProgressText(p.steps),
+            }))}
+          />
+        )}
+      </div>
+    </div>
+  )
+}

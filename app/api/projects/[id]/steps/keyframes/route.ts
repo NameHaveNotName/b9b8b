@@ -1,0 +1,368 @@
+import { NextResponse } from 'next/server'
+import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { prisma } from '@/lib/prisma'
+import { getTextClient, getImageClient } from '@/lib/api-clients'
+import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getStyleRefUrl } from '@/lib/style-ref'
+import { IMAGE_MODELS } from '@/lib/models-config'
+
+export async function POST(_req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+
+  // Demo 模式：允许操作 demo 用户的项目
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  if (!await canExecuteStep(params.id, 'KEYFRAMES')) {
+    return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
+  }
+
+  const storyboardStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } }
+  })
+  if (!storyboardStep || storyboardStep.status !== 'COMPLETED') {
+    return NextResponse.json({ error: 'WORKFLOW_003' }, { status: 400 })
+  }
+
+  // Phase 4: 从分镜设计读取起始帧
+  const storyboardShots = (storyboardStep.outputData as any)?.shots || []
+  const shotsWithFirstFrame = storyboardShots.filter((s: any) => s.firstFrameUrl)
+  if (shotsWithFirstFrame.length === 0) {
+    return NextResponse.json(
+      { error: 'WORKFLOW_005', message: '请先完成分镜设计的视频生成模式，生成起始帧' },
+      { status: 400 }
+    )
+  }
+
+  let step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'KEYFRAMES' } }
+  })
+  if (!step) {
+    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
+  }
+
+  if (step.status === 'COMPLETED' && step.outputData) {
+    console.log('[KEYFRAMES] step already completed, returning cached result')
+    return NextResponse.json({ success: true, data: step.outputData, cached: true })
+  }
+
+  const body = await _req.json().catch(() => ({}))
+  const force = body?.force === true
+  const action: 'generate-prompts' | 'generate-images' = body?.action || 'generate-images'
+
+  // === generate-prompts: 只生成尾帧提示词，不生图 ===
+  if (action === 'generate-prompts') {
+    try {
+      console.log('[KEYFRAMES-PROMPT] 收到 generate-prompts 请求')
+
+      const imageClient = await getImageClient()
+      const textClient = await getTextClient()
+
+      let styleRefUrl: string
+      let selectedStylePrompt: string
+      try {
+        const ref = await getStyleRefUrl(params.id)
+        styleRefUrl = ref.styleRefUrl
+        selectedStylePrompt = ref.stylePrompt ||
+          'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
+      } catch (refErr: any) {
+        console.error('[KEYFRAMES-PROMPT] 风格图提取失败：', refErr?.message)
+        return NextResponse.json(
+          { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图 URL' },
+          { status: 400 }
+        )
+      }
+
+      const prompts = []
+      for (const shot of shotsWithFirstFrame) {
+        const lastPrompt = loadPromptTemplate('keyframe-last', {
+          STYLE_REF: selectedStylePrompt,
+          USER_INPUT: shot.description || `${shot.shotId} - ${shot.sceneName}`,
+        })
+        const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024 })
+        const parsedLast = extractJsonFromMarkdown(lastPromptText)
+        const lastImagePrompt = parsedLast.keyframe?.imagePrompt || lastPromptText
+
+        prompts.push({
+          id: `prompt_${shot.shotId}`,
+          chineseDesc: shot.description || '',
+          englishPrompt: lastImagePrompt,
+          target: `keyframe_${shot.shotId}_last`,
+          shotId: shot.shotId,
+          firstFrameUrl: shot.firstFrameUrl || '',
+        })
+      }
+
+      await prisma.workflowStep.update({
+        where: { id: step.id },
+        data: {
+          status: 'PENDING' as any,
+          outputData: {
+            ...(step.outputData as any || {}),
+            prompts,
+            keyframes: shotsWithFirstFrame.map((s: any) => ({
+              shotId: s.shotId,
+              firstFrameUrl: s.firstFrameUrl,
+              description: s.description,
+            })),
+          },
+        },
+      })
+
+      console.log(`[KEYFRAMES-PROMPT] 生成 ${prompts.length} 条提示词，等待用户确认`)
+      return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
+    } catch (e: any) {
+      await failStep(step.id, e.message)
+      return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+    }
+  }
+
+  // === generate-images: 读取已保存提示词，执行生图 ===
+  if (action === 'generate-images') {
+    const aspectRatio = body?.aspectRatio || '16:9'
+    const imageModel = body?.imageModel
+    console.log(`[ASPECT-RATIO] [KEYFRAMES-IMAGE] 用户选择比例: ${aspectRatio}`)
+    console.log(`[MODEL-SELECT] [KEYFRAMES-IMAGE] 用户选择模型: ${imageModel || '默认'}`)
+
+    const existingOutput = (step.outputData as any) || {}
+    const prompts = existingOutput.prompts || []
+    if (prompts.length === 0) {
+      return NextResponse.json({ error: 'No prompts found. Please call generate-prompts first.' }, { status: 400 })
+    }
+
+    if (force) {
+      console.log('[KEYFRAMES-IMAGE] force=true, clearing old assets')
+      await prisma.asset.deleteMany({
+        where: { projectId: params.id, step: { stepType: 'KEYFRAMES' } }
+      })
+      await prisma.workflowStep.update({
+        where: { id: step.id },
+        data: { status: 'PENDING' as any, outputData: existingOutput, errorMessage: null },
+      })
+    }
+
+    await startStep(step.id)
+
+    try {
+      let styleRefUrl: string
+      let selectedStylePrompt: string
+      try {
+        const ref = await getStyleRefUrl(params.id)
+        styleRefUrl = ref.styleRefUrl
+        selectedStylePrompt = ref.stylePrompt ||
+          'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
+      } catch (refErr: any) {
+        console.error('[KEYFRAMES-IMAGE] 风格图提取失败：', refErr?.message)
+        return NextResponse.json(
+          { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图 URL' },
+          { status: 400 }
+        )
+      }
+
+      const imageClient = await getImageClient()
+      const results = []
+
+      for (const promptItem of prompts) {
+        const lastResult = await imageClient.generateKeyframe(
+          params.id,
+          promptItem.englishPrompt,
+          styleRefUrl,
+          'last',
+          aspectRatio,
+          imageModel
+        )
+        const lastAsset = await prisma.asset.create({
+          data: {
+            projectId: params.id,
+            stepId: step.id,
+            type: 'IMAGE',
+            mimeType: 'image/png',
+            storageKey: `projects/${params.id}/keyframes/${promptItem.shotId}_last.png`,
+            url: lastResult.url,
+            metadata: {
+              pairId: promptItem.shotId,
+              frameType: 'last',
+              sceneDesc: promptItem.chineseDesc,
+              llmPrompt: promptItem.englishPrompt,
+              aspectRatio,
+            },
+          }
+        })
+
+        results.push({
+          shotId: promptItem.shotId,
+          firstFrameUrl: promptItem.firstFrameUrl || '',
+          lastFrameUrl: lastResult.url,
+          description: promptItem.chineseDesc,
+          actionChange: '',
+        })
+      }
+
+      await completeStep(step.id, { results, keyframes: results, count: results.length, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary })
+      console.log(`[KEYFRAMES-IMAGE] 用户确认，开始生图，共 ${prompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
+      return NextResponse.json({ success: true, data: { results, count: results.length } })
+    } catch (e: any) {
+      await failStep(step.id, e.message)
+      return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+    }
+  }
+
+  // === 默认兼容：无 action 时走原有完整流程 ===
+
+  try {
+    const imageClient = await getImageClient()
+    const textClient = await getTextClient()
+
+    // 获取选定的风格参考图 URL + 风格提示词
+    let styleRefUrl: string
+    let selectedStylePrompt: string
+    try {
+      const ref = await getStyleRefUrl(params.id)
+      styleRefUrl = ref.styleRefUrl
+      selectedStylePrompt = ref.stylePrompt ||
+        'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
+      console.log('[KEYFRAMES-READ] 读取到 styleRefUrl 前80字符:', styleRefUrl.slice(0, 80))
+    } catch (refErr: any) {
+      console.error('[KEYFRAMES-READ] 校验失败：', refErr?.message)
+      return NextResponse.json(
+        { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图 URL' },
+        { status: 400 }
+      )
+    }
+
+    const results = []
+
+    for (const shot of shotsWithFirstFrame) {
+      // Phase 4: 尾帧 — 基于起始帧 + 动作变化生成
+      const lastPrompt = loadPromptTemplate('keyframe-last', {
+        STYLE_REF: selectedStylePrompt,
+        USER_INPUT: shot.description || `${shot.shotId} - ${shot.sceneName}`,
+      })
+      const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024 })
+      const parsedLast = extractJsonFromMarkdown(lastPromptText)
+      const lastImagePrompt = parsedLast.keyframe?.imagePrompt || lastPromptText
+
+      // Phase 4: 只生成尾帧（起始帧作为只读参考从分镜设计读取）
+      const lastResult = await imageClient.generateKeyframe(
+        params.id,
+        lastImagePrompt,
+        styleRefUrl,
+        'last'
+      )
+      const lastAsset = await prisma.asset.create({
+        data: {
+          projectId: params.id,
+          stepId: step.id,
+          type: 'IMAGE',
+          mimeType: 'image/png',
+          storageKey: `projects/${params.id}/keyframes/${shot.shotId}_last.png`,
+          url: lastResult.url,
+          metadata: { pairId: shot.shotId, frameType: 'last', sceneDesc: shot.description, llmPrompt: lastPromptText },
+        }
+      })
+
+      results.push({
+        shotId: shot.shotId,
+        firstFrameUrl: shot.firstFrameUrl,  // Phase 4: 只读引用，来自分镜设计
+        lastFrameUrl: lastResult.url,
+        description: shot.description,
+        actionChange: '',
+      })
+    }
+
+    console.log(`[KEYFRAMES-xxx] 尾帧生成完成, 数量: ${results.length}`)
+    await completeStep(step.id, { results, keyframes: results, count: results.length })
+    return NextResponse.json({ success: true, data: { results, count: results.length } })
+  } catch (e: any) {
+    await failStep(step.id, e.message)
+    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+  }
+}
+
+export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: params.id } })
+  const isOwner = project?.userId === session.user.id
+  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
+
+  if (!project || (!isOwner && !isDemoProject)) {
+    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  }
+
+  const body = await req.json().catch(() => ({}))
+
+  const step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'KEYFRAMES' } }
+  })
+  if (!step) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  const outputData = (step.outputData as any) || {}
+  const nextOutput: any = { ...outputData }
+
+  // 支持 keyframes 数组保存（原有逻辑）
+  if (Array.isArray(body.keyframes)) {
+    nextOutput.keyframes = body.keyframes
+    console.log(`[KEYFRAMES-PATCH] 保存 keyframes, 项目=${params.id}, 数量=${body.keyframes.length}`)
+  }
+
+  // 工作指令.txt（2026-05-24）：支持 prompts 数组保存（提示词行内编辑）
+  if (Array.isArray(body.prompts)) {
+    nextOutput.prompts = body.prompts
+    console.log(`[TEXT-EDIT-KEYFRAMES] 保存 prompts 成功, 数量=${body.prompts.length}`)
+  }
+
+  await prisma.workflowStep.update({
+    where: { id: step.id },
+    data: { outputData: nextOutput }
+  })
+
+  return NextResponse.json({ success: true })
+}
+
+export async function GET(_req: Request, { params }: { params: { id: string } }) {
+  const step = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'KEYFRAMES' } },
+    include: { resultAssets: true }
+  })
+  if (!step) return NextResponse.json({ status: 'not_found' })
+
+  // Phase 4: 合并分镜设计的起始帧到输出数据
+  const storyboardStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } }
+  })
+  const storyboardShots = (storyboardStep?.outputData as any)?.shots || []
+  const shotFirstFrames: Record<string, string> = {}
+  for (const s of storyboardShots) {
+    if (s.firstFrameUrl) shotFirstFrames[s.shotId] = s.firstFrameUrl
+  }
+
+  const outputData = step.outputData as any || {}
+  const keyframes = outputData.keyframes || outputData.results || []
+  // 注入首帧引用
+  const enrichedKeyframes = keyframes.map((kf: any) => ({
+    ...kf,
+    firstFrameUrl: kf.firstFrameUrl || shotFirstFrames[kf.shotId] || '',
+  }))
+
+  return NextResponse.json({
+    status: step.status,
+    outputData: { ...outputData, keyframes: enrichedKeyframes },
+    assets: step.resultAssets,
+  })
+}

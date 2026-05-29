@@ -1,0 +1,42 @@
+[R2] DEMO 模式：R2 凭据为占位符，使用 public/mock-storage/ 本地兜底
+◇ injected env (0) from .env.local // tip: ◈ secrets for agents [www.dotenvx.com]
+[VIDEO-ROUTE-FIX] ==========================================
+[VIDEO-ROUTE-FIX] 视频模型首尾帧能力测试（修正版）
+[VIDEO-ROUTE-FIX] 复用 lib/api-clients/xiaomi.ts 异步协议函数
+[VIDEO-ROUTE-FIX] ==========================================
+[VIDEO-ROUTE-FIX] ✅ 已确认，开始真实测试
+[VIDEO-ROUTE-FIX] 首帧图: public/mock-storage/projects/temp/concepts/concept_1778157832196.png ✅
+[VIDEO-ROUTE-FIX] 尾帧图: public/mock-storage/projects/temp/concepts/concept_1778157884110.png ✅
+
+[VIDEO-ROUTE-FIX] ==================== 测试 Hailuo (MiniMax-Hailuo-02) ====================
+[VIDEO-ROUTE-FIX] Hailuo 模式 A：首尾帧 + 提示词
+[BASE64] 读取本地文件: public/mock-storage/projects/temp/concepts/concept_1778157832196.png
+[HAILUO] first_frame_image Base64 长度: 1214678
+[BASE64] 读取本地文件: public/mock-storage/projects/temp/concepts/concept_1778157884110.png
+[HAILUO] last_frame_image Base64 长度: 1491634
+[HAILUO-SUBMIT] → {"model":"MiniMax-Hailuo-02","prompt":"A cinematic shot, camera slowly moves from the first frame composition to the second frame composition, maintaining consistent lighting and color grading","first_frame_image":"data:image/png;base64,/9j/6wDCQUlHQ3siTGFiZWwiOiIxIiwiQ29udGVudFByb2R1Y2VyIjoiMDAxMTkxMTEwMTA4TUEwMVI3MEs4RDEwMDAwIiwiUHJvZHVjZUlEIjoiMjAyNjA1MDcyMDQzMzlEREYxQ0NENzNCMTE5MjM0NkVENCIsIlJlc2VydmVkQ29kZTEiOiIiLCJDb250ZW50UHJvcGFnYXRvciI6IiIsIlByb3BhZ2F0ZUlEIjoiIiwiUmVzZXJ2ZWRDb2RlMiI6IiJ
+[HAILUO-SUBMIT] duration 适配: 5 → 6
+[HAILUO-SUBMIT] ← 200 {"task_id":"402255598961177","status":"Preparing","base_resp":{"status_code":0,"status_msg":"success"}}
+[VIDEO-ROUTE-FIX] Hailuo 提交成功 taskId=402255598961177，开始轮询...
+[HAILUO-POLL] taskId=402255598961177 status=preparing hasUrl=false url=/vip.123everything.com/minimax/v1/query/video_generation?task_id=402255598961177
+[HAILUO-POLL] taskId=402255598961177 status=processing hasUrl=false url=/vip.123everything.com/minimax/v1/query/video_generation?task_id=402255598961177
+[HAILUO-POLL] taskId=402255598961177 status=success hasUrl=true fileId=402144633930025 url=/vip.123everything.com/minimax/v1/query/video_generation?task_id=402255598961177
+[VIDEO-ROUTE-FIX] Hailuo 模式 A ✅ 成功！耗时 228.4s
+[VIDEO-ROUTE-FIX] 视频 URL: https://public-cdn-video-data-algeng.oss-cn-wulanchabu.aliyuncs.com/inference_ou...
+
+[VIDEO-ROUTE-FIX] ==================== 测试 Jimeng（即梦）====================
+[VIDEO-ROUTE-FIX] Jimeng：仅支持 image_url（单首帧），尝试提交...
+[JIMENG-SUBMIT] 准备提交: prompt=A cinematic shot, camera slowl, image_url=http://localhost:3000/mock-storage/projects/temp/c
+[JIMENG-SUBMIT] API endpoint=https://vip.123everything.com/jimeng/submit/videos
+[JIMENG-SUBMIT] API key exists=true, key prefix=sk-OGTmW
+[JIMENG-SUBMIT] → {"prompt":"A cinematic shot, camera slowly moves from the first frame composition to the second frame composition, maintaining consistent lighting and color grading","image_url":"http://localhost:3000/mock-storage/projects/temp/concepts/concept_1778157832196.png","duration":5,"aspect_ratio":"16:9","
+[JIMENG-SUBMIT] 响应状态: 503
+[JIMENG-SUBMIT] 响应体: {"error":{"message":"分组 default 下模型 jimeng-videos 无可用渠道（distributor） (request id: 20260526094830862899971nTSRD4me)","type":"new_api_error"}}
+[VIDEO-ROUTE-FIX] Jimeng ❌ 失败: Jimeng 失败: XiaomiAPI 503: {"error":{"message":"分组 default 下模型 jimeng-videos 无可用渠道（distributor） (request id: 20260526094830862899971nTSRD4me)","type":"new_api_error"}}
+
+[VIDEO-ROUTE-FIX] 报告已生成: .kimi/video-model-test-report.md
+
+[VIDEO-ROUTE-FIX] ========== 测试摘要 ==========
+[VIDEO-ROUTE-FIX] MiniMax-Hailuo-02: A=✅ B=❌ → usable
+[VIDEO-ROUTE-FIX] jimeng-video: A=❌ B=❌ → unavailable | error=Jimeng 失败: XiaomiAPI 503: {"error":{"message":"分组 default 下模型 jimeng-videos 无可用渠
+[VIDEO-ROUTE-FIX] ==================================

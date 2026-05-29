@@ -1,0 +1,5 @@
+{
+  "success": true,
+  "duration": 8329,
+  "preview": "{\n  \"characterConsistency\": 7.5,\n  \"lightingConsistency\": 6.0,\n  \"sceneContinuity\": 8.0,\n  \"overallScore\": 7.2,\n  \"issues\": [\n    \"角色A的服装颜色在镜头1中为深蓝色，而在镜头2中变为黑色，可能是因为光线变化或后期处理导致\",\n    \"镜头2中的剑拔出动作似乎在镜头1中雨水的背景下不连贯，可能是因为镜头切换时的动作剪辑不自然\"\n  ],\n  \"suggestions\": [\n    \"在镜头1和镜头2中统一角色A的服装颜色描述，确保其在整个场景中保持一致\",\n    \"在剪辑剑拔刀的动作时，注意保持动作的流畅性，确保与雨中场景的连贯性\"\n  ]\n}"
+}

@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env.local
+.env.*.local
+public/mock-storage/*.mp4
+public/mock-storage/*.png
+public/mock-storage/*.jpg
+*.log
+.kimi
+scripts/test-*.ts
+.temp
