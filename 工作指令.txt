@@ -1,98 +1,155 @@
-任务：配置 GitHub + Vercel 自动部署（方式 A）
+任务：修复人物设计/生图模块的 5 个前端交互与提示词问题
 
 当前状态：
-- 项目已部署到 Vercel（项目名 b9b8b，域名 b9b8b.vercel.app）
-- 代码在本地目录，尚未接入 GitHub
-- 目标：以后本地 git push 自动触发 Vercel 重新部署
+- 项目已部署至 Vercel + Supabase，数据库迁移完成
+- 问题集中在「人物设计」模块和「生图」相关组件
+- 需要排查 Mock 数据标记、提示词显示、生成参数角标、交互编辑等
 
-执行阶段：
-
-### Phase 1：Git 初始化与提交
-1. 检查项目根目录是否已有 .git：
-   - 若无：执行 git init
-   - 若有：跳过
-2. 检查 .gitignore，确保以下目录/文件已排除：
-   - node_modules/
-   - .env.local
-   - .vercel/
-   - public/mock-storage/（大文件，已迁移到 Supabase）
-   - 如缺失，补充进 .gitignore
-3. 配置 git user（如未配置）：
-   git config user.email "2627312372@qq.com"
-   git config user.name "康泽铭"
-4. 添加所有文件并提交：
-   git add .
-   git commit -m "init: project setup with Supabase + Vercel"
-5. 创建并切换到 main 分支：
-   git branch -M main
-
-### Phase 2：GitHub 仓库创建与推送
-检查系统是否安装了 GitHub CLI (gh)：
-- 若已安装：执行 gh repo create b9b8b --public --source=. --remote=origin --push
-- 若未安装：输出以下指导给用户，暂停执行等待用户反馈：
-
-【需要用户手动操作】
-1. 打开 https://github.com/new
-2. Repository name 填：b9b8b
-3. 选择 Public（或 Private，但 Private 需 Vercel Pro）
-4. 不要勾选 "Add a README" 或 ".gitignore"
-5. 点击 Create repository
-6. 复制页面上的这两行命令（HTTPS 或 SSH 均可）：
-   git remote add origin https://github.com/你的用户名/b9b8b.git
-   git push -u origin main
-7. 把命令粘贴到终端执行，或告诉我你的 GitHub 用户名，我帮你生成精确命令
-
-- 若用户提供了 GitHub 用户名和仓库名：
-   git remote add origin https://github.com/用户名/b9b8b.git
-   git push -u origin main
-
-### Phase 3：Vercel 连接 GitHub（用户手动 UI 操作）
-推送成功后，输出以下精确步骤给用户：
-
-1. 打开 Vercel Dashboard：https://vercel.com
-2. 进入项目 b9b8b → 顶部 Tab 找 "Settings" → 左侧 "Git"
-3. 点击 "Connect Git Repository" 或 "Disconnect" 后重新连接
-4. 选择 GitHub → 授权 Vercel 访问你的 GitHub 账号
-5. 选择仓库：你的用户名 / b9b8b
-6. 确认连接后，Vercel 会自动重新部署一次
-7. 以后每次执行 git push，Vercel 自动构建部署（约 1-2 分钟）
-
-### Phase 4：验证自动部署
-连接完成后，指导用户测试：
-1. 修改一个可见的小地方（如 pages/index.tsx 里的某个标题文字）
-2. git add . && git commit -m "test auto deploy" && git push
-3. 访问 https://b9b8b.vercel.app 确认更新生效
-
-重要：
-- 全程无需向我逐次确认，遇到阻塞性问题记录错误日志并汇报
-- .env.local 包含敏感信息，绝对不能 push 到 GitHub，务必确认已在 .gitignore 中
-- 如果 git push 报错（如权限、冲突），完整复制错误信息汇报
 ---
 
-[2026-05-29] ████ Round 5 开始执行 — 配置 GitHub + Vercel 自动部署
+## Phase 1：Mock 标记在重新生图后不消失
 
-### Phase 1：Git 初始化与提交 [执行中...]
+问题描述：生图结果带有「Mock」角标，点击「重新生图」后，Mock 标记仍然存在，预期是重新生成时应立即清除所有 Mock 标记。
 
-✅ Phase 1 完成：Git 初始化、.gitignore 补充、提交到 main
+排查方向：
+1. 定位「重新生图」按钮的点击事件处理函数，追踪其触发的 API 调用和状态更新链路
+2. 检查重新生图时，前端是否先清除了该资源的 mock/placeholder 状态，还是直接等待后端返回新数据后才更新
+3. 检查后端重新生成返回的数据结构中，是否仍然包含 `isMock` 或 `isPlaceholder` 标记
+4. 检查前端状态管理（React state / Zustand / Context），确认重新生图时是否显式将对应资源的 mock 状态重置为 false，或从缓存中移除旧数据
 
-### Phase 2：GitHub 仓库创建与推送 [执行中...]
+修改方向：
+- 重新生图的交互触发时，前端应立即将目标资源的 mock 标记置为 false（或移除占位样式），再发起请求
+- 如果后端返回的数据仍带 mock 标记，检查后端生成逻辑是否错误地继承了旧资源的 mock 字段
+- 确保 UI 的 mock 角标渲染条件是实时响应状态变化的，而非仅在首次加载时判断
 
-⏸️ Phase 2 暂停：gh CLI 未安装
+---
 
-【需要用户手动操作】
+## Phase 2：角色设计英文提示词缺失
 
+问题描述：部分角色设计卡片中，英文提示词（English Prompt）区域空白，未显示内容。
 
-【用户反馈】GitHub 仓库已创建：NameHaveNotName/b9b8b
-- PowerShell 无法解析 github.com，需要配置 git 代理
+排查方向：
+1. 打开 Supabase Dashboard 或本地 db.json 备份，直接检查 `character` / `asset` 表中对应记录的 `englishPrompt` / `promptEn` / `prompt` 字段是否有值
+2. 如果数据库中有值但前端不显示 → 前端渲染逻辑问题（字段名映射错误、条件渲染过早返回、或组件未传入该字段）
+3. 如果数据库中无值 → 数据生成/迁移问题（提示词生成时英文部分未保存、或迁移脚本遗漏该字段）
+4. 检查前端角色设计详情/列表组件的 Props 和类型定义，确认英文提示词字段是否被正确定义和传递
 
-### Phase 2 续：配置 git 代理并推送 [执行中...]
+修改方向：
+- 数据层缺失：在提示词生成/保存逻辑中，确保中英文提示词同时写入数据库
+- 渲染层缺失：修正组件 Props 传递链，确保英文提示词字段正确映射到展示组件
+- 如果英文提示词在部分角色上确实不存在，考虑在 UI 上显示「重新生成提示词」按钮作为兜底
 
-✅ Phase 2 完成：代码已推送到 GitHub
-- 仓库：https://github.com/NameHaveNotName/b9b8b
-- git 代理已配置并取消
+---
 
-⏸️ Phase 3：需要用户在 Vercel Dashboard 手动操作
+## Phase 3：人物设计图出现多个人物形象
 
-✅ Phase 3 完成：Vercel 已连接 GitHub 仓库
+问题描述：单个人物设计图（角色肖像）中出现了多个人物形象，且面部不完整。预期是每张设计图只包含一个完整面部的人物。
 
-⏸️ Phase 4：需要用户测试自动部署
+排查方向：
+1. 定位人物设计图的提示词生成逻辑（Prompt Engineering 层），检查当前生成的英文提示词中是否包含限制人物数量的关键词（如 single person, solo, one character, only one person）
+2. 检查是否有负面提示词/排除词（negative prompt / exclude tags）机制，确认是否排除了 multiple people, group, crowd, extra figures 等概念
+3. 检查提示词中是否包含容易产生多人物的描述（如 family, couple, standing together, reflection in mirror 等），这些描述在文生图模型中容易产出多人构图
+4. 如果是即梦/海螺等特定模型，检查其 API 是否支持 negative prompt 或 exclude 参数，以及当前调用是否传入了这些参数
+
+修改方向：
+- 在人物设计提示词生成模板中，强制注入「单人肖像」约束：前缀或后缀固定添加 "full body portrait of a single person, solo, only one character, complete face clearly visible, centered composition"
+- 添加负面提示词/排除参数："multiple people, group, crowd, extra limbs, cropped face, partial face, out of frame"
+- 如果模型 API 不支持负面提示词，通过强化正面描述权重来压制多人出现概率
+- 确保「完整面部」通过 "full face, front facing, clear facial features, uncropped head" 等描述约束
+
+---
+
+## Phase 4：图片左下角角标固定不变
+
+问题描述：使用不同比例（如 16:9 / 1:1 / 9:16）和不同模型（如即梦 4.5 / 其他模型）生图后，图片左下角角标显示的内容固定不变，未反映实际生成参数。
+
+排查方向：
+1. 定位图片卡片组件左下角角标的渲染代码，检查其显示的值是硬编码字符串还是从资源元数据中动态读取
+2. 检查资源数据结构（asset / image 表或对象），确认是否存储了 `aspectRatio`、`model`、`modelVersion` 等字段
+3. 检查生图 API 调用后的数据处理逻辑，确认返回的模型和比例信息是否被正确提取并保存到资源对象中
+4. 检查前端组件 Props，确认角标组件是否接收了正确的动态参数，还是写死了默认值
+
+修改方向：
+- 将硬编码角标改为动态读取资源对象的 `model` 和 `aspectRatio` 字段
+- 如果后端存储时未记录实际使用的模型和比例，在生图 API 调用成功后，将请求参数中的 model 和 aspectRatio 回写到资源元数据中
+- 角标显示格式建议：`{aspectRatio} | {model}`，如 `16:9 | 即梦4.5`
+- 如果资源无元数据，至少保证角标与生成时的请求参数一致
+
+---
+
+## Phase 5：人物设计英文提示词不可展开编辑
+
+问题描述：人物设计部分底部没有可展开的英文提示词编辑区域，期望能展开查看/编辑英文提示词，且修改后重新生成时按修改后的提示词执行。
+
+排查方向：
+1. 定位人物设计卡片/详情页的 UI 组件，检查当前是否已实现可折叠/展开的交互区域（如 Accordion / Collapse / Drawer）
+2. 检查该组件当前是否仅渲染中文提示词，英文提示词是否被隐藏或未传入
+3. 检查编辑后的提示词保存逻辑：修改后的英文提示词是否通过 API 回写到数据库，还是仅存在本地 state 中
+4. 检查重新生图时的提示词读取链路：重新生成时是从数据库读取最新提示词，还是从缓存/旧对象中读取
+
+修改方向：
+- 在人物设计卡片底部添加可展开/折叠的「英文提示词」区域（默认收起，点击展开），使用标准 UI 组件（如 shadcn Collapsible 或自定义展开动画）
+- 展开后显示英文提示词文本，并提供「编辑」按钮，进入可编辑状态（textarea 或 input）
+- 编辑完成后提供「保存」按钮，调用 API 将修改后的英文提示词更新到数据库对应记录
+- 重新生图时，确保生成逻辑读取的是数据库中最新的提示词（而非首次生成时的旧缓存），可在重新生成 API 中强制重新查询数据库获取最新 prompt
+- 如果前端有本地缓存机制（SWR / React Query / Zustand），在保存成功后失效对应缓存或主动更新缓存
+
+---
+
+执行要求：
+- 按 Phase 1 → 5 顺序逐个排查修复
+- 每个 Phase 完成后在 .kimi/plan.md 中记录修改摘要
+- 全程无需向我逐次确认，遇到阻塞性问题记录错误日志并汇报
+- 修改后本地 npm run dev 验证，确认无误后 git add / commit / push 自动部署
+- 如果某 Phase 涉及后端 API 改动，确保前端同步更新调用逻辑
+---
+
+[2026-05-30] ████ Round 6 开始执行 — 修复人物设计/生图模块 5 个问题
+
+## Phase 1：Mock 标记在重新生图后不消失 [✅ 完成]
+
+修复内容：
+1. `lib/api-clients/index.ts`：`generateCharacterPortrait` 和 `generateStyleSamples` 解构并返回 `isMock` + `lastError`
+2. `app/api/projects/[id]/steps/character/route.ts`：asset metadata 保存 `isMock`、`aspectRatio`、`imageModel`
+3. `app/api/projects/[id]/steps/character/regenerate/route.ts`：asset metadata 保存 `isMock`
+4. `app/api/projects/[id]/steps/concept/regenerate/route.ts`：修复硬编码 `isMock: false` → `!!result.metadata?.isMock`
+5. `app/api/projects/[id]/steps/style/regenerate/route.ts`：asset metadata 保存 `isMock`
+6. `components/generation/HoverImageBadge.tsx`：`isRegenerating` 时隐藏 Mock 角标（乐观更新）
+
+---
+
+## Phase 2：角色设计英文提示词缺失 [✅ 完成]
+
+修复内容：
+- `app/(dashboard)/project/[id]/workflow/page.tsx`：`CharacterPanel` 卡片底部新增可展开的「英文提示词」区域，从 `asset.metadata?.llmPrompt` 读取并显示
+
+---
+
+## Phase 3：人物设计图出现多个人物形象 [✅ 完成]
+
+修复内容：
+- `lib/api-clients/index.ts`：`generateCharacterPortrait` prompt 中强制注入单人肖像约束：`single person, solo, only one character, complete face clearly visible, front facing, full head in frame, centered composition`
+
+---
+
+## Phase 4：图片左下角角标固定不变 [✅ 完成]
+
+修复内容：
+1. `character/route.ts`：asset metadata 保存 `aspectRatio` + `imageModel`
+2. `concept/route.ts`：asset metadata 保存 `aspectRatio` + `imageModel`
+3. 前端已动态读取 `asset.metadata?.aspectRatio` 和 `asset.metadata?.imageModel`，后端补上缺失字段后角标即正确
+
+---
+
+## Phase 5：人物设计英文提示词不可展开编辑 [✅ 完成]
+
+修复内容：
+1. `app/(dashboard)/project/[id]/workflow/page.tsx`：`CharacterPanel` 新增：
+   - `expandedPromptIds` state 管理展开/折叠
+   - `handleUpdatePrompt` + `savePrompts` 函数：500ms 防抖 PATCH 保存到 `/api/projects/[id]/steps/character`
+   - 卡片底部使用 `ClickToEdit` 组件，点击即可编辑英文提示词
+2. `app/api/projects/[id]/steps/character/regenerate/route.ts`：重新生成时从 `outputData.prompts` 读取最新 `englishPrompt` 注入 `character.description`，确保按修改后的提示词执行
+
+---
+
+[2026-05-30] Round 6 全部 5 个 Phase 修复完成 — 构建验证通过

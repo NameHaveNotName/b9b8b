@@ -175,6 +175,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
               characterName: promptItem.characterName,
               styleRefUrl: styleRefUrl || null,
               llmPrompt: promptItem.englishPrompt,
+              aspectRatio,
+              imageModel: imageModel || IMAGE_MODELS.primary,
+              isMock: !!result.isMock,
+              ...(result.lastError ? { mockReason: result.lastError } : {}),
             },
           },
         })
@@ -283,6 +287,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
             characterName: character.name,
             styleRefUrl: styleRefUrl || null,
             llmPrompt: charPrompt,
+            aspectRatio: '16:9',
+            imageModel: IMAGE_MODELS.primary,
+            isMock: !!result.isMock,
+            ...(result.lastError ? { mockReason: result.lastError } : {}),
           },
         },
       })

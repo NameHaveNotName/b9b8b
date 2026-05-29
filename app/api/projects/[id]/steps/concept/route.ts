@@ -182,6 +182,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
               llmPrompt: promptItem.englishPrompt,
               prompt: promptItem.englishPrompt,
               aspectRatio,
+              imageModel: imageModel || IMAGE_MODELS.primary,
             },
           },
         })
@@ -317,6 +318,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
               llmPrompt: llmScene?.imagePrompt,
               prompt: finalPrompt,
               size: '1024x576',
+              aspectRatio: '16:9',
+              imageModel: IMAGE_MODELS.primary,
             },
           },
         })

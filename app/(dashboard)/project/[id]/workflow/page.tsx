@@ -1883,6 +1883,9 @@ function CharacterPanel({
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
   const [ratios, setRatios] = useState<Record<string, number>>({})
+  const [expandedPromptIds, setExpandedPromptIds] = useState<Set<string>>(new Set())
+  const promptSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastSavedPromptsRef = useRef<any[]>(step.outputData?.prompts || [])
 
   // PROMPT_READY：提示词预览（必须在 PROCESSING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
@@ -1951,6 +1954,44 @@ function CharacterPanel({
     }
   }
 
+  // Round 6 Phase 2+5：英文提示词展开/折叠
+  function togglePromptExpand(assetId: string) {
+    setExpandedPromptIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(assetId)) next.delete(assetId); else next.add(assetId)
+      return next
+    })
+  }
+
+  // Round 6 Phase 5：编辑英文提示词并保存到 workflowStep.outputData.prompts
+  function handleUpdatePrompt(characterId: string, newPrompt: string) {
+    const existingPrompts = step.outputData?.prompts || []
+    const idx = existingPrompts.findIndex((p: any) => p.characterId === characterId)
+    if (idx < 0) return
+    const newPrompts = [...existingPrompts]
+    newPrompts[idx] = { ...newPrompts[idx], englishPrompt: newPrompt }
+    if (promptSaveTimeoutRef.current) clearTimeout(promptSaveTimeoutRef.current)
+    promptSaveTimeoutRef.current = setTimeout(() => {
+      savePrompts(newPrompts)
+    }, 500)
+  }
+
+  async function savePrompts(newPrompts: any[]) {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/character`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts: newPrompts }),
+      })
+      if (!res.ok) throw new Error('保存失败')
+      lastSavedPromptsRef.current = newPrompts
+      await mutate()
+      console.log('[TEXT-EDIT-CHARACTER-CARD] 保存 prompts 成功, 数量=', newPrompts.length)
+    } catch (e: any) {
+      console.error('[TEXT-EDIT-CHARACTER-CARD] 保存失败:', e.message)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-stone-600">已生成 {assets.length} 个角色人像：</p>
@@ -1988,6 +2029,28 @@ function CharacterPanel({
                 <p className="text-xs text-stone-500">
                   {asset.metadata?.characterId}
                 </p>
+                {/* Round 6 Phase 2+5：可展开/可编辑的英文提示词 */}
+                {asset.metadata?.llmPrompt && (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => togglePromptExpand(asset.id)}
+                      className="flex items-center gap-1 text-[11px] text-stone-400 hover:text-stone-600 transition"
+                    >
+                      <span>英文提示词</span>
+                      <span>{expandedPromptIds.has(asset.id) ? '▲' : '▼'}</span>
+                    </button>
+                    {expandedPromptIds.has(asset.id) && (
+                      <div className="mt-1">
+                        <ClickToEdit
+                          value={asset.metadata?.llmPrompt || ''}
+                          onSave={(newVal) => handleUpdatePrompt(asset.metadata?.characterId, newVal)}
+                          className="text-[11px] font-mono text-stone-500 leading-relaxed"
+                          placeholder="点击编辑英文提示词..."
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )

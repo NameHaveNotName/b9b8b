@@ -98,6 +98,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           imageModel: resolvedModel,
           regenerated: true,
           originalAssetId: oldAsset?.id,
+          isMock: !!result.isMock,
+          ...(result.lastError ? { mockReason: result.lastError } : {}),
         },
       },
     })

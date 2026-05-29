@@ -46,7 +46,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const targetPortrait = portraits[targetIndex]
   const character = targetPortrait.character
 
-  console.log(`[CHARACTER-REGENERATE] 重新生成角色: assetId=${assetId}, char=${character?.name}`)
+  // Round 6 Phase 5：重新生成时使用用户最新编辑的 englishPrompt
+  const prompts: any[] = outputData.prompts || []
+  const latestPrompt = prompts.find((p: any) => p.characterId === character?.id)
+  const enrichedCharacter = latestPrompt?.englishPrompt
+    ? { ...character, description: latestPrompt.englishPrompt }
+    : character
+
+  console.log(`[CHARACTER-REGENERATE] 重新生成角色: assetId=${assetId}, char=${character?.name}, 使用提示词来源=${latestPrompt ? 'prompts.englishPrompt' : 'character.description'}`)
 
   let styleRefUrl: string
   let stylePrompt: string
@@ -73,7 +80,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const imageClient = await getImageClient()
     const result = await imageClient.generateCharacterPortrait(
       params.id,
-      character,
+      enrichedCharacter,
       styleRefUrl,
       stylePrompt,
       newRatio,
@@ -96,6 +103,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           imageModel: newModel,
           regenerated: true,
           originalAssetId: assetId,
+          isMock: !!result.isMock,
+          ...(result.lastError ? { mockReason: result.lastError } : {}),
         },
       },
     })

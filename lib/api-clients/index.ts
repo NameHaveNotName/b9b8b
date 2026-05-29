@@ -71,12 +71,16 @@ export interface StyleSample {
   url: string
   seed: number
   stylePrompt: string
+  isMock?: boolean
+  lastError?: string
 }
 
 export interface CharacterPortraitResult {
   url: string
   storageKey: string
   characterId: string
+  isMock?: boolean
+  lastError?: string
 }
 
 export interface ConceptSceneResult {
@@ -159,7 +163,7 @@ export async function getImageClient(): Promise<ImageClient> {
           const model = imageModel || IMAGE_MODELS.primary
           const ar = aspectRatio || '16:9'
           console.log(`[MODEL-SELECT] [generateStyleSamples] 模型: ${model}, 比例: ${ar}`)
-          const { buffer } = await generateImage({
+          const { buffer, isMock, lastError } = await generateImage({
             model,
             prompt,
             aspectRatio: ar,
@@ -168,17 +172,18 @@ export async function getImageClient(): Promise<ImageClient> {
           const id = `style_${Date.now()}_${i}`
           const storageKey = `projects/${projectId}/styles/${id}.png`
           const url = await uploadOrDataFallback(storageKey, buffer, 'image/png')
-          results.push({ url, seed: Math.floor(Math.random() * 999999), stylePrompt: prompt, id })
+          results.push({ url, seed: Math.floor(Math.random() * 999999), stylePrompt: prompt, id, isMock: !!isMock, ...(lastError ? { lastError } : {}) })
         }
         return results
       },
 
       async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?) {
         // 豆包图生图：把风格图通过 image 字段传入，prompt 写角色描述 + 风格修饰
-        const prompt = `${_stylePrompt || ''}, character portrait of ${character.name}, ${character.description || ''}, cinematic film still, 35mm Kodak Portra 400, full body shot, 8k, poetic realism`
+        // Round 6 Phase 3：强制单人肖像约束，避免多人物/面部不完整
+        const prompt = `${_stylePrompt || ''}, character portrait of ${character.name}, ${character.description || ''}, single person, solo, only one character, complete face clearly visible, front facing, full head in frame, centered composition, cinematic film still, 35mm Kodak Portra 400, full body shot, 8k, poetic realism`
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${aspectRatio || '16:9'}`)
         console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${imageModel || '默认'}`)
-        const { buffer } = await generateImage({
+        const { buffer, isMock, lastError } = await generateImage({
           model: imageModel || IMAGE_MODELS.primary,
           prompt,
           referenceImageUrl: styleRefUrl,
@@ -187,7 +192,7 @@ export async function getImageClient(): Promise<ImageClient> {
         })
         const storageKey = `projects/${projectId}/characters/${character.id}.png`
         const url = await uploadOrDataFallback(storageKey, buffer, 'image/png')
-        return { url, storageKey, characterId: character.id }
+        return { url, storageKey, characterId: character.id, isMock: !!isMock, ...(lastError ? { lastError } : {}) }
       },
 
       async generateConceptScene(projectId, sceneDesc, styleRefUrl, _stylePrompt?, characterImageUrls?, size?, aspectRatio?, imageModel?) {

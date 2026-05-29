@@ -149,9 +149,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           imageModel: newModel,
           regenerated: true,
           originalAssetId: assetId,
-          // 工作指令.txt（Phase 3 修复）：显式清除 Mock 标志
-          isMock: false,
-          mockReason: null,
+          // Round 6 Phase 1 修复：使用实际生成结果的 isMock 状态，而非硬编码 false
+          isMock: !!result.metadata?.isMock,
+          mockReason: result.metadata?.mockReason || null,
         },
       },
     })

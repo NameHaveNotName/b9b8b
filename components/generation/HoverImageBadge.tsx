@@ -113,8 +113,8 @@ export default function HoverImageBadge({
         </div>
       )}
 
-      {/* Mock 角标 — 始终显示 */}
-      {isMock && (
+      {/* Mock 角标 — regenerating 时立即隐藏（乐观更新） */}
+      {isMock && !isRegenerating && (
         <div className="absolute left-2 top-2 z-10 rounded bg-yellow-400 px-2 py-0.5 text-[10px] font-bold text-yellow-900 shadow">
           ⚠ Mock
         </div>
