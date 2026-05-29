@@ -132,7 +132,11 @@
       "Bash(DATABASE_URL='postgresql://postgres:sZzuJ78XNlxO5TQx@db.enlaopujtgvoqglvlnox.supabase.co:5432/postgres' npx tsx *)",
       "Bash(git config *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git branch *)",
+      "Bash(gh --version)",
+      "Bash(git remote *)",
+      "Bash(git push *)"
     ]
   },
   "outputStyle": "default",
