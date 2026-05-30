@@ -430,11 +430,11 @@ export default function KeyframesTable({
                 <div className="w-24 shrink-0">首帧</div>
                 <div className="w-24 shrink-0">尾帧</div>
                 <div className="w-20 shrink-0">镜头ID</div>
-                <div className="min-w-0 flex-1">描述（点击编辑）</div>
+                <div className="min-w-0 flex-1">描述（双击编辑）</div>
                 <div className="w-20 shrink-0">运镜</div>
                 <div className="w-14 shrink-0">时长</div>
                 <div className="w-28 shrink-0">角色</div>
-                <div className="w-40 shrink-0">动作变化（点击编辑）</div>
+                <div className="w-40 shrink-0">动作变化（双击编辑）</div>
                 <div className="w-8 shrink-0" />
               </div>
 

@@ -380,7 +380,7 @@ export default function StoryboardTable({
             <div className="w-6 shrink-0" />
             <div className="w-24 shrink-0">缩略图</div>
             <div className="w-20 shrink-0">镜头ID</div>
-            <div className="min-w-0 flex-1">描述（点击编辑）</div>
+            <div className="min-w-0 flex-1">描述（双击编辑）</div>
             <div className="w-20 shrink-0">运镜</div>
             <div className="w-14 shrink-0">时长</div>
             <div className="w-28 shrink-0">角色</div>

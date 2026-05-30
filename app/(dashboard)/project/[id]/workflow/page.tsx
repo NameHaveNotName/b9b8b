@@ -2045,7 +2045,7 @@ function CharacterPanel({
                           value={asset.metadata?.llmPrompt || ''}
                           onSave={(newVal) => handleUpdatePrompt(asset.metadata?.characterId, newVal)}
                           className="text-[11px] font-mono text-stone-500 leading-relaxed"
-                          placeholder="点击编辑英文提示词..."
+                          placeholder="双击编辑英文提示词..."
                         />
                       </div>
                     )}

@@ -77,16 +77,16 @@ export function ClickToEdit({ value, onSave, multiline = true, className, placeh
 
   return (
     <div
-      onClick={() => setIsEditing(true)}
+      onDoubleClick={() => setIsEditing(true)}
       className={cn(
         "cursor-text hover:bg-stone-50 rounded-md p-1 -m-1 transition-colors group",
         !value && "text-stone-400 italic",
         className
       )}
-      title="点击编辑"
+      title="双击编辑"
     >
       <span className="group-hover:underline decoration-dotted underline-offset-2">
-        {value || placeholder || '点击编辑...'}
+        {value || placeholder || '双击编辑...'}
       </span>
     </div>
   )
