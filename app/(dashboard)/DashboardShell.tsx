@@ -35,6 +35,11 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           fetch('/api/projects'),
         ])
 
+        if (userRes.status === 401 || projectsRes.status === 401) {
+          window.location.href = '/login'
+          return
+        }
+
         if (userRes.ok) {
           const userData = await userRes.json()
           setUser(userData.user || null)

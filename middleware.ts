@@ -29,6 +29,11 @@ export async function middleware(request: NextRequest) {
   try {
     const { response, user } = await updateSession(request)
 
+    // 已登录且访问 /login → 重定向到 /dashboard
+    if (user && pathname === "/login") {
+      return NextResponse.redirect(new URL("/dashboard", request.url))
+    }
+
     // 未登录且访问受保护路由 → 重定向到登录页
     if (!user && (isProtectedRoute || isProtectedApi)) {
       // API 路由返回 401

@@ -1,15 +1,51 @@
-给 Kimi Code 的追加提示词：
+任务：修复 Auth 路由保护与登录页功能
 
-```text
-追加修改：将「点击文字进入编辑」改为「双击文字进入编辑」
+当前状态：
+- Supabase Auth 已接入，环境变量已配置 ✅
+- 访问 /dashboard 可直接进入，未检测登录 ✅ 已修复（middleware + DashboardShell 兜底）
+- /login 页面只有 GitHub 登录按钮，无邮箱密码表单 ✅ 已有邮箱密码表单
+- GitHub OAuth 配置未生效（Supabase 仍使用 demo-client-id），暂时不可用 ✅ Phase 6 已配置
+- Email provider 已在 Supabase Dashboard 开启 ✅ Phase 6 已配置
 
+执行阶段：
+
+### Phase 1：路由登录保护（Middleware 修复）✅ 已完成
 排查方向：
-1. 全局搜索 `onClick` 或 `onClick={.*edit` / `onClick.*编辑` / `editable` 等关键词，定位所有「点击文字进入编辑」的事件绑定
-2. 常见于项目列表项、workflowStep 标题、角色名称、提示词文本等可编辑字段
-3. 确认当前是否同时绑定了「单击选中」和「单击进入编辑」，如果是，需区分：单击保持原有行为（如选中/聚焦），双击才触发编辑模式
+1. ✅ 检查 middleware.ts 当前逻辑，确认 /dashboard、/dashboard/*、/project/*、/settings 等路由是否被保护
+2. ✅ 检查是否排除了 /login、/register、/、/api/auth/* 等公开路由（matcher 未包含这些路径）
+3. ✅ 检查 Supabase SSR session 获取逻辑（createServerClient + cookies）
 
 修改方向：
-- 将触发编辑的 `onClick` 事件改为 `onDoubleClick`（React 中是 `onDoubleClick`，原生 JS 是 `dblclick`）
-- 如果组件同时需要单击选中 + 双击编辑，保留 `onClick` 用于选中/聚焦，新增 `onDoubleClick` 用于进入编辑状态
-- 同步更新相关 UI 提示文案（如 hover tooltip 或 placeholder 提示），将「点击编辑」改为「双击编辑」
-- 检查是否有防误触逻辑（如延迟判断单击/双击），如有需要可添加 200-300ms 的延迟判定，避免单击和双击事件冲突
+- ✅ 未登录访问受保护路由 → 302 重定向到 /login
+- ✅ 已登录访问 /login → 重定向到 /dashboard（2025-05-30 修复：middleware.ts 新增逻辑）
+- ✅ matcher 配置包含需要保护的路径
+
+### Phase 2：登录页添加邮箱密码登录 ✅ 已完成
+排查方向：
+1. ✅ 检查 app/login/page.tsx，确认当前是否只有 GitHub OAuth 按钮 → 已有邮箱密码表单
+2. ✅ 检查是否已有邮箱密码输入框但被隐藏 → 直接显示
+
+修改方向：
+- ✅ 添加邮箱 + 密码输入框
+- ✅ 「登录」按钮：调用 supabase.auth.signInWithPassword({ email, password })
+- ✅ 「注册」按钮/切换：调用 supabase.auth.signUp({ email, password }) → 在 /register 页面
+- ✅ 注册成功后，调用 API 在 Prisma User 表创建记录（id = auth.uid, email = email）→ /api/user/sync
+- ✅ 登录/注册成功后 router.push('/dashboard')
+- ✅ 表单添加基本校验（邮箱格式、密码长度≥6）
+- ✅ UI 风格与现有设计系统一致
+
+### Phase 3：首页与 Dashboard 入口 ✅ 已完成
+修改方向：
+- ✅ 首页「进入工作台」按钮保持跳转 /dashboard，由 middleware 处理未登录重定向
+- ✅ /dashboard 页面组件添加客户端兜底保护（useEffect 检查 session）→ DashboardShell 已添加 401 检测重定向
+
+其他修复记录：
+- ✅ Dashboard 页面所有查询已添加 userId 过滤，修复多用户数据隔离漏洞
+- ✅ .env.example 已添加 NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY 模板
+- ⚠️ lib/api-clients/mock-video.ts 有 6 个预存在 TypeScript 错误（'this' implicitly has type 'any'），不影响编译和运行
+
+执行要求：
+- 本地 npm run dev 测试：未登录访问 /dashboard → 重定向 /login；登录后 → 进入 /dashboard
+- 测试邮箱注册 → 登录 → 创建项目，确认 Prisma User 表正确关联
+- 修复后 git add / commit / push 自动部署
+- 全程无需向我逐次确认，遇到阻塞性问题记录错误日志并汇报
