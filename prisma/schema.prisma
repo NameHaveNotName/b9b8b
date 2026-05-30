@@ -93,16 +93,20 @@ model VerificationToken {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
+  id            String         @id @default(cuid())
+  email         String         @unique
   name          String?
   image         String?
   emailVerified DateTime?
+  points        Int            @default(0)
+  isAdmin       Boolean        @default(false)
+  adminNote     String?
   accounts      Account[]
   sessions      Session[]
   projects      Project[]
   auditLogs     AuditLog[]
-  createdAt     DateTime  @default(now())
+  operationLogs OperationLog[]
+  createdAt     DateTime       @default(now())
 }
 
 model Project {
@@ -202,4 +206,21 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([action, createdAt])
+}
+
+model OperationLog {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String   // generate, regenerate, error
+  projectId      String?
+  workflowStepId String?
+  assetId        String?
+  pointsCost     Int      @default(0)
+  success        Boolean  @default(true)
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
 }

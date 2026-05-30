@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
+import { checkPoints, deductPointsAndLog, DEFAULT_REGENERATE_COST } from '@/lib/points'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -52,6 +53,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     : character
 
   console.log(`[CHARACTER-REGENERATE] 重新生成角色: assetId=${assetId}, char=${character?.name}, 使用提示词来源=${latestPrompt ? 'prompts.englishPrompt' : 'character.description'}`)
+
+  const pointsCheck = await checkPoints(DEFAULT_REGENERATE_COST)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
 
   let styleRefUrl: string
   let stylePrompt: string
@@ -121,9 +127,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       data: { outputData: { ...outputData, portraits: newPortraits } },
     })
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'regenerate', { projectId: params.id, workflowStepId: step.id, success: true })
     console.log('[CHARACTER-REGENERATE] 重新生成成功:', newAsset.id)
     return NextResponse.json({ success: true, portrait: newPortraits[targetIndex] })
   } catch (e: any) {
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     console.error('[CHARACTER-REGENERATE] 重新生成失败:', e?.message)
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }

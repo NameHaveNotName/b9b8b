@@ -6,6 +6,7 @@ import { loadPromptTemplate, extractJsonFromMarkdown, assignModelNoFallback } fr
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { createQueue } from '@/lib/queue'
 import { processStyleGeneration } from '@/lib/style-processor'
+import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 
 const styleQueue = createQueue('style-generation')
 
@@ -128,6 +129,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   // === generate-images: 读取已保存提示词，执行生图 ===
   if (action === 'generate-images') {
+    const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+    if (!pointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+    }
+
     const aspectRatio = body?.aspectRatio || '16:9'
     const imageModel = body?.imageModel
     console.log(`[ASPECT-RATIO] [STYLE-IMAGE] 用户选择比例: ${aspectRatio}`)
@@ -199,6 +205,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         })
       }
 
+      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[STYLE-IMAGE] 用户确认，开始生图，共 ${prompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
       return NextResponse.json({
         success: true,
@@ -207,6 +214,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       })
     } catch (e: any) {
       await failStep(step.id, e.message)
+      await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
       return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
     }
   }

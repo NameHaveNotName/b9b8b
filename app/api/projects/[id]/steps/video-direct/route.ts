@@ -3,6 +3,7 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { createQueue, isDemoMode as queueIsDemoMode } from '@/lib/queue'
 import { startStep, canExecuteStep } from '@/lib/workflow-executor'
+import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 
 // [DASHBOARD-FIX] DEMO 模式下使用 createQueue 返回 Mock，避免 ECONNREFUSED
 const videoQueue = createQueue('video-generation')
@@ -80,6 +81,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     console.log(`[VIDEO-DIRECT] 检测到尾帧，使用首尾帧生成视频, 数量: ${keyframes.length}`)
   }
 
+  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   await startStep(step.id)
 
   const jobs = []
@@ -105,6 +111,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     jobs.push({ shotId, jobId: job.id, strategy: shotStrategy })
   }
 
+  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
   return NextResponse.json({
     success: true,
     taskId: step.id,

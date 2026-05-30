@@ -3,6 +3,7 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from '@/lib/models-config'
+import { checkPoints, deductPointsAndLog, DEFAULT_REGENERATE_COST } from '@/lib/points'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -41,6 +42,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const targetStyle = styleOptions[targetIndex]
   console.log(`[STYLE-REGENERATE] 重新生成风格: styleId=${styleId}, name=${targetStyle.styleName}`)
+
+  const pointsCheck = await checkPoints(DEFAULT_REGENERATE_COST)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
 
   // 删除旧 Asset（如果存在），同时读取原模型信息
   const oldAsset = await prisma.asset.findFirst({
@@ -115,9 +121,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       data: { outputData: { ...outputData, styleOptions: newOptions } },
     })
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'regenerate', { projectId: params.id, workflowStepId: step.id, success: true })
     console.log('[STYLE-REGENERATE] 重新生成成功:', newAsset.id)
     return NextResponse.json({ success: true, style: newOptions[targetIndex] })
   } catch (e: any) {
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     console.error('[STYLE-REGENERATE] 重新生成失败:', e?.message)
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }

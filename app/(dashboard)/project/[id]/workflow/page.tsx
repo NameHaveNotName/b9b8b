@@ -32,6 +32,8 @@ import { VISIBLE_STEP_TYPES } from '@/lib/workflow'
 import { IMAGE_MODELS, MODEL_SHORT_NAME, STYLE_MODEL_POOL, VIDEO_MODELS, VIDEO_MODEL_SHORT_NAME } from '@/lib/models-config'
 import HoverImageBadge from '@/components/generation/HoverImageBadge'
 import { ClickToEdit } from '@/components/ui/ClickToEdit'
+import CostBadge from '@/components/CostBadge'
+import { DEFAULT_GENERATE_COST } from '@/lib/points'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -116,6 +118,10 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         console.log(`[executeStep] ${stepType} response:`, JSON.stringify(result).slice(0, 500))
 
         if (!result.success) {
+          if (result.error === 'POINTS_001') {
+            setLastError('点数不足，请联系管理员充值')
+            return
+          }
           const errorMsg = `执行失败：${result.error || '未知错误'}${result.message ? ' — ' + result.message.slice(0, 100) : ''}`
           setLastError(errorMsg)
           return
@@ -1678,9 +1684,10 @@ function PromptPreview({
           <button
             onClick={onConfirm}
             disabled={isExecuting}
-            className="rounded-lg bg-stone-900 px-6 py-2 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-2 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
           >
             确认执行
+            <CostBadge cost={DEFAULT_GENERATE_COST} />
           </button>
         </div>
       </div>

@@ -12,6 +12,9 @@ import {
   ChevronRight,
   LogOut,
   FolderOpen,
+  BarChart3,
+  Users,
+  Shield,
 } from 'lucide-react'
 
 interface Project {
@@ -23,6 +26,8 @@ interface User {
   name?: string | null
   email?: string | null
   image?: string | null
+  isAdmin?: boolean
+  points?: number
 }
 
 export default function AppSidebar({ user, recentProjects }: { user: User; recentProjects: Project[] }) {
@@ -68,6 +73,42 @@ export default function AppSidebar({ user, recentProjects }: { user: User; recen
             </Link>
           )
         })}
+
+        {/* 管理员菜单 */}
+        {user.isAdmin && (
+          <div className="mt-4">
+            <div className="flex items-center gap-2 px-3 py-1.5">
+              <Shield className="h-3.5 w-3.5 text-amber-600" />
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700">
+                统计
+              </span>
+            </div>
+            <div className="mt-1 space-y-0.5">
+              <Link
+                href="/admin/users"
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  pathname?.startsWith('/admin/users')
+                    ? 'bg-stone-100 text-stone-900'
+                    : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
+                }`}
+              >
+                <Users className="h-4 w-4" />
+                用户统计
+              </Link>
+              <Link
+                href="/admin/analytics"
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  pathname?.startsWith('/admin/analytics')
+                    ? 'bg-stone-100 text-stone-900'
+                    : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
+                }`}
+              >
+                <BarChart3 className="h-4 w-4" />
+                请求统计
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* 最近项目 */}
         <div className="mt-2">
@@ -116,6 +157,12 @@ export default function AppSidebar({ user, recentProjects }: { user: User; recen
           )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-stone-700">{user.name || user.email || '用户'}</p>
+            {typeof user.points === 'number' && (
+              <p className="text-[11px] text-stone-400">
+                点数: {user.points}
+                {user.isAdmin && <span className="ml-1 text-amber-600">(管理员)</span>}
+              </p>
+            )}
           </div>
           <button
             onClick={signOut}

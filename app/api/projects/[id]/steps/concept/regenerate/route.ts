@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
+import { checkPoints, deductPointsAndLog, DEFAULT_REGENERATE_COST } from '@/lib/points'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -47,6 +48,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const sceneIndex = targetScene.sceneIndex
 
   console.log(`[CONCEPT-REGENERATE] 重新生成概念图: assetId=${assetId}, act=${actNumber}, scene=${sceneIndex}`)
+
+  const pointsCheck = await checkPoints(DEFAULT_REGENERATE_COST)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
 
   // 获取风格参考图
   let styleRefUrl: string
@@ -177,9 +183,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     console.log('[REGENERATE-POSITION] 替换后数组顺序:', newScenes.map((s: any) => `Act${s.actNumber}-Scene${s.sceneIndex} (assetId=${s.assetId?.slice(-8)})`))
     console.log('[REGENERATE-POSITION] 验证: 数组长度不变=', newScenes.length === scenes.length, '原index=', targetIndex, '新场景act=', newScenes[targetIndex].actNumber, 'scene=', newScenes[targetIndex].sceneIndex)
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'regenerate', { projectId: params.id, workflowStepId: step.id, success: true })
     console.log('[CONCEPT-REGENERATE] 重新生成成功:', newAsset.id)
     return NextResponse.json({ success: true, scene: newScenes[targetIndex] })
   } catch (e: any) {
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     console.error('[CONCEPT-REGENERATE] 重新生成失败:', e?.message)
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }

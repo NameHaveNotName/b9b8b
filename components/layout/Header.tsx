@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
-import { Bell, User, LogOut, Settings, ChevronDown } from 'lucide-react'
+import { Bell, User, LogOut, Settings, ChevronDown, Zap } from 'lucide-react'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': '仪表盘',
@@ -48,6 +48,18 @@ export default function Header() {
   const { user, signOut } = useAuth()
   const userDropdown = useDropdown()
   const notifDropdown = useDropdown()
+  const [points, setPoints] = useState<number | null>(null)
+
+  useEffect(() => {
+    fetch('/api/user')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.user?.points !== undefined) {
+          setPoints(data.user.points)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const userName = user?.user_metadata?.name || user?.email?.split('@')[0] || '用户'
   const userEmail = user?.email || ''
@@ -111,6 +123,12 @@ export default function Header() {
               <div className="my-1 border-t border-stone-100" />
 
               {/* 菜单项 */}
+              {typeof points === 'number' && (
+                <div className="flex items-center gap-2 px-4 py-2 text-sm text-stone-500">
+                  <Zap className="h-4 w-4 text-amber-500" />
+                  剩余点数: {points}
+                </div>
+              )}
               <Link
                 href="/settings/profile"
                 onClick={() => userDropdown.setOpen(false)}

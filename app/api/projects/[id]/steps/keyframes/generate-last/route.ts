@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { getStyleRefUrl } from '@/lib/style-ref'
+import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 
 /**
  * 单条尾帧生成 API
@@ -62,6 +63,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   }
 
   console.log('[KEYFRAMES-GENERATE-LAST] shotId:', shot.shotId, 'description:', shot.description?.slice(0, 60))
+
+  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
 
   try {
     // 获取风格参考
@@ -139,12 +145,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     console.log('[KEYFRAMES-GENERATE-LAST] 尾帧生成完成, lastFrameUrl:', result.url?.slice(0, 80))
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: keyframesStep.id, success: true })
     return NextResponse.json({
       success: true,
       lastFrameUrl: result.url,
       assetId: asset.id,
     })
   } catch (e: any) {
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: keyframesStep.id, success: false, errorMessage: e.message })
     console.error('[KEYFRAMES-GENERATE-LAST] 生成失败:', e.message)
     return NextResponse.json({ error: 'KEYFRAMES_001', message: e.message }, { status: 500 })
   }

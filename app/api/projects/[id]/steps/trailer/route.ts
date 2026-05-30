@@ -3,6 +3,7 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { createQueue, isDemoMode as queueIsDemoMode } from '@/lib/queue'
 import { startStep, completeStep, failStep, canExecuteStep, tryStartStep } from '@/lib/workflow-executor'
+import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 
 // [DASHBOARD-FIX] DEMO 模式下使用 createQueue 返回 Mock，避免 ECONNREFUSED
 const videoQueue = createQueue('video-generation')
@@ -69,8 +70,11 @@ async function processTrailerInline(
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   // 工作指令.txt 第三阶段：路由入队诊断 [TRAILER-POST]
   console.log(`[TRAILER-POST] 收到请求 projectId=${params.id} t=${new Date().toISOString()}`)
+  let userId: string | null = null
+  let pointsCheck: any = null
+  let stepIdForLog: string | undefined
   try {
-    const userId = await getCurrentUserId()
+    userId = await getCurrentUserId()
     if (!userId) {
       console.warn('[TRAILER-POST] 未登录，401 返回')
       return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -117,6 +121,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const step = await prisma.workflowStep.findUnique({
       where: { projectId_stepType: { projectId: params.id, stepType: 'TRAILER' } }
     })
+    stepIdForLog = step?.id
     if (!step) {
       console.warn('[TRAILER-POST] 找不到 TRAILER 步骤，拒绝执行')
       return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
@@ -154,6 +159,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       return NextResponse.json({ success: true, message: '宣传片生成任务已在进行中', status: 'PROCESSING' })
     }
 
+    pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+    if (!pointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+    }
+
     // 工作指令.txt（Round 6 任务二）：BullMQ 入队 + setImmediate 兜底（修 "Failed to fetch"）
     // 仅当显式开启 TRAILER_USE_QUEUE=1 时才走 BullMQ；否则默认 setImmediate 后台处理，
     // 避免 Redis 不可用时 videoQueue.add() 因 enableOfflineQueue: false 抛错导致 POST 挂起。
@@ -184,6 +194,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       })
     }
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({
       success: true,
       taskId: step.id,
@@ -191,6 +202,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       message: queued ? '宣传片生成任务已入队' : '宣传片生成任务已在后台启动',
     })
   } catch (err: any) {
+    try {
+      if (userId && pointsCheck) {
+        await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: stepIdForLog, success: false, errorMessage: err?.message })
+      }
+    } catch {}
     // 工作指令.txt 第5部分：POST 同步阶段意外失败（鉴权/Prisma/入队）也要返回详细错误，
     // 否则前端只会看到通用的 500 "Failed to fetch"，定位非常困难
     console.error('[TRAILER-ERROR]', err)
