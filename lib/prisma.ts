@@ -15,16 +15,8 @@ function isPlaceholderUrl(url: string | undefined): boolean {
   return false
 }
 
-// Demo 用户：让 user.findUnique 等鉴权检查都能拿到一个稳定的"已登录用户"，
-// 进而让所有 (dashboard) 子页面里的 `if (!user) redirect('/login')` 不再触发。
-const DEMO_USER_RECORD = {
-  id: 'demo_user_local',
-  name: '本地体验用户',
-  email: 'demo@ai-film.local',
-  image: null as string | null,
-  emailVerified: null as Date | null,
-  createdAt: new Date(),
-}
+// 不再使用 Demo 用户 fallback，未认证时返回 null
+// 确保数据隔离：每个用户只能看到自己的项目
 
 // ============ Mock Prisma 本地文件持久化（2026-05-19）============
 // 工作指令.txt：解决 Mock 数据在 dev server 重启后丢失的问题。
@@ -319,21 +311,20 @@ function buildMockPrisma(): PrismaClient {
                     const found = Object.values(records).find((r: any) => r.email === args.where.email)
                     if (found) return found
                   }
-                  return { ...DEMO_USER_RECORD }
+                  return null
                 }
               case 'findUniqueOrThrow':
               case 'findFirstOrThrow':
                 return async (args: any) => {
                   const rec = args?.where?.id ? records[args.where.id] : null
                   if (rec) return rec
-                  return { ...DEMO_USER_RECORD }
+                  throw new Error('Record not found')
                 }
               case 'create':
                 return async (args: any) => {
                   const id = args?.data?.id || `mock_user_${Date.now()}`
                   const { id: _dataId, ...restData } = args.data || {}
-                  const { id: _demoId, ...demoData } = DEMO_USER_RECORD
-                  records[id] = { id, ...demoData, ...restData }
+                  records[id] = { id, email: '', name: '', image: null, emailVerified: null, createdAt: new Date(), ...restData }
                   return records[id]
                 }
             }

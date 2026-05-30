@@ -1,25 +1,37 @@
-# FilmFlow 后续规划备忘录
+# 修复构建错误与 UI/Auth 更新
 
-## 基础设施迁移（已确定）
+## Phase 1: Fix /login build error
+- ✅ 创建 `app/login/login-form.tsx` 作为 "use client" 组件
+- ✅ `app/login/page.tsx` 改为 Server Component，用 Suspense 包裹 LoginForm
+- ✅ 构建通过，无 useSearchParams 相关错误
 
-- [x] 数据库：Supabase PostgreSQL（已配置）
-- [x] 对象存储：Supabase Storage S3（已配置）
-- [ ] 部署平台：Vercel（等待 vercel login 完成）
-- [ ] 域名：暂无，使用 Vercel 默认域名（后续如需自定义域名，确认是否免费）
+## Phase 2: Add email/password auth
+- ✅ 登录页面添加 Login/Register 模式切换
+- ✅ 注册：调用 `supabase.auth.signUp` + POST `/api/auth/register` 创建 Prisma User
+- ✅ 注册成功后自动登录，跳转 `/dashboard`
+- ✅ 基本验证：邮箱格式、密码最少 6 位、确认密码匹配
 
-## 未来升级计划（用户指定）
+## Phase 3: Auth middleware
+- ✅ 保护路由：`/dashboard/*`, `/project/*`, `/settings/*`
+- ✅ 未认证用户重定向到 `/login?redirect=currentPath`
+- ✅ 已认证用户访问 `/login` 重定向到 `/dashboard`
+- ✅ Demo 模式放行
 
-- [ ] 数据库：后续迁移到阿里云（写入 .kimi/plan.md）
-- [ ] 对象存储：后续迁移到阿里云 OSS（写入 .kimi/plan.md）
-- [ ] 队列/缓存：当前同步模式，后续升级为异步模式（BullMQ + Upstash Redis）
-- [ ] 认证：当前 DEMO 模式，后续接入 GitHub OAuth（等梯子恢复后执行）
-- [ ] 访问控制：GitHub OAuth 接入后，评估是否需要额外访问密码
+## Phase 4: Hide GitHub login
+- ✅ 隐藏 GitHub OAuth 按钮
+- ✅ 添加 "更多登录方式即将推出" 提示
 
-## 功能开发计划
+## Phase 5: UI fixes
+- ✅ Mock badge: regenerating 时立即隐藏（乐观更新）
+- ✅ Character English prompt: 修复 regenerate 后 `llmPrompt` 丢失问题
+- ✅ Single character: 增强 portrait prompt 单人约束 + negative 描述
+- ✅ Corner badge: 动态显示 aspectRatio 和 model name（已正确实现）
+- ✅ Expandable English prompt: 已支持展开/编辑/保存
 
-- [ ] 动态故事结构：框架搭建 prompt 模板改造（AI 自行决定幕数）
-- [ ] 全局文本编辑：ClickToEdit 覆盖创意扩散、框架搭建、所有生图步骤
-- [ ] 视频模型：即梦/海螺/Veo 首尾帧测试（路由已修正为 /v1/video/create）
-- [ ] 多模型评测系统（Phase 4）
-- [ ] 法律页面：/terms /privacy /ai-policy
-- [ ] 答辩演示模式：冻结 API，展示预置案例
+## Phase 6: Interaction updates
+- ✅ 双击编辑：ClickToEdit 组件已使用 onDoubleClick，更新提示文字
+- ✅ 首页进入 Dashboard 按钮：已存在
+
+## 构建状态
+- ✅ `npm run build` 本地通过，零错误
+- ⚠️ 推送失败（网络问题：Could not resolve host: github.com）

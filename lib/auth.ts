@@ -1,23 +1,10 @@
 import { createClient } from "@/lib/supabase/server"
 import { prisma } from "@/lib/prisma"
-import { isDemoMode, DEMO_USER } from "@/lib/demo-mode"
 
-/** 服务端获取当前登录用户（优先 Supabase Auth，回退 Demo 模式）
- *  返回 Prisma User 记录（含业务数据关联）
+/** 服务端获取当前登录用户（优先 Supabase Auth）
+ *  不再使用 Demo 模式 fallback，未认证返回 null
  */
 export async function getCurrentUser() {
-  // Demo 模式：返回固定 demo 用户
-  if (isDemoMode) {
-    return {
-      id: DEMO_USER.id,
-      email: DEMO_USER.email,
-      name: DEMO_USER.name,
-      image: DEMO_USER.image,
-      emailVerified: null as Date | null,
-      createdAt: new Date(),
-    }
-  }
-
   try {
     const supabase = await createClient()
     const { data: { user: authUser } } = await supabase.auth.getUser()
@@ -50,10 +37,6 @@ export async function getCurrentUser() {
 
 /** 获取当前用户 ID */
 export async function getCurrentUserId(): Promise<string | null> {
-  if (isDemoMode) {
-    return DEMO_USER.id
-  }
-
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()

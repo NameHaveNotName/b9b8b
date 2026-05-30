@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { updateSession } from "@/lib/supabase/middleware"
-import { isDemoMode } from "@/lib/demo-mode"
 
 // 受保护的路由前缀
 const PROTECTED_PREFIXES = ["/dashboard", "/project", "/settings"]
@@ -19,11 +18,6 @@ export async function middleware(request: NextRequest) {
   const isProtectedApi = PROTECTED_API_PREFIXES.some((prefix) =>
     pathname.startsWith(prefix)
   )
-
-  // Demo 模式：Supabase 未配置时，直接放行（保持现有行为）
-  if (isDemoMode) {
-    return NextResponse.next()
-  }
 
   // Supabase 模式：验证 session
   try {
@@ -48,9 +42,15 @@ export async function middleware(request: NextRequest) {
 
     return response
   } catch (err) {
-    // Supabase 配置异常（如环境变量缺失），保持放行避免锁死
+    // Supabase 配置异常（如环境变量缺失），未认证用户访问受保护路由时重定向
     console.error("[Middleware] Supabase session error:", err)
-    return NextResponse.next()
+    if (!isProtectedRoute && !isProtectedApi) {
+      return NextResponse.next()
+    }
+    // 受保护路由在异常时保守处理：重定向到登录
+    const loginUrl = new URL("/login", request.url)
+    loginUrl.searchParams.set("redirect", pathname)
+    return NextResponse.redirect(loginUrl)
   }
 }
 
