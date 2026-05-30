@@ -1,8 +1,9 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentUserId } from '@/lib/auth-helpers'
+import { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST } from '@/lib/points-config'
 
 // 重新导出常量，保持 API 路由的 backward compatibility
-export { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST } from '@/lib/points-config'
+export { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST }
 
 export interface PointsCheckResult {
   ok: boolean

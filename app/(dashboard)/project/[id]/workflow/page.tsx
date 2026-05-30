@@ -411,23 +411,26 @@ function StepHeader({
 
       <div className="flex items-center gap-2">
         {step.status === 'PENDING' && (
-          <button
-            onClick={onExecute}
-            disabled={isExecuting}
-            className="flex items-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-          >
-            {isExecuting ? (
-              <>
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-                生成中...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" />
-                开始执行
-              </>
-            )}
-          </button>
+          <div className="relative inline-block">
+            <button
+              onClick={onExecute}
+              disabled={isExecuting}
+              className="flex items-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+            >
+              {isExecuting ? (
+                <>
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  开始执行
+                </>
+              )}
+            </button>
+            <CostBadge cost={DEFAULT_GENERATE_COST} />
+          </div>
         )}
 
         {step.status === 'FAILED' && (
@@ -760,23 +763,26 @@ function IdeationPanel({
       <div className="space-y-6">
         <IdeaAnchor text={project.rawIdea} />
         <div className="flex justify-center">
-          <button
-            onClick={() => onExecute('IDEATION')}
-            disabled={isExecuting}
-            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-          >
-            {isExecuting ? (
-              <>
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-                生成中...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" />
-                生成创意方向
-              </>
-            )}
-          </button>
+          <div className="relative inline-block">
+            <button
+              onClick={() => onExecute('IDEATION')}
+              disabled={isExecuting}
+              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+            >
+              {isExecuting ? (
+                <>
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  生成创意方向
+                </>
+              )}
+            </button>
+            <CostBadge cost={DEFAULT_GENERATE_COST} />
+          </div>
         </div>
       </div>
     )
@@ -833,23 +839,26 @@ function IdeationPanel({
         </div>
         {selectedIdx !== null && (
           <div className="flex justify-center">
-            <button
-              onClick={() => onExecute('FRAMEWORK', { directionIndex: selectedIdx })}
-              disabled={isExecuting}
-              className="flex items-center gap-2 rounded-lg bg-amber-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
-            >
-              {isExecuting ? (
-                <>
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  生成中...
-                </>
-              ) : (
-                <>
-                  选择此方向并继续
-                  <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </button>
+            <div className="relative inline-block">
+              <button
+                onClick={() => onExecute('FRAMEWORK', { directionIndex: selectedIdx })}
+                disabled={isExecuting}
+                className="flex items-center gap-2 rounded-lg bg-amber-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+              >
+                {isExecuting ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    选择此方向并继续
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+              <CostBadge cost={DEFAULT_GENERATE_COST} />
+            </div>
           </div>
         )}
       </div>
@@ -1190,23 +1199,26 @@ function StylePanel({
           <p className="mt-3 text-sm text-stone-500">框架已就绪，接下来将基于影片设定生成 3 种截然不同的视觉风格</p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => onExecute('STYLE', { action: 'generate-prompts' })}
-            disabled={isExecuting}
-            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-          >
-            {isExecuting ? (
-              <>
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-                生成中...
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4" />
-                生成三种风格
-              </>
-            )}
-          </button>
+          <div className="relative inline-block">
+            <button
+              onClick={() => onExecute('STYLE', { action: 'generate-prompts' })}
+              disabled={isExecuting}
+              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+            >
+              {isExecuting ? (
+                <>
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  生成三种风格
+                </>
+              )}
+            </button>
+            <CostBadge cost={DEFAULT_GENERATE_COST} />
+          </div>
           {onSkip && (
             <button
               onClick={() => {
@@ -1348,15 +1360,18 @@ function StylePanel({
                   onClick={() => setShowConfirmAll(false)}
                   className="rounded-md border border-stone-200 bg-white px-4 py-1.5 text-sm text-stone-600 transition hover:bg-stone-50"
                 >取消</button>
-                <button
-                  onClick={() => { setShowConfirmAll(false); onExecute('STYLE', { force: true }) }}
-                  disabled={isExecuting}
-                  className="flex items-center gap-1.5 rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {isExecuting ? (
-                    <><LoaderCircle className="h-3.5 w-3.5 animate-spin" />生成中...</>
-                  ) : '确认重做'}
-                </button>
+                <div className="relative inline-block">
+                  <button
+                    onClick={() => { setShowConfirmAll(false); onExecute('STYLE', { force: true }) }}
+                    disabled={isExecuting}
+                    className="flex items-center gap-1.5 rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {isExecuting ? (
+                      <><LoaderCircle className="h-3.5 w-3.5 animate-spin" />生成中...</>
+                    ) : '确认重做'}
+                  </button>
+                  <CostBadge cost={DEFAULT_GENERATE_COST} />
+                </div>
               </div>
             </div>
           )}
@@ -1681,14 +1696,16 @@ function PromptPreview({
               跳过
             </button>
           )}
-          <button
-            onClick={onConfirm}
-            disabled={isExecuting}
-            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-2 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-          >
-            确认执行
+          <div className="relative inline-block">
+            <button
+              onClick={onConfirm}
+              disabled={isExecuting}
+              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-2 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+            >
+              确认执行
+            </button>
             <CostBadge cost={DEFAULT_GENERATE_COST} />
-          </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1927,17 +1944,20 @@ function CharacterPanel({
           <ImageIcon className="mx-auto h-10 w-10 text-stone-300" />
           <p className="mt-3 text-sm text-stone-500">将基于框架设定为每个角色生成人像</p>
         </div>
-        <button
-          onClick={() => onExecute('CHARACTER', { action: 'generate-prompts' })}
-          disabled={isExecuting}
-          className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-        >
-          {isExecuting ? (
-            <><LoaderCircle className="h-4 w-4 animate-spin" />生成中...</>
-          ) : (
-            <><Play className="h-4 w-4" />开始执行</>
-          )}
-        </button>
+        <div className="relative inline-block">
+          <button
+            onClick={() => onExecute('CHARACTER', { action: 'generate-prompts' })}
+            disabled={isExecuting}
+            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+          >
+            {isExecuting ? (
+              <><LoaderCircle className="h-4 w-4 animate-spin" />生成中...</>
+            ) : (
+              <><Play className="h-4 w-4" />开始执行</>
+            )}
+          </button>
+          <CostBadge cost={DEFAULT_GENERATE_COST} />
+        </div>
       </div>
     )
   }
@@ -2084,15 +2104,18 @@ function CharacterPanel({
                   onClick={() => setShowConfirmAll(false)}
                   className="rounded-md border border-stone-200 bg-white px-4 py-1.5 text-sm text-stone-600 transition hover:bg-stone-50"
                 >取消</button>
-                <button
-                  onClick={() => { setShowConfirmAll(false); onExecute('CHARACTER', { force: true }) }}
-                  disabled={isExecuting}
-                  className="flex items-center gap-1.5 rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {isExecuting ? (
-                    <><LoaderCircle className="h-3.5 w-3.5 animate-spin" />生成中...</>
-                  ) : '确认重做'}
-                </button>
+                <div className="relative inline-block">
+                  <button
+                    onClick={() => { setShowConfirmAll(false); onExecute('CHARACTER', { force: true }) }}
+                    disabled={isExecuting}
+                    className="flex items-center gap-1.5 rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {isExecuting ? (
+                      <><LoaderCircle className="h-3.5 w-3.5 animate-spin" />生成中...</>
+                    ) : '确认重做'}
+                  </button>
+                  <CostBadge cost={DEFAULT_GENERATE_COST} />
+                </div>
               </div>
             </div>
           )}
@@ -2163,14 +2186,17 @@ function ConceptPanel({
           <p className="mt-3 text-sm text-stone-500">将基于框架设定生成各幕场景概念图</p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
-            disabled={isExecuting}
-            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-          >
-            <Play className="h-4 w-4" />
-            生成概念图
-          </button>
+          <div className="relative inline-block">
+            <button
+              onClick={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
+              disabled={isExecuting}
+              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+            >
+              <Play className="h-4 w-4" />
+              生成概念图
+            </button>
+            <CostBadge cost={DEFAULT_GENERATE_COST} />
+          </div>
           {onSkip && (
             <button
               onClick={() => {
@@ -2299,20 +2325,23 @@ function ConceptPanel({
                 >
                   取消
                 </button>
-                <button
-                  onClick={handleRegenerateAll}
-                  disabled={isExecuting}
-                  className="flex items-center gap-1.5 rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {isExecuting ? (
-                    <>
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                      生成中...
-                    </>
-                  ) : (
-                    '确认重做'
-                  )}
-                </button>
+                <div className="relative inline-block">
+                  <button
+                    onClick={handleRegenerateAll}
+                    disabled={isExecuting}
+                    className="flex items-center gap-1.5 rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {isExecuting ? (
+                      <>
+                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                        生成中...
+                      </>
+                    ) : (
+                      '确认重做'
+                    )}
+                  </button>
+                  <CostBadge cost={DEFAULT_GENERATE_COST} />
+                </div>
               </div>
             </div>
           )}
@@ -2486,23 +2515,26 @@ function TrailerPanel({
       ) : step.status === 'PENDING' ? (
         <div className="flex justify-center py-8">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => onExecute('TRAILER')}
-              disabled={isExecuting}
-              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-            >
-              {isExecuting ? (
-                <>
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  生成中...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4" />
-                  生成宣传片
-                </>
-              )}
-            </button>
+            <div className="relative inline-block">
+              <button
+                onClick={() => onExecute('TRAILER')}
+                disabled={isExecuting}
+                className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+              >
+                {isExecuting ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4" />
+                    生成宣传片
+                  </>
+                )}
+              </button>
+              <CostBadge cost={DEFAULT_GENERATE_COST} />
+            </div>
             {onSkip && (
               <button
                 onClick={() => {
@@ -2728,15 +2760,18 @@ function StoryboardPanel({
                   onClick={() => setShowConfirmAll(false)}
                   className="rounded-md border border-stone-200 bg-white px-3 py-1 text-xs text-stone-600 transition hover:bg-stone-50"
                 >取消</button>
-                <button
-                  onClick={() => { setShowConfirmAll(false); onExecute('STORYBOARD', { force: true }) }}
-                  disabled={isExecuting}
-                  className="flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {isExecuting ? (
-                    <><LoaderCircle className="h-3 w-3 animate-spin" />生成中...</>
-                  ) : '确认'}
-                </button>
+                <div className="relative inline-block">
+                  <button
+                    onClick={() => { setShowConfirmAll(false); onExecute('STORYBOARD', { force: true }) }}
+                    disabled={isExecuting}
+                    className="flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {isExecuting ? (
+                      <><LoaderCircle className="h-3 w-3 animate-spin" />生成中...</>
+                    ) : '确认'}
+                  </button>
+                  <CostBadge cost={DEFAULT_GENERATE_COST} />
+                </div>
               </div>
             </div>
           )}
@@ -2794,23 +2829,26 @@ function StoryboardPanel({
             />
           </div>
         ) : (
-          <button
-            onClick={() => onExecute('STORYBOARD', { action: 'generate-prompts' })}
-            disabled={isExecuting}
-            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-          >
-            {isExecuting ? (
-              <>
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-                生成中...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" />
-                生成分镜设计
-              </>
-            )}
-          </button>
+          <div className="relative inline-block">
+            <button
+              onClick={() => onExecute('STORYBOARD', { action: 'generate-prompts' })}
+              disabled={isExecuting}
+              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+            >
+              {isExecuting ? (
+                <>
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  生成分镜设计
+                </>
+              )}
+            </button>
+            <CostBadge cost={DEFAULT_GENERATE_COST} />
+          </div>
         )}
       </div>
     </div>
@@ -3054,23 +3092,26 @@ function KeyframesPanel({
 
           <div className="flex items-center gap-3">
             {/* 生成全部尾帧按钮 */}
-            <button
-              onClick={handleGenerateAll}
-              disabled={isExecuting}
-              className="flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-            >
-              {isExecuting ? (
-                <>
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  生成中...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4" />
-                  生成全部尾帧
-                </>
-              )}
-            </button>
+            <div className="relative inline-block">
+              <button
+                onClick={handleGenerateAll}
+                disabled={isExecuting}
+                className="flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+              >
+                {isExecuting ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4" />
+                    生成全部尾帧
+                  </>
+                )}
+              </button>
+              <CostBadge cost={DEFAULT_GENERATE_COST} />
+            </div>
 
             {/* 视图切换 */}
             <div className="flex items-center rounded-lg border border-stone-200 bg-white p-1 shadow-sm">
@@ -3131,23 +3172,26 @@ function KeyframesPanel({
   return (
     <div className="flex justify-center py-8">
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => onExecute('KEYFRAMES', { action: 'generate-prompts' })}
-          disabled={isExecuting}
-          className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-        >
-          {isExecuting ? (
-            <>
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-              生成中...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" />
-              生成尾帧
-            </>
-          )}
-        </button>
+        <div className="relative inline-block">
+          <button
+            onClick={() => onExecute('KEYFRAMES', { action: 'generate-prompts' })}
+            disabled={isExecuting}
+            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+          >
+            {isExecuting ? (
+              <>
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+                生成中...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4" />
+                生成尾帧
+              </>
+            )}
+          </button>
+          <CostBadge cost={DEFAULT_GENERATE_COST} />
+        </div>
         {onSkip && (
           <button
             onClick={() => {
@@ -3279,23 +3323,26 @@ function VideoDirectPanel({
       </div>
 
       <div className="flex justify-center">
-        <button
-          onClick={() => onExecute('VIDEO_DIRECT', { videoModel: selectedVideoModel })}
-          disabled={isExecuting}
-          className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-        >
-          {isExecuting ? (
-            <>
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-              入队中...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" />
-              生成视频
-            </>
-          )}
-        </button>
+        <div className="relative inline-block">
+          <button
+            onClick={() => onExecute('VIDEO_DIRECT', { videoModel: selectedVideoModel })}
+            disabled={isExecuting}
+            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+          >
+            {isExecuting ? (
+              <>
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+                入队中...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4" />
+                生成视频
+              </>
+            )}
+          </button>
+          <CostBadge cost={DEFAULT_GENERATE_COST} />
+        </div>
       </div>
     </div>
   )
