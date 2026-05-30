@@ -33,7 +33,7 @@ import { IMAGE_MODELS, MODEL_SHORT_NAME, STYLE_MODEL_POOL, VIDEO_MODELS, VIDEO_M
 import HoverImageBadge from '@/components/generation/HoverImageBadge'
 import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
-import { DEFAULT_GENERATE_COST } from '@/lib/points'
+import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
