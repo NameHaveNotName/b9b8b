@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server"
 import { updateSession } from "@/lib/supabase/middleware"
 
 // 受保护的路由前缀
-const PROTECTED_PREFIXES = ["/dashboard", "/project", "/settings"]
+const PROTECTED_PREFIXES = ["/dashboard", "/project", "/settings", "/admin"]
 
 // 这些 API 路由也需要认证
 const PROTECTED_API_PREFIXES = ["/api/projects", "/api/tasks"]
@@ -60,6 +60,7 @@ export const config = {
     "/dashboard/:path*",
     "/project/:path*",
     "/settings/:path*",
+    "/admin/:path*",
     "/api/projects/:path*",
     "/api/tasks/:path*",
     "/login",
