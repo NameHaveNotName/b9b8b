@@ -97,6 +97,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           characterId: character.id,
           characterName: character.name,
           styleRefUrl,
+          llmPrompt: latestPrompt?.englishPrompt || character.description,
           aspectRatio: newRatio,
           imageModel: newModel,
           regenerated: true,

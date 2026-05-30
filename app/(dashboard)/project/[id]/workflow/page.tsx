@@ -784,7 +784,7 @@ function IdeationPanel({
     return (
       <div className="space-y-6">
         <StoryLengthSelector value={localStoryLength} onChange={handleStoryLengthChange} />
-        <p className="text-sm text-stone-600">请选择最符合你预期的创意方向（点击卡片选择，标题和描述可直接编辑）：</p>
+        <p className="text-sm text-stone-600">请选择最符合你预期的创意方向（点击卡片选择，标题和描述可双击编辑）：</p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {displayDirections.map((d: any, idx: number) => (
             <div

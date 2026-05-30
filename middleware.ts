@@ -4,7 +4,7 @@ import { updateSession } from "@/lib/supabase/middleware"
 import { isDemoMode } from "@/lib/demo-mode"
 
 // 受保护的路由前缀
-const PROTECTED_PREFIXES = ["/dashboard", "/project"]
+const PROTECTED_PREFIXES = ["/dashboard", "/project", "/settings"]
 
 // 这些 API 路由也需要认证
 const PROTECTED_API_PREFIXES = ["/api/projects", "/api/tasks"]
@@ -42,7 +42,7 @@ export async function middleware(request: NextRequest) {
       }
       // 页面路由重定向到登录
       const loginUrl = new URL("/login", request.url)
-      loginUrl.searchParams.set("callbackUrl", pathname)
+      loginUrl.searchParams.set("redirect", pathname)
       return NextResponse.redirect(loginUrl)
     }
 
@@ -58,6 +58,7 @@ export const config = {
   matcher: [
     "/dashboard/:path*",
     "/project/:path*",
+    "/settings/:path*",
     "/api/projects/:path*",
     "/api/tasks/:path*",
     "/login",

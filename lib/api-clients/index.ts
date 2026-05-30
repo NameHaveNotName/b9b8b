@@ -180,7 +180,8 @@ export async function getImageClient(): Promise<ImageClient> {
       async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?) {
         // 豆包图生图：把风格图通过 image 字段传入，prompt 写角色描述 + 风格修饰
         // Round 6 Phase 3：强制单人肖像约束，避免多人物/面部不完整
-        const prompt = `${_stylePrompt || ''}, character portrait of ${character.name}, ${character.description || ''}, single person, solo, only one character, complete face clearly visible, front facing, full head in frame, centered composition, cinematic film still, 35mm Kodak Portra 400, full body shot, 8k, poetic realism`
+        // Phase 5: 强制单人肖像约束 + negative 描述避免多人/面部不完整
+        const prompt = `${_stylePrompt || ''}, character portrait of ${character.name}, ${character.description || ''}, solo, single person, only one character, complete full face clearly visible, front facing, full head in frame, centered composition, cinematic film still, 35mm Kodak Portra 400, full body shot, 8k, poetic realism. Avoid: multiple people, crowd, group shot, partial face, cropped head, off-center face, back view, profile view, obscured face.`
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${aspectRatio || '16:9'}`)
         console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${imageModel || '默认'}`)
         const { buffer, isMock, lastError } = await generateImage({
