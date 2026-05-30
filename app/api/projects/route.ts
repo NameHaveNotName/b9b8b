@@ -1,34 +1,19 @@
 import { NextResponse } from 'next/server';
-import { auth, isDemoMode, DEMO_USER } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { WorkflowStepType } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
-import { getCurrentUser } from '@/lib/auth-helpers';
+import { getCurrentUser, getCurrentUserId } from '@/lib/auth-helpers';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getCurrentUserId();
+  if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 });
   }
 
-  // 调试日志
-  console.log('[GET /api/projects] session.userId:', session.user.id)
-  console.log('[GET /api/projects] isDemoMode:', isDemoMode)
-
-  // Demo 模式下，兼容三种可能的 userId 来源：session.user.id、DEMO_USER.id、历史 demo 用户
-  let whereClause: any = { status: 'ACTIVE' }
-  if (isDemoMode) {
-    whereClause.OR = [
-      { userId: session.user.id },
-      { userId: DEMO_USER.id },
-    ]
-    console.log('[GET /api/projects] demo mode - using OR clause:', whereClause)
-  } else {
-    whereClause.userId = session.user.id
-  }
+  console.log('[GET /api/projects] userId:', userId)
 
   const projects = await prisma.project.findMany({
-    where: whereClause,
+    where: { userId, status: 'ACTIVE' },
     orderBy: { createdAt: 'desc' },
     include: {
       _count: { select: { steps: true, assets: true } },
@@ -36,10 +21,6 @@ export async function GET() {
   });
 
   console.log('[GET /api/projects] found projects:', projects.length)
-  projects.forEach(p => {
-    console.log(`- ${p.id}: userId=${p.userId}, title=${p.title}, status=${p.status}`)
-  })
-
   return NextResponse.json({ projects });
 }
 
@@ -49,26 +30,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 });
   }
 
-  // 统一使用 getCurrentUser() 返回的 userId，确保 Demo/真实模式一致
-  const userId = user.id;
-  console.log('[POST /api/projects] userId:', userId, 'isDemoMode:', isDemoMode)
-
-  // Demo 模式下确保 demo 用户存在于数据库（mock 层也需要用户记录做关联）
-  if (isDemoMode) {
-    const existingDemoUser = await prisma.user.findUnique({
-      where: { id: DEMO_USER.id },
-    });
-    if (!existingDemoUser) {
-      console.log('[POST /api/projects] creating demo user...')
-      await prisma.user.create({
-        data: {
-          id: DEMO_USER.id,
-          email: DEMO_USER.email,
-          name: DEMO_USER.name,
-        },
-      });
-    }
-  }
+  console.log('[POST /api/projects] userId:', user.id)
 
   const { rawIdea } = await req.json();
   if (!rawIdea || typeof rawIdea !== 'string') {
@@ -77,14 +39,14 @@ export async function POST(req: Request) {
 
   const project = await prisma.project.create({
     data: {
-      userId,
+      userId: user.id,
       rawIdea,
       title: rawIdea.slice(0, 20) + (rawIdea.length > 20 ? '...' : ''),
       status: 'ACTIVE',
     },
   });
 
-  console.log('[POST /api/projects] created project:', project.id, 'with userId:', userId)
+  console.log('[POST /api/projects] created project:', project.id, 'with userId:', user.id)
 
   // 自动初始化 12 步 WorkflowStep 记录（全部 PENDING）
   const stepTypes: WorkflowStepType[] = [
@@ -102,7 +64,6 @@ export async function POST(req: Request) {
     'REVIEW',
   ];
 
-  // 防止重复初始化：先检查项目是否已有步骤（理论上不应有，但 demo HMR 会触发重复调用）
   const existingSteps = await prisma.workflowStep.findMany({
     where: { projectId: project.id },
     select: { stepType: true },
@@ -116,8 +77,6 @@ export async function POST(req: Request) {
     await prisma.workflowStep.createMany({ data: stepsToCreate });
   }
 
-  // 重新验证仪表盘缓存，确保项目列表立即更新
   revalidatePath('/dashboard')
-
   return NextResponse.json({ project })
 }

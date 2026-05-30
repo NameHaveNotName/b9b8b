@@ -1,20 +1,18 @@
 import { NextResponse } from 'next/server'
-import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from '@/lib/models-config'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const session = await auth()
-  if (!session?.user?.id) {
+  const userId = await getCurrentUserId()
+  if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
   const project = await prisma.project.findUnique({ where: { id: params.id } })
-  const isOwner = project?.userId === session.user.id
-  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
 
-  if (!project || (!isOwner && !isDemoProject)) {
+  if (!project || project.userId !== userId) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
   }
 

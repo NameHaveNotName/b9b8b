@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { createQueue, isDemoMode as queueIsDemoMode } from '@/lib/queue'
 import { startStep, completeStep, failStep, canExecuteStep, tryStartStep } from '@/lib/workflow-executor'
@@ -70,20 +70,16 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   // 工作指令.txt 第三阶段：路由入队诊断 [TRAILER-POST]
   console.log(`[TRAILER-POST] 收到请求 projectId=${params.id} t=${new Date().toISOString()}`)
   try {
-    const session = await auth()
-    if (!session?.user?.id) {
+    const userId = await getCurrentUserId()
+    if (!userId) {
       console.warn('[TRAILER-POST] 未登录，401 返回')
       return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
     }
 
     const project = await prisma.project.findUnique({ where: { id: params.id } })
 
-    // Demo 模式：允许操作 demo 用户的项目
-    const isOwner = project?.userId === session.user.id
-    const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
-
-    if (!project || (!isOwner && !isDemoProject)) {
-      console.warn(`[TRAILER-POST] 鉴权失败 projectExists=${!!project} isOwner=${isOwner} isDemoProject=${isDemoProject}`)
+    if (!project || project.userId !== userId) {
+      console.warn(`[TRAILER-POST] 鉴权失败 projectExists=${!!project}`)
       return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
     }
 

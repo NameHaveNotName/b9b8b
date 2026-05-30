@@ -1,7 +1,9 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import { Bell, User } from 'lucide-react'
+import Link from 'next/link'
+import { useAuth } from '@/lib/auth-context'
+import { Bell, User, LogOut } from 'lucide-react'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': '仪表盘',
@@ -22,6 +24,7 @@ function getPageTitle(pathname: string): string {
 export default function Header() {
   const pathname = usePathname()
   const title = getPageTitle(pathname || '')
+  const { user, signOut } = useAuth()
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-stone-200 bg-white px-6">
@@ -36,10 +39,21 @@ export default function Header() {
           <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500"></span>
         </button>
 
-        {/* 用户头像（简化版，详细信息在 Sidebar 底部） */}
+        {/* 用户头像 */}
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-100">
           <User className="h-4 w-4 text-stone-500" />
         </div>
+
+        {/* 登出按钮 */}
+        {user && (
+          <button
+            onClick={signOut}
+            className="rounded-md p-2 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
+            title="登出"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </header>
   )

@@ -45,20 +45,24 @@ export default async function DashboardPage() {
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
+  const userId = user.id
   const [activeProjectsCount, weeklyAssetsCount, videoAssetsCount, userAssets] =
     await Promise.all([
-      prisma.project.count({ where: { status: 'ACTIVE' } }),
+      prisma.project.count({ where: { status: 'ACTIVE', userId } }),
       prisma.asset.count({
         where: {
+          project: { userId },
           createdAt: { gte: weekAgo },
         },
       }),
       prisma.asset.count({
         where: {
+          project: { userId },
           type: 'VIDEO',
         },
       }),
       prisma.asset.findMany({
+        where: { project: { userId } },
         select: { id: true, projectId: true },
       }),
     ])
@@ -70,7 +74,7 @@ export default async function DashboardPage() {
     : 0
 
   const projects = await prisma.project.findMany({
-    where: { status: 'ACTIVE' },
+    where: { status: 'ACTIVE', userId },
     orderBy: { updatedAt: 'desc' },
     take: 20,
     include: {

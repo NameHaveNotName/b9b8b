@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
@@ -23,18 +23,14 @@ async function generateStoryboardByAct(textClient: any, framework: any, act: any
 }
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
-  const session = await auth()
-  if (!session?.user?.id) {
+  const userId = await getCurrentUserId()
+  if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
   const project = await prisma.project.findUnique({ where: { id: params.id } })
 
-  // Demo 模式：允许操作 demo 用户的项目
-  const isOwner = project?.userId === session.user.id
-  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
-
-  if (!project || (!isOwner && !isDemoProject)) {
+  if (!project || project.userId !== userId) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
   }
 
@@ -333,16 +329,14 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 }
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const session = await auth()
-  if (!session?.user?.id) {
+  const userId = await getCurrentUserId()
+  if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
   const project = await prisma.project.findUnique({ where: { id: params.id } })
-  const isOwner = project?.userId === session.user.id
-  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
 
-  if (!project || (!isOwner && !isDemoProject)) {
+  if (!project || project.userId !== userId) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
   }
 

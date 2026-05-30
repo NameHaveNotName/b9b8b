@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import {
   Lightbulb,
@@ -63,8 +63,8 @@ function formatDate(date: Date): string {
 }
 
 export default async function ProjectPage({ params }: { params: { id: string } }) {
-  const session = await auth()
-  if (!session?.user?.id) {
+  const userId = await getCurrentUserId()
+  if (!userId) {
     redirect('/login')
   }
 
@@ -76,10 +76,7 @@ export default async function ProjectPage({ params }: { params: { id: string } }
     },
   })
 
-  const isOwner = project?.userId === session.user.id
-  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
-
-  if (!project || (!isOwner && !isDemoProject)) {
+  if (!project || project.userId !== userId) {
     notFound()
   }
 

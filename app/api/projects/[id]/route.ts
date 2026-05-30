@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import { auth, isDemoMode, DEMO_USER } from '@/auth'
+import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const session = await auth()
-  if (!session?.user?.id) {
+  const userId = await getCurrentUserId()
+  if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
@@ -19,11 +19,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     },
   })
 
-  // Demo 模式：允许访问 demo 用户的项目
-  const isOwner = project?.userId === session.user.id
-  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
-
-  if (!project || (!isOwner && !isDemoProject)) {
+  if (!project || project.userId !== userId) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
   }
 
@@ -31,18 +27,14 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 }
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const session = await auth()
-  if (!session?.user?.id) {
+  const userId = await getCurrentUserId()
+  if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
   const project = await prisma.project.findUnique({ where: { id: params.id } })
 
-  // Demo 模式：允许修改 demo 用户的项目
-  const isOwner = project?.userId === session.user.id
-  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
-
-  if (!project || (!isOwner && !isDemoProject)) {
+  if (!project || project.userId !== userId) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
   }
 
@@ -66,8 +58,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 }
 
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
-  const session = await auth()
-  if (!session?.user?.id) {
+  const userId = await getCurrentUserId()
+  if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
@@ -78,11 +70,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     }
   })
 
-  // Demo 模式：允许删除 demo 用户的项目
-  const isOwner = project?.userId === session.user.id
-  const isDemoProject = isDemoMode && project?.userId === DEMO_USER.id
-
-  if (!project || (!isOwner && !isDemoProject)) {
+  if (!project || project.userId !== userId) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
   }
 

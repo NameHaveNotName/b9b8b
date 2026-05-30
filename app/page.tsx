@@ -1,10 +1,10 @@
 import Link from 'next/link'
-import { auth } from '@/auth'
+import { getCurrentUser } from '@/lib/auth-helpers'
 import { ArrowRight, Sparkles } from 'lucide-react'
 
 export default async function Home() {
-  const session = await auth().catch(() => null)
-  const isLoggedIn = !!session?.user
+  const user = await getCurrentUser()
+  const isLoggedIn = !!user
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-6 md:p-24 bg-gradient-to-b from-stone-50 to-white">

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { signOut } from 'next-auth/react'
+import { useAuth } from '@/lib/auth-context'
 import {
   Film,
   LayoutDashboard,
@@ -28,6 +28,7 @@ interface User {
 export default function AppSidebar({ user, recentProjects }: { user: User; recentProjects: Project[] }) {
   const [projectsOpen, setProjectsOpen] = useState(true)
   const pathname = usePathname()
+  const { signOut } = useAuth()
 
   const navItems = [
     { href: '/dashboard', label: '仪表盘', icon: LayoutDashboard },
@@ -117,7 +118,7 @@ export default function AppSidebar({ user, recentProjects }: { user: User; recen
             <p className="truncate text-sm font-medium text-stone-700">{user.name || user.email || '用户'}</p>
           </div>
           <button
-            onClick={() => signOut({ callbackUrl: '/login' })}
+            onClick={signOut}
             className="rounded-md p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
             title="登出"
           >

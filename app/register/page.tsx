@@ -1,49 +1,82 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { signIn } from 'next-auth/react'
 import { Film, Eye, EyeOff } from 'lucide-react'
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const callbackUrl = searchParams.get('callbackUrl') || '/dashboard'
 
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
 
-  async function handleEmailLogin(e: React.FormEvent) {
+  async function handleRegister(e: React.FormEvent) {
     e.preventDefault()
     setIsLoading(true)
     setError('')
+    setSuccess('')
 
-    const supabase = createClient()
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
-
-    if (signInError) {
-      setError(signInError.message === 'Invalid login credentials'
-        ? '邮箱或密码错误'
-        : signInError.message
-      )
+    if (password !== confirmPassword) {
+      setError('两次输入的密码不一致')
       setIsLoading(false)
       return
     }
 
-    router.push(callbackUrl)
-    router.refresh()
-  }
+    if (password.length < 6) {
+      setError('密码长度至少为 6 位')
+      setIsLoading(false)
+      return
+    }
 
-  async function handleGitHubLogin() {
-    await signIn('github', { callbackUrl })
+    const supabase = createClient()
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { name: name || email.split('@')[0] },
+      },
+    })
+
+    if (signUpError) {
+      setError(signUpError.message)
+      setIsLoading(false)
+      return
+    }
+
+    if (data.user) {
+      // 注册成功，同步创建 Prisma User 记录
+      try {
+        const res = await fetch('/api/user/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: data.user.id,
+            email: data.user.email,
+            name: name || data.user.email?.split('@')[0] || '',
+          }),
+        })
+        if (!res.ok) {
+          console.warn('[Register] Prisma User sync failed:', await res.text())
+        }
+      } catch (err) {
+        console.warn('[Register] Prisma User sync error:', err)
+      }
+
+      setSuccess('注册成功！请查收验证邮件（如需要）并登录。')
+      setTimeout(() => {
+        router.push('/login')
+      }, 1500)
+    }
+
+    setIsLoading(false)
   }
 
   return (
@@ -53,8 +86,8 @@ export default function LoginPage() {
           <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-stone-900">
             <Film className="h-5 w-5 text-white" />
           </div>
-          <h1 className="text-xl font-semibold text-stone-800">AI 影视工作流</h1>
-          <p className="mt-1 text-sm text-stone-500">登录以继续管理你的项目</p>
+          <h1 className="text-xl font-semibold text-stone-800">创建账号</h1>
+          <p className="mt-1 text-sm text-stone-500">注册以开始使用 AI 影视工作流</p>
         </div>
 
         {error && (
@@ -63,8 +96,26 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* 邮箱密码登录 */}
-        <form onSubmit={handleEmailLogin} className="space-y-4">
+        {success && (
+          <div className="mb-4 rounded-md bg-green-50 p-3 text-sm text-green-700">
+            {success}
+          </div>
+        )}
+
+        <form onSubmit={handleRegister} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-stone-700">
+              昵称（可选）
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="你的昵称"
+              className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-800 placeholder-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+            />
+          </div>
+
           <div>
             <label className="mb-1 block text-sm font-medium text-stone-700">
               邮箱
@@ -88,7 +139,7 @@ export default function LoginPage() {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="至少 6 位"
                 required
                 minLength={6}
                 className="w-full rounded-md border border-stone-300 px-3 py-2 pr-10 text-sm text-stone-800 placeholder-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
@@ -103,38 +154,36 @@ export default function LoginPage() {
             </div>
           </div>
 
+          <div>
+            <label className="mb-1 block text-sm font-medium text-stone-700">
+              确认密码
+            </label>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="再次输入密码"
+              required
+              className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-800 placeholder-stone-400 focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
+            />
+          </div>
+
           <button
             type="submit"
             disabled={isLoading}
             className="flex w-full items-center justify-center rounded-md bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
           >
-            {isLoading ? '登录中...' : '登录'}
+            {isLoading ? '注册中...' : '注册'}
           </button>
         </form>
 
-        {/* 分隔线 */}
-        <div className="my-5 flex items-center gap-3">
-          <div className="h-px flex-1 bg-stone-200" />
-          <span className="text-xs text-stone-400">或</span>
-          <div className="h-px flex-1 bg-stone-200" />
-        </div>
-
-        {/* GitHub OAuth */}
-        <button
-          onClick={handleGitHubLogin}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-          使用 GitHub 登录
-        </button>
-
         <p className="mt-5 text-center text-sm text-stone-500">
-          还没有账号？{' '}
+          已有账号？{' '}
           <Link
-            href="/register"
+            href="/login"
             className="font-medium text-stone-900 hover:underline"
           >
-            立即注册
+            立即登录
           </Link>
         </p>
       </div>
