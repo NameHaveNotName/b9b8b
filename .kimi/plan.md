@@ -34,4 +34,28 @@
 
 ## 构建状态
 - ✅ `npm run build` 本地通过，零错误
-- ⚠️ 推送失败（网络问题：Could not resolve host: github.com）
+- ✅ 已推送 (841dacb)
+
+---
+
+# 用户数据隔离与右上角菜单实现 (d6b820b)
+
+## Phase 1: 强制认证与数据隔离
+- ✅ lib/auth.ts — 移除 DEMO_USER fallback，未认证返回 null
+- ✅ auth.ts — 移除 NextAuth 的 DEMO_SESSION fallback
+- ✅ middleware.ts — 移除 isDemoMode 绕过，始终检查 Supabase session
+- ✅ lib/prisma.ts — 移除 mock 模式下 DEMO_USER_RECORD fallback
+
+## Phase 2: 右上角用户菜单
+- ✅ Header.tsx — 通知铃铛带红点角标，点击展开下拉面板（暂无通知状态）
+- ✅ Header.tsx — 用户头像下拉菜单：个人信息、账号设置、退出登录
+- ✅ 点击外部自动关闭菜单
+
+## Phase 3: 真实用户信息
+- ✅ Header 显示 Supabase session 中的真实 name/email/avatar
+- ✅ AppSidebar 通过 DashboardShell 获取真实用户信息
+
+## Phase 4: 数据隔离验证
+- ✅ 所有 API 路由已带 userId 过滤
+- ✅ 新项目创建自动关联 currentUser.id
+- ✅ 未认证访问 /dashboard → middleware 重定向到 /login
