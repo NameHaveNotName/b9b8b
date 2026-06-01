@@ -198,6 +198,19 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
           }
         }
         if (!res.ok) throw new Error(result.error || result.message || `HTTP ${res.status}`)
+
+        // Phase 4: 同步更新 framework 中的 selectedStyleImage
+        try {
+          await fetch(`/api/projects/${params.id}/steps/framework`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selectedStyleImage: styleRefUrl }),
+          })
+          console.log('[SELECT-STYLE-FRONT] 已同步到 framework.selectedStyleImage')
+        } catch (fwErr: any) {
+          console.warn('[SELECT-STYLE-FRONT] 同步到 framework 失败:', fwErr.message)
+        }
+
         await mutate()
         setToast({ kind: 'success', message: '已保存为统一视觉基准' })
       } catch (e: any) {
@@ -898,6 +911,38 @@ function IdeationPanel({
   return <ProcessingBlock message="暂无创意方向数据" />
 }
 
+function DeepeningStatus({ deepening }: { deepening?: any }) {
+  if (!deepening) return null
+  const status = deepening.status
+  if (status === 'completed' || status === 'idle' || !status) return null
+
+  const isError = status === 'error'
+  const progress = deepening.progress || {}
+
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${isError ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
+      <div className="flex items-center gap-2">
+        {isError ? (
+          <RefreshCw className="h-4 w-4 text-red-500" />
+        ) : (
+          <LoaderCircle className="h-4 w-4 animate-spin text-amber-500" />
+        )}
+        <span className={`text-sm font-medium ${isError ? 'text-red-700' : 'text-amber-700'}`}>
+          {progress.phase || '深化中...'}
+        </span>
+      </div>
+      {progress.total > 0 && !isError && (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-amber-200">
+          <div
+            className="h-full rounded-full bg-amber-500 transition-all duration-300"
+            style={{ width: `${(progress.current / progress.total) * 100}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FrameworkPanel({
   step,
   projectId,
@@ -942,6 +987,9 @@ function FrameworkPanel({
       if (nextOutput.synopsis !== undefined) body.synopsis = nextOutput.synopsis
       if (nextOutput.characters !== undefined) body.characters = nextOutput.characters
       if (nextOutput.acts !== undefined) body.acts = nextOutput.acts
+      if (nextOutput.environments !== undefined) body.environments = nextOutput.environments
+      if (nextOutput.overallPacing !== undefined) body.overallPacing = nextOutput.overallPacing
+      if (nextOutput.selectedStyleImage !== undefined) body.selectedStyleImage = nextOutput.selectedStyleImage
 
       const res = await fetch(`/api/projects/${projectId}/steps/framework`, {
         method: 'PATCH',
@@ -958,8 +1006,13 @@ function FrameworkPanel({
     }
   }
 
+  const deepening = localOutput.deepening
+  const isDeepening = deepening?.status && deepening.status !== 'completed' && deepening.status !== 'idle'
+
   return (
     <div className="space-y-4">
+      <DeepeningStatus deepening={deepening} />
+
       <CollapsibleSection title="灵感阐释" defaultOpen>
         <ClickToEdit
           value={localOutput.inspiration || ''}
@@ -979,12 +1032,39 @@ function FrameworkPanel({
       </CollapsibleSection>
 
       <CollapsibleSection title="视觉风格">
-        <ClickToEdit
-          value={localOutput.visualStyle || localOutput.styleGuide || ''}
-          onSave={(newVal) => updateField('visualStyle', newVal)}
-          className="text-sm leading-relaxed text-stone-700"
-          placeholder="视觉风格..."
-        />
+        {localOutput.selectedStyleImage ? (
+          <div className="flex gap-4">
+            {/* 左侧文字区域 */}
+            <div className="flex-1 min-w-0 flex flex-col justify-center">
+              <ClickToEdit
+                value={localOutput.visualStyle || localOutput.styleGuide || ''}
+                onSave={(newVal) => updateField('visualStyle', newVal)}
+                className="text-sm leading-relaxed text-stone-700"
+                placeholder="视觉风格..."
+              />
+            </div>
+            {/* 右侧风格图 */}
+            <div className="shrink-0">
+              <img
+                src={localOutput.selectedStyleImage}
+                alt="选定的视觉风格"
+                className="rounded-lg border border-stone-200 object-cover"
+                style={{ maxHeight: 200, maxWidth: 280, width: 'auto', height: 'auto' }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none'
+                }}
+              />
+              <p className="mt-1 text-center text-[10px] text-stone-400">已选定的风格基准</p>
+            </div>
+          </div>
+        ) : (
+          <ClickToEdit
+            value={localOutput.visualStyle || localOutput.styleGuide || ''}
+            onSave={(newVal) => updateField('visualStyle', newVal)}
+            className="text-sm leading-relaxed text-stone-700"
+            placeholder="视觉风格..."
+          />
+        )}
       </CollapsibleSection>
 
       <CollapsibleSection title={`角色设定 (${localOutput.characters?.length || 0})`}>
@@ -1001,7 +1081,9 @@ function FrameworkPanel({
                 <span className="font-medium text-stone-800">{c.name}</span>
                 <span className="text-xs text-stone-500">{c.role}</span>
               </div>
+              {/* 基础描述 */}
               <div className="mt-2">
+                <span className="text-xs text-stone-400">基础设定</span>
                 <ClickToEdit
                   value={c.description || ''}
                   onSave={(newVal) => {
@@ -1013,6 +1095,54 @@ function FrameworkPanel({
                   placeholder="角色描述..."
                 />
               </div>
+              {/* 深化内容 */}
+              {c.deepened && (
+                <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
+                  {c.deepened.appearance && (
+                    <div>
+                      <span className="text-xs text-stone-400">形象外貌</span>
+                      <p className="text-sm text-stone-600">{c.deepened.appearance}</p>
+                    </div>
+                  )}
+                  {c.deepened.personality && (
+                    <div>
+                      <span className="text-xs text-stone-400">性格深度</span>
+                      <p className="text-sm text-stone-600">{c.deepened.personality}</p>
+                    </div>
+                  )}
+                  {c.deepened.catchphrase && (
+                    <div>
+                      <span className="text-xs text-stone-400">口头禅</span>
+                      <p className="text-sm font-medium text-amber-700">「{c.deepened.catchphrase}」</p>
+                    </div>
+                  )}
+                  {c.deepened.attitudes && Object.keys(c.deepened.attitudes).length > 0 && (
+                    <div>
+                      <span className="text-xs text-stone-400">人际态度</span>
+                      <div className="mt-1 space-y-1">
+                        {Object.entries(c.deepened.attitudes).map(([target, attitude]: [string, any]) => (
+                          <div key={target} className="flex items-start gap-2 text-sm">
+                            <span className="shrink-0 rounded bg-stone-200 px-1.5 py-0.5 text-xs text-stone-600">{target}</span>
+                            <span className="text-stone-600">{attitude}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {c.deepened.memoryPoints && (
+                    <div>
+                      <span className="text-xs text-stone-400">记忆点</span>
+                      <p className="text-sm font-medium text-stone-700">{c.deepened.memoryPoints}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {isDeepening && !c.deepened && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-stone-400">
+                  <LoaderCircle className="h-3 w-3 animate-spin" />
+                  等待深化...
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -1049,6 +1179,7 @@ function FrameworkPanel({
                 )}
               </div>
               <div className="mt-2">
+                <span className="text-xs text-stone-400">原始简述</span>
                 <ClickToEdit
                   value={act.content || ''}
                   onSave={(newVal) => {
@@ -1060,6 +1191,12 @@ function FrameworkPanel({
                   placeholder="幕内容概述..."
                 />
               </div>
+              {act.deepenedContent && (
+                <div className="mt-3 border-t border-stone-200 pt-3">
+                  <span className="text-xs text-stone-400">深化内容</span>
+                  <p className="mt-1 text-sm leading-relaxed text-stone-700">{act.deepenedContent}</p>
+                </div>
+              )}
               <div className="mt-2 space-y-1">
                 <span className="text-xs text-stone-400">核心场景：</span>
                 {(act.keyScenes || []).map((s: string, si: number) => (
@@ -1087,16 +1224,89 @@ function FrameworkPanel({
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection title="环境设定">
-        <ClickToEdit
-          value={(localOutput.environments || []).join('\n')}
-          onSave={(newVal) => {
-            const lines = newVal.split('\n').filter((l) => l.trim())
-            updateField('environments', lines)
-          }}
-          className="text-sm leading-relaxed text-stone-700"
-          placeholder="每行一个核心环境..."
-        />
+      {/* Phase 3: 环境设定卡片化 */}
+      <CollapsibleSection title={`环境设定 (${Array.isArray(localOutput.environments) ? localOutput.environments.length : 0})`}>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {Array.isArray(localOutput.environments) && localOutput.environments.map((env: any, ei: number) => {
+            const isObject = typeof env === 'object' && env !== null
+            const name = isObject ? env.name : String(env)
+            const brief = isObject ? env.brief : ''
+            return (
+              <div key={ei} className="rounded-lg border border-stone-200 bg-stone-50/50 p-4">
+                <div className="flex items-center gap-2">
+                  <span className="rounded bg-stone-700 px-2 py-0.5 text-xs font-medium text-white">
+                    环境 {ei + 1}
+                  </span>
+                  <span className="font-medium text-stone-800">{name}</span>
+                </div>
+                {brief && (
+                  <p className="mt-2 text-sm italic text-stone-500">{brief}</p>
+                )}
+                {isObject && (
+                  <div className="mt-3 space-y-2">
+                    {env.architecture && (
+                      <div>
+                        <span className="text-xs text-stone-400">建筑风格</span>
+                        <p className="text-sm text-stone-600">{env.architecture}</p>
+                      </div>
+                    )}
+                    {env.atmosphere && (
+                      <div>
+                        <span className="text-xs text-stone-400">影调氛围</span>
+                        <p className="text-sm text-stone-600">{env.atmosphere}</p>
+                      </div>
+                    )}
+                    {env.culture && (
+                      <div>
+                        <span className="text-xs text-stone-400">人文情况</span>
+                        <p className="text-sm text-stone-600">{env.culture}</p>
+                      </div>
+                    )}
+                    {env.distinctive && (
+                      <div>
+                        <span className="text-xs text-stone-400">辨识度</span>
+                        <p className="text-sm font-medium text-stone-700">{env.distinctive}</p>
+                      </div>
+                    )}
+                    {env.storyFunction && (
+                      <div>
+                        <span className="text-xs text-stone-400">叙事功能</span>
+                        <p className="text-sm text-stone-600">{env.storyFunction}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* 兼容旧数据：纯字符串环境 */}
+                {!isObject && (
+                  <div className="mt-2">
+                    <ClickToEdit
+                      value={String(env)}
+                      onSave={(newVal) => {
+                        const newEnvs = [...(localOutput.environments || [])]
+                        newEnvs[ei] = newVal
+                        updateField('environments', newEnvs)
+                      }}
+                      className="text-sm text-stone-600"
+                      placeholder="环境描述..."
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {/* 旧数据兼容：无环境时的编辑区 */}
+        {(!localOutput.environments || localOutput.environments.length === 0) && (
+          <ClickToEdit
+            value={(localOutput.environments || []).join('\n')}
+            onSave={(newVal) => {
+              const lines = newVal.split('\n').filter((l: string) => l.trim())
+              updateField('environments', lines)
+            }}
+            className="text-sm leading-relaxed text-stone-700"
+            placeholder="每行一个核心环境..."
+          />
+        )}
       </CollapsibleSection>
 
       <CollapsibleSection title="整体节奏策略">
@@ -1300,14 +1510,26 @@ function StylePanel({
 
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
+  // Phase 5: 每个卡片独立的模型选择状态
+  const [cardModels, setCardModels] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {}
+    optionsWithImages.forEach((opt: any) => {
+      const modelNo = opt.modelNo || opt.metadata?.modelNo
+      const poolModel = modelNo ? STYLE_MODEL_POOL.find(m => m.no === modelNo) : null
+      initial[opt.id] = poolModel?.id || opt.metadata?.imageModel || IMAGE_MODELS.primary
+    })
+    return initial
+  })
 
-  async function handleRegenerate(styleId: string, aspectRatio?: string, imageModel?: string) {
+  async function handleRegenerate(styleId: string, aspectRatio?: string, _imageModel?: string) {
     setRegeneratingId(styleId)
     try {
+      // 使用卡片独立选择的模型
+      const cardModel = cardModels[styleId] || IMAGE_MODELS.primary
       const res = await fetch(`/api/projects/${project.id}/steps/style/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ styleId, aspectRatio, imageModel }),
+        body: JSON.stringify({ styleId, aspectRatio, imageModel: cardModel }),
       })
       const data = await res.json()
       if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`)
@@ -1332,9 +1554,12 @@ function StylePanel({
               option={opt}
               isSelected={isSelected}
               onSelect={() => onSelectStyle(opt.id, opt.imageUrl)}
-              onRegenerate={(ar, model) => handleRegenerate(opt.id, ar, model)}
+              onRegenerate={(ar) => handleRegenerate(opt.id, ar)}
               isRegenerating={regeneratingId === opt.id}
               anyRegenerating={!!regeneratingId}
+              onModelChange={(modelId) => {
+                setCardModels(prev => ({ ...prev, [opt.id]: modelId }))
+              }}
             />
           )
         })}
@@ -1571,8 +1796,8 @@ function PromptPreview({
         </span>
       </div>
 
-      {/* 比例 + 模型 下拉选择栏 */}
-      {(onAspectRatioChange || onImageModelChange) && (
+      {/* 比例 + 模型 下拉选择栏（风格统一步骤隐藏全局模型选择） */}
+      {(onAspectRatioChange || onImageModelChange) && stepLabel !== 'STYLE' && (
         <div className="flex items-center gap-6 border-b border-stone-200 py-4">
           {onAspectRatioChange && (
             <div className="flex items-center gap-2">
@@ -1606,6 +1831,25 @@ function PromptPreview({
               </select>
             </div>
           )}
+        </div>
+      )}
+      {/* 风格统一步骤只保留比例选择 */}
+      {stepLabel === 'STYLE' && onAspectRatioChange && (
+        <div className="flex items-center gap-6 border-b border-stone-200 py-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-stone-700 whitespace-nowrap">画面比例</span>
+            <select
+              value={selectedRatio}
+              onChange={(e) => onAspectRatioChange(e.target.value)}
+              className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            >
+              {ASPECT_RATIO_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}（{opt.width}×{opt.height}）
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
@@ -1775,6 +2019,7 @@ function StyleCard({
   onRegenerate,
   isRegenerating,
   anyRegenerating,
+  onModelChange,
 }: {
   option: any
   isSelected: boolean
@@ -1782,8 +2027,10 @@ function StyleCard({
   onRegenerate?: (aspectRatio: string, imageModel: string) => Promise<void>
   isRegenerating?: boolean
   anyRegenerating?: boolean
+  onModelChange?: (modelId: string) => void
 }) {
   const [showPrompt, setShowPrompt] = useState(false)
+  const [showModelDropdown, setShowModelDropdown] = useState(false)
   const [aspectRatio, setAspectRatio] = useState(1)
   const isMock = !!option.isMock
   // [CARD-HOVER] 从 metadata 读取生成时的比例和模型
@@ -1791,12 +2038,22 @@ function StyleCard({
   // 工作指令.txt（2026-05-24）：优先从 modelNo 映射模型简称，旧项目回退到 imageModel
   const cardModelNo = option.metadata?.modelNo
   const cardModelFromPool = cardModelNo ? STYLE_MODEL_POOL.find(m => m.no === cardModelNo) : null
-  const cardModel = cardModelFromPool?.id || option.metadata?.imageModel || IMAGE_MODELS.primary
-  const modelShortLabel = cardModelFromPool?.short || MODEL_SHORT_NAME[cardModel] || cardModel.split('-')[0]
+  const defaultModelId = cardModelFromPool?.id || option.metadata?.imageModel || IMAGE_MODELS.primary
+  const [selectedModel, setSelectedModel] = useState(defaultModelId)
+  const modelShortLabel = MODEL_SHORT_NAME[selectedModel] || selectedModel.split('-')[0]
+
+  // 可用模型列表（排除 disabled 的）
+  const availableModels = (IMAGE_MODELS.available as unknown as any[]).filter(m => !m.disabled)
+
+  const handleModelChange = (modelId: string) => {
+    setSelectedModel(modelId)
+    setShowModelDropdown(false)
+    onModelChange?.(modelId)
+  }
 
   return (
     <div
-      className={`flex flex-col overflow-hidden rounded-lg border-2 transition ${
+      className={`relative flex flex-col overflow-hidden rounded-lg border-2 transition ${
         isSelected
           ? 'border-amber-500 shadow-md'
           : isMock
@@ -1814,7 +2071,7 @@ function StyleCard({
             src={option.imageUrl}
             alt={option.styleName}
             aspectRatio={cardRatio}
-            imageModel={cardModel}
+            imageModel={selectedModel}
             modelShortLabel={modelShortLabel}
             isMock={isMock}
             onClick={onSelect}
@@ -1841,6 +2098,43 @@ function StyleCard({
           <Check className="h-4 w-4 text-white" />
         </div>
       )}
+
+      {/* 模型选择交互区（右上角） */}
+      {onModelChange && (
+        <div className="absolute right-2 top-2 z-20">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowModelDropdown((v) => !v)
+            }}
+            className="flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white backdrop-blur-sm transition hover:bg-black/80"
+          >
+            {modelShortLabel}
+            <ChevronDown className="h-2.5 w-2.5" />
+          </button>
+          {showModelDropdown && (
+            <div className="absolute right-0 top-7 w-48 rounded-lg border border-stone-200 bg-white py-1 shadow-lg">
+              <div className="px-3 py-1 text-[10px] text-stone-400">选择生图模型</div>
+              {availableModels.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleModelChange(m.id)
+                  }}
+                  className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition hover:bg-stone-50 ${
+                    selectedModel === m.id ? 'text-amber-600 font-medium' : 'text-stone-700'
+                  }`}
+                >
+                  <span>{m.label}</span>
+                  {selectedModel === m.id && <Check className="h-3 w-3" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-1 flex-col p-3">
         <h3 className="text-sm font-semibold text-stone-800">{option.styleName}</h3>
         <p className="mt-1 text-xs leading-relaxed text-stone-500">{option.styleDescription}</p>

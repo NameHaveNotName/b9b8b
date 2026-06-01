@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { createStep, startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -32,6 +33,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   if (step.status === 'COMPLETED' && step.outputData) {
     console.log('[IDEATION] step already completed, returning cached result')
     return NextResponse.json({ success: true, data: step.outputData, cached: true })
+  }
+
+  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
   await startStep(step.id)
@@ -68,6 +74,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, rawText: resultText.slice(0, 3000) }
     await completeStep(step.id, result)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
 
     // 文本类步骤也应保存 outputData 到 Asset，确保资产库能展示
     const existingAsset = await prisma.asset.findFirst({
@@ -98,6 +105,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   } catch (e: any) {
     console.error('[IDEATION] Error:', e.message)
     await failStep(step.id, e.message)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

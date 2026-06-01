@@ -37,8 +37,8 @@ export default function AdminUsersPage() {
       (u.name || '').toLowerCase().includes(search.toLowerCase())
   )
 
-  const handleImpersonate = (userId: string) => {
-    router.push(`/project?impersonate=${userId}`)
+  const handleViewUser = (userId: string) => {
+    router.push(`/admin/users/${userId}/projects`)
   }
 
   if (loading) {
@@ -153,9 +153,9 @@ export default function AdminUsersPage() {
                   </td>
                   <td className="px-4 py-3">
                     <button
-                      onClick={() => handleImpersonate(user.id)}
+                      onClick={() => handleViewUser(user.id)}
                       className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-stone-500 transition hover:bg-stone-100 hover:text-stone-700"
-                      title="查看该用户视角"
+                      title="查看用户详情"
                     >
                       <Eye className="h-3.5 w-3.5" />
                       查看
