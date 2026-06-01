@@ -42,3 +42,4 @@ next-env.d.ts
 
 # mock storage (migrated to Supabase)
 public/mock-storage/
+settings.local.json
