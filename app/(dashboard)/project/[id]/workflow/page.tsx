@@ -1911,13 +1911,30 @@ function PromptPreview({
               key={p.id}
               className="rounded-lg border border-stone-200 bg-white p-4"
             >
-              {/* 模型标签（风格统一步骤专属） */}
+              {/* 模型选择下拉（风格统一步骤专属） */}
               {'modelNo' in p && (
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-medium text-stone-700">风格 {idx + 1}</span>
-                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                    将由 {STYLE_MODEL_POOL.find(m => m.no === (p as any).modelNo)?.label || '?'} 生成
-                  </span>
+                  <select
+                    value={(p as any).modelNo || 1}
+                    onChange={(e) => {
+                      const newModelNo = Number(e.target.value)
+                      const newPrompts = [...localPrompts]
+                      newPrompts[idx] = { ...newPrompts[idx], modelNo: newModelNo }
+                      setLocalPrompts(newPrompts)
+                      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+                      saveTimeoutRef.current = setTimeout(() => {
+                        savePrompts(newPrompts)
+                      }, 500)
+                    }}
+                    className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 cursor-pointer"
+                  >
+                    {STYLE_MODEL_POOL.map((m) => (
+                      <option key={m.no} value={m.no}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
 
