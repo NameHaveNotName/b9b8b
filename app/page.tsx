@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth-helpers'
 import { ArrowRight, Sparkles } from 'lucide-react'
