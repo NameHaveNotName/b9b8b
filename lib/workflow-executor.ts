@@ -43,6 +43,12 @@ export async function failStep(stepId: string, errorMessage: string) {
   });
 }
 
+/** 检查步骤是否被用户取消（使用 FAILED + [CANCELLED] 前缀标记） */
+export async function isStepCancelled(stepId: string): Promise<boolean> {
+  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  return step?.status === 'FAILED' && !!step?.errorMessage?.startsWith('[CANCELLED]')
+}
+
 export async function getProjectSteps(projectId: string) {
   return prisma.workflowStep.findMany({
     where: { projectId },

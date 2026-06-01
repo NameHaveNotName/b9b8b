@@ -21,6 +21,7 @@ import {
   Download,
   FileJson,
   FileSpreadsheet,
+  Square,
 } from 'lucide-react'
 // @ts-ignore — xlsx 包类型定义不完整，运行时可用
 import * as XLSX from 'xlsx'
@@ -138,6 +139,29 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
       }
     },
     [params.id, mutate, executing]
+  )
+
+  // 中断步骤
+  const handleCancel = useCallback(
+    async (stepType: string) => {
+      try {
+        const res = await fetch(`/api/projects/${params.id}/steps/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stepType }),
+        })
+        const result = await res.json()
+        if (!res.ok || !result.success) {
+          setToast({ kind: 'error', message: `中断失败：${result.error || '未知错误'}` })
+          return
+        }
+        setToast({ kind: 'success', message: '已中断' })
+        await mutate()
+      } catch (e: any) {
+        setToast({ kind: 'error', message: '中断失败：' + e.message })
+      }
+    },
+    [params.id, mutate]
   )
 
   // [WORKFLOW-FIX] 跳过步骤
@@ -284,6 +308,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             executing={executing}
             onExecute={() => executeStep(currentStep.stepType)}
             onRetry={() => executeStep(currentStep.stepType)}
+            onCancel={() => handleCancel(currentStep.stepType)}
             onNext={goToNextStep}
           />
 
@@ -386,15 +411,18 @@ function StepHeader({
   executing,
   onExecute,
   onRetry,
+  onCancel,
   onNext,
 }: {
   step: any
   executing: string | null
   onExecute: () => void
   onRetry: () => void
+  onCancel: () => void
   onNext: () => void
 }) {
   const isExecuting = executing === step.stepType
+  const isCancelled = step.status === 'FAILED' && step.errorMessage?.startsWith('[CANCELLED]')
 
   const statusConfig: Record<
     string,
@@ -403,7 +431,7 @@ function StepHeader({
     PENDING: { label: '待开始', className: 'bg-stone-100 text-stone-500' },
     PROCESSING: { label: '进行中', className: 'bg-blue-50 text-blue-600' },
     COMPLETED: { label: '已完成', className: 'bg-green-50 text-green-600' },
-    FAILED: { label: '失败', className: 'bg-red-50 text-red-600' },
+    FAILED: { label: isCancelled ? '已中断' : '失败', className: isCancelled ? 'bg-stone-100 text-stone-500' : 'bg-red-50 text-red-600' },
     SKIPPED: { label: '已跳过', className: 'bg-stone-50 text-stone-400' },
   }
 
@@ -444,6 +472,17 @@ function StepHeader({
             </button>
             <CostBadge cost={DEFAULT_GENERATE_COST} />
           </div>
+        )}
+
+        {step.status === 'PROCESSING' && (
+          <button
+            onClick={onCancel}
+            disabled={isExecuting && executing !== step.stepType}
+            className="flex items-center gap-2 rounded-lg bg-red-50 px-5 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+          >
+            <Square className="h-4 w-4 fill-current" />
+            中断
+          </button>
         )}
 
         {step.status === 'FAILED' && (

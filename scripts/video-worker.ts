@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq'
 import { redisConnection } from '../lib/queue'
 import { prisma } from '../lib/prisma'
-import { completeStep, failStep } from '../lib/workflow-executor'
+import { completeStep, failStep, isStepCancelled } from '../lib/workflow-executor'
 
 // 动态加载 video client（避免在导入时解析路径别名问题）
 async function getVideoClient() {
@@ -40,6 +40,10 @@ const worker = new Worker('video-generation', async (job) => {
       })
       // 工作指令.txt（Round 7/8）：BullMQ 分支与 setImmediate 分支保持一致，
       // 在 step.outputData 写入完整管线产物（segments + musicUrl + musicIsMock）
+      if (await isStepCancelled(stepId)) {
+        console.log(`[TRAILER-WORKER] step ${stepId} was cancelled by user, aborting`)
+        return
+      }
       await completeStep(stepId, {
         videoUrl: result.url,
         videoAssetId: result.storageKey,

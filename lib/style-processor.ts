@@ -1,5 +1,5 @@
 import { prisma } from './prisma'
-import { completeStep, failStep } from './workflow-executor'
+import { completeStep, failStep, isStepCancelled } from './workflow-executor'
 import { generateImage } from './api-clients/xiaomi'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
@@ -166,6 +166,12 @@ export async function processStyleGeneration(
             }
           : opt
       }) || results
+
+    // 检查是否被用户取消
+    if (await isStepCancelled(stepId)) {
+      console.log(`[StyleProcessor] step ${stepId} was cancelled by user, aborting`)
+      return
+    }
 
     const mockCount = results.filter((r) => r.isMock).length
     const outputData = {

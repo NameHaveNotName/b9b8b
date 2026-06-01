@@ -1,103 +1,134 @@
-这个日志暴露了一个关键问题：**`cookies()` 和 `headers()` 在 Next.js 静态生成阶段被调用**，导致 `getCurrentUser()` 在 build 时抛错，进而可能使运行时 auth 逻辑也不稳定。这会连锁导致 OperationLog 拿不到 `userId`、Admin 页面鉴权失败。
+这是执行代码里**完全没有调用** `logOperation` 的问题。之前建的表和工具函数只是基础设施，现在需要在每个工作流步骤的**执行成功回调**中显式插入写入逻辑。
 
 ---
 
 ## Kimi Code 执行提示词
 
-**任务：修复 `DynamicServerError` — 静态生成阶段非法调用 `cookies`/`headers`**
+**任务：在工作流全步骤执行成功后注入操作日志写入**
 
 ---
 
-### Phase 1: 问题定位
+### Phase 1: 定位所有执行函数的注入点
 
-日志中所有报错都遵循同一模式：
-- `getCurrentUser` → 调用了 `cookies()` → 在 `/api/*` 和 `/admin/*` 路由中触发
-- `RootLayout` → 调用了 `headers()` → 在所有页面布局中触发
+在项目中全局搜索以下关键词，找到用户点击"开始执行"、"确认执行"、"生成创意方向"后**实际触发业务逻辑**的函数：
 
-**根因**：Next.js 14 在 `next build` 时会尝试静态预渲染（SSG）所有路由。如果某路由（或 API Route）内部直接或间接调用了 `cookies()` / `headers()`，但该路由未被标记为动态，build 就会抛 `DynamicServerError`。
-
----
-
-### Phase 2: 强制动态渲染 — API Routes
-
-对所有受影响的 API Route 文件（`route.ts`），在文件顶部添加：
-
-```ts
-export const dynamic = 'force-dynamic';
+```
+搜索关键词（按优先级）：
+- "开始执行"
+- "确认执行"  
+- "生成创意方向"
+- "重新生成"
+- handleGenerate
+- handleExecute
+- onExecute
+- onConfirm
+- generateStyle / generateFramework / generateIdea 等
 ```
 
-**受影响文件**（根据日志）：
-- `app/api/admin/analytics/route.ts`
-- `app/api/admin/users/route.ts`
-- `app/api/user/route.ts`
-
-**检查方式**：全局搜索 `app/api/` 下所有 `route.ts`，如果文件内部直接或间接使用了 `cookies()` / `headers()`（通过 `lib/supabase/server.ts` 也算），一律添加 `export const dynamic = 'force-dynamic'`。
+**注入位置**：在这些函数**成功返回结果后**（`try` 块末尾、`return` 之前），插入 `logOperation` 调用。
 
 ---
 
-### Phase 3: 强制动态渲染 — 页面（page.tsx）
+### Phase 2: 注入代码模板
 
-对所有受影响的页面文件，在文件顶部添加：
+**如果执行逻辑在 API Route（`app/api/.../route.ts`）中**：
 
 ```ts
-export const dynamic = 'force-dynamic';
+import { logOperation } from '@/lib/operations';
+
+// 在 POST handler 中，业务逻辑成功后
+await logOperation({
+  userId: user.id,           // 从 auth session 获取
+  projectId: body.projectId,   // 从请求 body 获取
+  stepName: 'style_unify',   // 见下方映射表
+  actionType: 'generate',    // generate | regenerate | skip | confirm
+  cost: 20,                  // 从 lib/points-config.ts 读取
+  status: 'success',
+});
 ```
 
-**受影响文件**（根据日志）：
-- `app/admin/analytics/page.tsx`
-- `app/admin/users/page.tsx`
-- `app/page.tsx`（仪表盘）
-- `app/project/new/page.tsx`
-- `app/settings/page.tsx`
-- `app/login/page.tsx`
-- `app/register/page.tsx`
+**如果执行逻辑在 Server Action 中**：
 
-**检查方式**：全局搜索 `app/**/page.tsx`，如果文件内部使用了 `lib/supabase/server.ts`（含 `cookies()`）或 `headers()`，添加该导出。
+```ts
+'use server';
+import { logOperation } from '@/lib/operations';
 
----
+export async function generateFramework(projectId: string, ...) {
+  // ... 业务逻辑 ...
+  
+  await logOperation({
+    userId: session.user.id,
+    projectId,
+    stepName: 'framework',
+    actionType: 'generate',
+    cost: 10,
+    status: 'success',
+  });
+  
+  return result;
+}
+```
 
-### Phase 4: 修复 RootLayout
-
-日志显示 `RootLayout` 中调用了 `auth()`，而 `auth()` 内部使用了 `headers()`。
-
-**方案**（二选一，根据项目实际选择）：
-
-**方案 A：如果 RootLayout 不需要在服务端获取 auth 信息**
-- 将 `RootLayout` 中的 `auth()` 调用移除，或改为在客户端通过 `useEffect` + `lib/supabase/client.ts` 获取 session。
-- 这样布局层不再触碰 `headers()`，子页面可按需静态生成。
-
-**方案 B：如果 RootLayout 必须在服务端获取 auth**
-- 在 `app/layout.tsx` 顶部添加：
-  ```ts
-  export const dynamic = 'force-dynamic';
-  ```
-- 但这会导致**整个应用**所有路由都无法静态生成（因为布局是根节点）。如果项目本来就是全动态应用（有登录态），这是可接受的。
-
-**推荐**：如果这是一个需要登录的 SaaS 应用，**方案 B 最简单**，直接在 `app/layout.tsx` 加 `export const dynamic = 'force-dynamic'`。
+**如果执行逻辑在 Client Component 中直接 fetch 外部 API**（如直接调用即梦/海螺 API）：
+- **方案 A（推荐）**：在后端新增一个 `/api/log-operation` 的 POST 路由，前端执行成功后先调用它。
+- **方案 B**：将执行逻辑改为走 Server Action，在 Action 内部统一处理业务 + 日志。
 
 ---
 
-### Phase 5: 验证修复
+### Phase 3: 各步骤 stepName 映射表（严格统一）
 
-1. 本地执行 `npm run build`（或 `next build`）。
-2. 确认控制台不再出现 `DynamicServerError: ... couldn't be rendered statically because it used cookies/headers`。
-3. 如果 build 通过，部署到 Vercel。
-4. 部署后重新测试：
-   - 执行一次工作流步骤，检查 OperationLog 是否写入
-   - 检查 Admin 页面是否正常加载
+| 界面步骤 | stepName | 成本常量（从 points-config.ts 读取） |
+|---------|----------|----------------------------------|
+| 创意扩散 | `idea_diffusion` | `STEP_COSTS.idea` |
+| 框架搭建 | `framework` | `STEP_COSTS.framework` |
+| 风格统一 | `style_unify` | `STEP_COSTS.style` |
+| 人物设计 | `character_design` | `STEP_COSTS.character` |
+| 概念图 | `concept_art` | `STEP_COSTS.concept` |
+| 宣传片 | `trailer` | `STEP_COSTS.trailer` |
+| 分镜设计 | `storyboard` | `STEP_COSTS.storyboard` |
+| 生成尾帧 | `ending_frame` | `STEP_COSTS.ending` |
+| 直出视频 | `direct_video` | `STEP_COSTS.direct` |
 
----
-
-### Phase 6: 如果 OperationLog 仍不写入
-
-DynamicServerError 修复后，如果操作数依然不增长，回到之前的问题：**执行函数中没有显式调用 `logOperation`**。
-
-请按以下顺序排查：
-1. 打开一个工作流步骤的执行代码（如 `app/api/idea/generate/route.ts` 或对应的 Server Action）。
-2. 确认在返回成功响应**之前**，有 `await logOperation(...)` 调用。
-3. 确认 `logOperation` 中的 `userId` 不是 `null`（通过 `getCurrentUser()` 获取）。
-4. 在 `logOperation` 函数内部加 `console.log('Logging operation', data)`，看是否被执行。
+**actionType 规则**：
+- 用户点击"开始执行" / "生成创意方向" / "确认执行" → `'generate'`
+- 用户点击"重新生成" → `'regenerate'`
+- 用户点击"跳过" → `'skip'`
 
 ---
 
-**执行顺序**：Phase 2（API Routes）→ Phase 3（Pages）→ Phase 4（RootLayout）→ Phase 5（Build 验证）→ Phase 6（日志写入验证）。
+### Phase 4: 失败时也要记录
+
+在每个执行函数的 `catch` 块中补充失败日志：
+
+```ts
+} catch (error) {
+  await logOperation({
+    userId: user.id,
+    projectId,
+    stepName: 'style_unify',
+    actionType: 'generate',
+    cost: 0,
+    status: 'failed',
+    metadata: { error: error instanceof Error ? error.message : String(error) },
+  });
+  throw error;
+}
+```
+
+---
+
+### Phase 5: 验证写入
+
+1. 完成至少一个步骤的注入后，本地执行一次该步骤（如创意扩散或风格统一）。
+2. 立即在 Supabase SQL Editor 执行：
+   ```sql
+   SELECT * FROM "OperationLog" ORDER BY created_at DESC LIMIT 5;
+   ```
+3. 确认返回非空记录后，再批量处理其他步骤。
+4. 全部完成后，刷新 Admin 后台，确认"总操作数"和图表不再为 0。
+
+---
+
+**执行顺序**：Phase 1（搜索定位）→ Phase 2（选一个步骤注入并验证）→ Phase 3（按映射表批量注入所有步骤）→ Phase 4（补 catch 块）→ Phase 5（全量验证）。
+
+**先选一个最简单的步骤（如创意扩散或框架搭建）做试点，验证 OperationLog 能写入后，再批量处理其余步骤。**

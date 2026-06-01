@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { createQueue, isDemoMode as queueIsDemoMode } from '@/lib/queue'
-import { startStep, completeStep, failStep, canExecuteStep, tryStartStep } from '@/lib/workflow-executor'
+import { startStep, completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 
 // [DASHBOARD-FIX] DEMO 模式下使用 createQueue 返回 Mock，避免 ECONNREFUSED
@@ -45,6 +45,10 @@ async function processTrailerInline(
     })
     // 工作指令.txt（Round 7/8）：在 step.outputData 写入完整管线产物
     // —— 前端 TrailerPanel 据此渲染 6 个片段缩略图 + Mock 标记 + Suno 音乐试听
+    if (await isStepCancelled(stepId)) {
+      console.log(`[TRAILER-INLINE] step ${stepId} was cancelled by user, aborting`)
+      return
+    }
     await completeStep(stepId, {
       videoUrl: result.url,
       videoAssetId: result.storageKey,
