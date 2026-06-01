@@ -9,6 +9,8 @@ import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflo
 import { createQueue } from '@/lib/queue'
 import { processStyleGeneration } from '@/lib/style-processor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { logOperation } from '@/lib/operations'
+import { STEP_COSTS } from '@/lib/points-config'
 
 const styleQueue = createQueue('style-generation')
 
@@ -337,6 +339,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       })
     }
 
+    await logOperation({
+      userId,
+      projectId: params.id,
+      workflowStepId: step.id,
+      actionType: 'generate',
+      cost: STEP_COSTS.style,
+      status: 'success',
+    })
     return NextResponse.json({
       success: true,
       message: queued ? '风格生成任务已入队' : '风格生成任务已在后台启动',
@@ -345,6 +355,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     })
   } catch (e: any) {
     await failStep(step.id, e.message)
+    await logOperation({
+      userId,
+      projectId: params.id,
+      workflowStepId: step.id,
+      actionType: 'generate',
+      cost: 0,
+      status: 'failed',
+      metadata: { error: e.message },
+    })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

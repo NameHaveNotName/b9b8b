@@ -10,6 +10,8 @@ import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflo
 import sharp from 'sharp'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { logOperation } from '@/lib/operations'
+import { STEP_COSTS } from '@/lib/points-config'
 
 async function generateStoryboardByAct(textClient: any, framework: any, act: any) {
   const prompt = loadPromptTemplate('storyboard-act-dynamic', {
@@ -322,9 +324,26 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
 
     await completeStep(step.id, outputData)
+    await logOperation({
+      userId,
+      projectId: params.id,
+      workflowStepId: step.id,
+      actionType: 'generate',
+      cost: STEP_COSTS.storyboard,
+      status: 'success',
+    })
     return NextResponse.json({ success: true, data: { shots: allShots, count: allShots.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)
+    await logOperation({
+      userId,
+      projectId: params.id,
+      workflowStepId: step.id,
+      actionType: 'generate',
+      cost: 0,
+      status: 'failed',
+      metadata: { error: e.message },
+    })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

@@ -6,6 +6,8 @@ import { prisma } from '@/lib/prisma'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import sharp from 'sharp'
 import { IMAGE_MODELS, MODEL_SIZE_MAP } from '@/lib/models-config'
+import { logOperation } from '@/lib/operations'
+import { STEP_COSTS } from '@/lib/points-config'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -128,9 +130,26 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     })
 
     console.log('[STORYBOARD-REGENERATE] 重新生成成功:', newAsset.id)
+    await logOperation({
+      userId,
+      projectId: params.id,
+      workflowStepId: step.id,
+      actionType: 'regenerate',
+      cost: STEP_COSTS.storyboard,
+      status: 'success',
+    })
     return NextResponse.json({ success: true, asset: { shotId: targetShot.shotId, assetId: newAsset.id, url } })
   } catch (e: any) {
     console.error('[STORYBOARD-REGENERATE] 重新生成失败:', e?.message)
+    await logOperation({
+      userId,
+      projectId: params.id,
+      workflowStepId: step.id,
+      actionType: 'regenerate',
+      cost: 0,
+      status: 'failed',
+      metadata: { error: e.message },
+    })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

@@ -68,14 +68,21 @@ export default async function AdminUserProjectsPage({ params }: PageProps) {
   // 操作日志按步骤聚合统计
   const operations = await prisma.operationLog.findMany({
     where: { userId: user.id },
-    include: {
-      workflowStep: { select: { stepType: true } },
-    },
   })
+
+  // 收集所有 workflowStepId 并查询对应步骤类型
+  const stepIds = operations.map((op) => op.workflowStepId).filter(Boolean) as string[]
+  const workflowSteps = stepIds.length > 0
+    ? await prisma.workflowStep.findMany({
+        where: { id: { in: stepIds } },
+        select: { id: true, stepType: true },
+      })
+    : []
+  const stepTypeMap = new Map(workflowSteps.map((s) => [s.id, s.stepType]))
 
   const stepCountMap = new Map<string, number>()
   for (const op of operations) {
-    const stepType = op.workflowStep?.stepType || 'OTHER'
+    const stepType = op.workflowStepId ? stepTypeMap.get(op.workflowStepId) || 'OTHER' : 'OTHER'
     stepCountMap.set(stepType, (stepCountMap.get(stepType) || 0) + 1)
   }
 

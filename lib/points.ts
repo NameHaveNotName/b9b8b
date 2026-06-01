@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST } from '@/lib/points-config'
+import { logOperation } from '@/lib/operations'
 
 // 重新导出常量，保持 API 路由的 backward compatibility
 export { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST }
@@ -53,39 +54,24 @@ export async function deductPointsAndLog(
     errorMessage?: string
   } = {}
 ) {
+  // 先写日志（logOperation 内部已做容错，不会抛错阻断主流程）
+  await logOperation({
+    userId,
+    projectId: meta.projectId,
+    workflowStepId: meta.workflowStepId,
+    assetId: meta.assetId,
+    actionType: type,
+    cost,
+    status: meta.success ?? true ? 'success' : 'failed',
+    metadata: meta.errorMessage ? { error: meta.errorMessage } : undefined,
+  })
+
   if (cost <= 0) {
-    // 即使不扣积分，也记录操作日志
-    await prisma.operationLog.create({
-      data: {
-        userId,
-        type,
-        pointsCost: 0,
-        success: meta.success ?? true,
-        projectId: meta.projectId,
-        workflowStepId: meta.workflowStepId,
-        assetId: meta.assetId,
-        errorMessage: meta.errorMessage,
-      },
-    })
     return
   }
 
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: userId },
-      data: { points: { decrement: cost } },
-    }),
-    prisma.operationLog.create({
-      data: {
-        userId,
-        type,
-        pointsCost: cost,
-        success: meta.success ?? true,
-        projectId: meta.projectId,
-        workflowStepId: meta.workflowStepId,
-        assetId: meta.assetId,
-        errorMessage: meta.errorMessage,
-      },
-    }),
-  ])
+  await prisma.user.update({
+    where: { id: userId },
+    data: { points: { decrement: cost } },
+  })
 }

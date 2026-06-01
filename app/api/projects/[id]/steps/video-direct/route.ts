@@ -90,37 +90,42 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   await startStep(step.id)
 
-  const jobs = []
-  for (const shot of firstFrames) {
-    const shotId = shot.shotId
-    const firstFrameUrl = shot.firstFrameUrl
+  try {
+    const jobs = []
+    for (const shot of firstFrames) {
+      const shotId = shot.shotId
+      const firstFrameUrl = shot.firstFrameUrl
 
-    // Phase 5: 检查该 shot 是否有尾帧（支持部分生成情况）
-    const kf = keyframes.find((k: any) => k.shotId === shotId)
-    const lastFrameUrl = kf?.lastFrameUrl || null
-    const shotStrategy = lastFrameUrl ? 'first-last' : 'first-only'
+      // Phase 5: 检查该 shot 是否有尾帧（支持部分生成情况）
+      const kf = keyframes.find((k: any) => k.shotId === shotId)
+      const lastFrameUrl = kf?.lastFrameUrl || null
+      const shotStrategy = lastFrameUrl ? 'first-last' : 'first-only'
 
-    const job = await videoQueue.add('generate-direct', {
-      stepId: step.id,
-      projectId: params.id,
-      shotId,
-      firstFrameUrl,
-      lastFrameUrl,  // Phase 5: 可能为 null
-      strategy: shotStrategy,  // Phase 5: 每 shot 独立策略
-      type: 'direct',
-      videoModel,  // 工作指令.txt（2026-05-26 Phase 6）：透传模型选择
+      const job = await videoQueue.add('generate-direct', {
+        stepId: step.id,
+        projectId: params.id,
+        shotId,
+        firstFrameUrl,
+        lastFrameUrl,  // Phase 5: 可能为 null
+        strategy: shotStrategy,  // Phase 5: 每 shot 独立策略
+        type: 'direct',
+        videoModel,  // 工作指令.txt（2026-05-26 Phase 6）：透传模型选择
+      })
+      jobs.push({ shotId, jobId: job.id, strategy: shotStrategy })
+    }
+
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
+    return NextResponse.json({
+      success: true,
+      taskId: step.id,
+      status: 'queued',
+      strategy,
+      jobs,
     })
-    jobs.push({ shotId, jobId: job.id, strategy: shotStrategy })
+  } catch (e: any) {
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
+    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
-
-  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-  return NextResponse.json({
-    success: true,
-    taskId: step.id,
-    status: 'queued',
-    strategy,
-    jobs,
-  })
 }
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {

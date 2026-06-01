@@ -9,6 +9,8 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getStyleRefUrl } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { logOperation } from '@/lib/operations'
+import { STEP_COSTS } from '@/lib/points-config'
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -304,9 +306,26 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
 
     await completeStep(step.id, { portraits, characterCount: characters.length })
+    await logOperation({
+      userId,
+      projectId: params.id,
+      workflowStepId: step.id,
+      actionType: 'generate',
+      cost: STEP_COSTS.character,
+      status: 'success',
+    })
     return NextResponse.json({ success: true, data: { portraits, characterCount: characters.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)
+    await logOperation({
+      userId,
+      projectId: params.id,
+      workflowStepId: step.id,
+      actionType: 'generate',
+      cost: 0,
+      status: 'failed',
+      metadata: { error: e.message },
+    })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

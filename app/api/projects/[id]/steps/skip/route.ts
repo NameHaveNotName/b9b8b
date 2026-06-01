@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { WORKFLOW_STEPS } from '@/lib/workflow'
+import { logOperation } from '@/lib/operations'
 
 const SKIPPABLE_STEPS = ['STYLE', 'CONCEPT', 'TRAILER', 'KEYFRAMES', 'REVIEW']
 
@@ -56,6 +57,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   }
 
   console.log(`[WORKFLOW-FIX] 跳过步骤 ${stepType} (项目 ${params.id})`)
+
+  await logOperation({
+    userId,
+    projectId: params.id,
+    workflowStepId: step?.id,
+    actionType: 'skip',
+    cost: 0,
+    status: 'success',
+  })
 
   // 查找下一步
   const nextStep = WORKFLOW_STEPS.find(s => s.order === stepMeta.order + 1)
