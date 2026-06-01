@@ -1,51 +1,103 @@
-任务：修复 Auth 路由保护与登录页功能
+这个日志暴露了一个关键问题：**`cookies()` 和 `headers()` 在 Next.js 静态生成阶段被调用**，导致 `getCurrentUser()` 在 build 时抛错，进而可能使运行时 auth 逻辑也不稳定。这会连锁导致 OperationLog 拿不到 `userId`、Admin 页面鉴权失败。
 
-当前状态：
-- Supabase Auth 已接入，环境变量已配置 ✅
-- 访问 /dashboard 可直接进入，未检测登录 ✅ 已修复（middleware + DashboardShell 兜底）
-- /login 页面只有 GitHub 登录按钮，无邮箱密码表单 ✅ 已有邮箱密码表单
-- GitHub OAuth 配置未生效（Supabase 仍使用 demo-client-id），暂时不可用 ✅ Phase 6 已配置
-- Email provider 已在 Supabase Dashboard 开启 ✅ Phase 6 已配置
+---
 
-执行阶段：
+## Kimi Code 执行提示词
 
-### Phase 1：路由登录保护（Middleware 修复）✅ 已完成
-排查方向：
-1. ✅ 检查 middleware.ts 当前逻辑，确认 /dashboard、/dashboard/*、/project/*、/settings 等路由是否被保护
-2. ✅ 检查是否排除了 /login、/register、/、/api/auth/* 等公开路由（matcher 未包含这些路径）
-3. ✅ 检查 Supabase SSR session 获取逻辑（createServerClient + cookies）
+**任务：修复 `DynamicServerError` — 静态生成阶段非法调用 `cookies`/`headers`**
 
-修改方向：
-- ✅ 未登录访问受保护路由 → 302 重定向到 /login
-- ✅ 已登录访问 /login → 重定向到 /dashboard（2025-05-30 修复：middleware.ts 新增逻辑）
-- ✅ matcher 配置包含需要保护的路径
+---
 
-### Phase 2：登录页添加邮箱密码登录 ✅ 已完成
-排查方向：
-1. ✅ 检查 app/login/page.tsx，确认当前是否只有 GitHub OAuth 按钮 → 已有邮箱密码表单
-2. ✅ 检查是否已有邮箱密码输入框但被隐藏 → 直接显示
+### Phase 1: 问题定位
 
-修改方向：
-- ✅ 添加邮箱 + 密码输入框
-- ✅ 「登录」按钮：调用 supabase.auth.signInWithPassword({ email, password })
-- ✅ 「注册」按钮/切换：调用 supabase.auth.signUp({ email, password }) → 在 /register 页面
-- ✅ 注册成功后，调用 API 在 Prisma User 表创建记录（id = auth.uid, email = email）→ /api/user/sync
-- ✅ 登录/注册成功后 router.push('/dashboard')
-- ✅ 表单添加基本校验（邮箱格式、密码长度≥6）
-- ✅ UI 风格与现有设计系统一致
+日志中所有报错都遵循同一模式：
+- `getCurrentUser` → 调用了 `cookies()` → 在 `/api/*` 和 `/admin/*` 路由中触发
+- `RootLayout` → 调用了 `headers()` → 在所有页面布局中触发
 
-### Phase 3：首页与 Dashboard 入口 ✅ 已完成
-修改方向：
-- ✅ 首页「进入工作台」按钮保持跳转 /dashboard，由 middleware 处理未登录重定向
-- ✅ /dashboard 页面组件添加客户端兜底保护（useEffect 检查 session）→ DashboardShell 已添加 401 检测重定向
+**根因**：Next.js 14 在 `next build` 时会尝试静态预渲染（SSG）所有路由。如果某路由（或 API Route）内部直接或间接调用了 `cookies()` / `headers()`，但该路由未被标记为动态，build 就会抛 `DynamicServerError`。
 
-其他修复记录：
-- ✅ Dashboard 页面所有查询已添加 userId 过滤，修复多用户数据隔离漏洞
-- ✅ .env.example 已添加 NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY 模板
-- ⚠️ lib/api-clients/mock-video.ts 有 6 个预存在 TypeScript 错误（'this' implicitly has type 'any'），不影响编译和运行
+---
 
-执行要求：
-- 本地 npm run dev 测试：未登录访问 /dashboard → 重定向 /login；登录后 → 进入 /dashboard
-- 测试邮箱注册 → 登录 → 创建项目，确认 Prisma User 表正确关联
-- 修复后 git add / commit / push 自动部署
-- 全程无需向我逐次确认，遇到阻塞性问题记录错误日志并汇报
+### Phase 2: 强制动态渲染 — API Routes
+
+对所有受影响的 API Route 文件（`route.ts`），在文件顶部添加：
+
+```ts
+export const dynamic = 'force-dynamic';
+```
+
+**受影响文件**（根据日志）：
+- `app/api/admin/analytics/route.ts`
+- `app/api/admin/users/route.ts`
+- `app/api/user/route.ts`
+
+**检查方式**：全局搜索 `app/api/` 下所有 `route.ts`，如果文件内部直接或间接使用了 `cookies()` / `headers()`（通过 `lib/supabase/server.ts` 也算），一律添加 `export const dynamic = 'force-dynamic'`。
+
+---
+
+### Phase 3: 强制动态渲染 — 页面（page.tsx）
+
+对所有受影响的页面文件，在文件顶部添加：
+
+```ts
+export const dynamic = 'force-dynamic';
+```
+
+**受影响文件**（根据日志）：
+- `app/admin/analytics/page.tsx`
+- `app/admin/users/page.tsx`
+- `app/page.tsx`（仪表盘）
+- `app/project/new/page.tsx`
+- `app/settings/page.tsx`
+- `app/login/page.tsx`
+- `app/register/page.tsx`
+
+**检查方式**：全局搜索 `app/**/page.tsx`，如果文件内部使用了 `lib/supabase/server.ts`（含 `cookies()`）或 `headers()`，添加该导出。
+
+---
+
+### Phase 4: 修复 RootLayout
+
+日志显示 `RootLayout` 中调用了 `auth()`，而 `auth()` 内部使用了 `headers()`。
+
+**方案**（二选一，根据项目实际选择）：
+
+**方案 A：如果 RootLayout 不需要在服务端获取 auth 信息**
+- 将 `RootLayout` 中的 `auth()` 调用移除，或改为在客户端通过 `useEffect` + `lib/supabase/client.ts` 获取 session。
+- 这样布局层不再触碰 `headers()`，子页面可按需静态生成。
+
+**方案 B：如果 RootLayout 必须在服务端获取 auth**
+- 在 `app/layout.tsx` 顶部添加：
+  ```ts
+  export const dynamic = 'force-dynamic';
+  ```
+- 但这会导致**整个应用**所有路由都无法静态生成（因为布局是根节点）。如果项目本来就是全动态应用（有登录态），这是可接受的。
+
+**推荐**：如果这是一个需要登录的 SaaS 应用，**方案 B 最简单**，直接在 `app/layout.tsx` 加 `export const dynamic = 'force-dynamic'`。
+
+---
+
+### Phase 5: 验证修复
+
+1. 本地执行 `npm run build`（或 `next build`）。
+2. 确认控制台不再出现 `DynamicServerError: ... couldn't be rendered statically because it used cookies/headers`。
+3. 如果 build 通过，部署到 Vercel。
+4. 部署后重新测试：
+   - 执行一次工作流步骤，检查 OperationLog 是否写入
+   - 检查 Admin 页面是否正常加载
+
+---
+
+### Phase 6: 如果 OperationLog 仍不写入
+
+DynamicServerError 修复后，如果操作数依然不增长，回到之前的问题：**执行函数中没有显式调用 `logOperation`**。
+
+请按以下顺序排查：
+1. 打开一个工作流步骤的执行代码（如 `app/api/idea/generate/route.ts` 或对应的 Server Action）。
+2. 确认在返回成功响应**之前**，有 `await logOperation(...)` 调用。
+3. 确认 `logOperation` 中的 `userId` 不是 `null`（通过 `getCurrentUser()` 获取）。
+4. 在 `logOperation` 函数内部加 `console.log('Logging operation', data)`，看是否被执行。
+
+---
+
+**执行顺序**：Phase 2（API Routes）→ Phase 3（Pages）→ Phase 4（RootLayout）→ Phase 5（Build 验证）→ Phase 6（日志写入验证）。

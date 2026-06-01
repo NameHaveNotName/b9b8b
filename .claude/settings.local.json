@@ -136,7 +136,10 @@
       "Bash(git branch *)",
       "Bash(gh --version)",
       "Bash(git remote *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git reset *)",
+      "Bash(git fetch *)",
+      "WebFetch(domain:b9b8b.vercel.app)"
     ]
   },
   "outputStyle": "default",

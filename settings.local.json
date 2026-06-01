@@ -1,0 +1,12 @@
+{
+    "permissions":{
+        "allow":[
+            "Read(*)",
+            "Write(*)",
+            "Edit(*)",
+            "Bash(pnpm *)",
+            "Bash(node *)",
+            "Bash(npx *)"
+        ]
+    }
+}
