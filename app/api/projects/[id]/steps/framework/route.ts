@@ -174,7 +174,7 @@ async function deepenSynopsis(framework: any, stepId: string) {
     const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 })
     const deepenedSynopsis = resultText.trim()
 
-    framework = { ...framework, synopsis: deepenedSynopsis }
+    framework = { ...framework, deepenedSynopsis }
     await updateDeepeningStatus(stepId, framework, 'deepening_synopsis', {
       current: 1,
       total: 1,

@@ -911,6 +911,45 @@ function IdeationPanel({
   return <ProcessingBlock message="暂无创意方向数据" />
 }
 
+/** 将纯文本按换行符格式化为段落，对话行自动单独成段 */
+function FormattedText({ text, className }: { text: string; className?: string }) {
+  if (!text) return null
+  // 按双换行切分段落，同时兼容单换行形成的段落
+  const paragraphs = text.split(/\n{2,}/).filter(Boolean)
+  return (
+    <div className={className}>
+      {paragraphs.map((para, pi) => {
+        // 段落内部再按单换行切分（LLM 有时用单换行分隔对话）
+        const lines = para.split('\n').filter(Boolean)
+        return (
+          <div key={pi} className={pi > 0 ? 'mt-3' : ''}>
+            {lines.map((line, li) => {
+              const trimmed = line.trim()
+              // 检测对话行：以引号开头，或包含 "说："/"道：" 等对话标记
+              const isDialogue =
+                /^[「『“‘"']/.test(trimmed) ||
+                /[「『“‘"'].+[」』”’"']/.test(trimmed) ||
+                /[说道喊叫问答嚷]\s*[:：]/.test(trimmed)
+              return (
+                <p
+                  key={li}
+                  className={
+                    isDialogue
+                      ? 'mt-1 pl-3 border-l-2 border-stone-200 italic text-stone-600'
+                      : li > 0 ? 'mt-1' : ''
+                  }
+                >
+                  {trimmed}
+                </p>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function DeepeningStatus({ deepening }: { deepening?: any }) {
   if (!deepening) return null
   const status = deepening.status
@@ -1149,12 +1188,19 @@ function FrameworkPanel({
       </CollapsibleSection>
 
       <CollapsibleSection title="故事梗概">
-        <ClickToEdit
-          value={localOutput.synopsis || ''}
-          onSave={(newVal) => updateField('synopsis', newVal)}
-          className="text-sm leading-relaxed text-stone-700"
-          placeholder="故事梗概..."
-        />
+        {localOutput.deepenedSynopsis ? (
+          <FormattedText
+            text={localOutput.deepenedSynopsis}
+            className="text-sm leading-relaxed text-stone-700"
+          />
+        ) : (
+          <ClickToEdit
+            value={localOutput.synopsis || ''}
+            onSave={(newVal) => updateField('synopsis', newVal)}
+            className="text-sm leading-relaxed text-stone-700"
+            placeholder="故事梗概..."
+          />
+        )}
       </CollapsibleSection>
 
       <CollapsibleSection title="幕结构">
@@ -1194,7 +1240,10 @@ function FrameworkPanel({
               {act.deepenedContent && (
                 <div className="mt-3 border-t border-stone-200 pt-3">
                   <span className="text-xs text-stone-400">深化内容</span>
-                  <p className="mt-1 text-sm leading-relaxed text-stone-700">{act.deepenedContent}</p>
+                  <FormattedText
+                    text={act.deepenedContent}
+                    className="mt-1 text-sm leading-relaxed text-stone-700"
+                  />
                 </div>
               )}
               <div className="mt-2 space-y-1">
