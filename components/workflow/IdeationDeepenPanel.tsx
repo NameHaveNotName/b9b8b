@@ -5,10 +5,8 @@ import {
   LoaderCircle,
   ArrowRight,
   Sparkles,
-  ChevronRight,
   AlertTriangle,
   History,
-  MessageSquare,
 } from 'lucide-react'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
@@ -45,21 +43,22 @@ interface IdeationDeepenPanelProps {
   onBack: () => void
 }
 
-function ScoreBar({ label, score, description, colorClass }: {
+function ScoreBar({ label, score, description, textClass, bgClass }: {
   label: string
   score: number
   description: string
-  colorClass: string
+  textClass: string
+  bgClass: string
 }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-stone-700">{label}</span>
-        <span className={`text-sm font-bold ${colorClass}`}>{score}%</span>
+        <span className={`text-sm font-bold ${textClass}`}>{score}%</span>
       </div>
       <div className="h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
         <div
-          className={`h-full rounded-full transition-all duration-500 ${colorClass.replace('text-', 'bg-')}`}
+          className={`h-full rounded-full transition-all duration-500 ${bgClass}`}
           style={{ width: `${score}%` }}
         />
       </div>
@@ -139,7 +138,6 @@ export default function IdeationDeepenPanel({
       setEvaluation(data.evaluation)
     } catch (e: any) {
       setError(e.message || '评估失败')
-      // 降级：显示空评估
       setEvaluation({
         retentionScore: 0,
         qualityScore: 0,
@@ -184,22 +182,18 @@ export default function IdeationDeepenPanel({
         throw new Error(data.message || '深化生成失败')
       }
 
-      // 更新当前版本
       await fetchIterations()
 
-      // 解析新生成的创意内容
       const { directionTitle: newTitle, directionDescription: newDesc, keywords: newKeywords } = data.iteration
       setCreativeTitle(newTitle)
       setCreativeDesc(newDesc)
       setCreativeKeywords(newKeywords)
       setCreativeText(data.iteration.creativeContent)
 
-      // 清除选择
       setSelectedOption(null)
       setCustomFeedback('')
       setShowCustomInput(false)
 
-      // 重新评估新版本
       setEvaluation(null)
     } catch (e: any) {
       setError(e.message || '深化生成失败')
@@ -218,16 +212,14 @@ export default function IdeationDeepenPanel({
       const data = await res.json()
       if (data.success) {
         await fetchIterations()
-        // 更新当前显示
         const target = iterations.find((i) => i.id === iterationId)
         if (target) {
           setCurrentVersion(target)
           setCreativeText(target.creativeContent)
-          // 尝试解析内容
           const lines = target.creativeContent.split('\n')
           setCreativeTitle(lines[0]?.replace(/^#+\s*/, '') || directionTitle)
           setCreativeDesc(lines[1]?.replace(/^#+\s*/, '') || directionDescription)
-          setEvaluation(null) // 触发重新评估
+          setEvaluation(null)
         }
       }
     } catch (e) {
@@ -285,13 +277,15 @@ export default function IdeationDeepenPanel({
               label="原内容保留度"
               score={evaluation.retentionScore}
               description="与原始创意的契合程度"
-              colorClass={evaluation.retentionScore >= 60 ? 'text-green-600' : evaluation.retentionScore >= 40 ? 'text-amber-600' : 'text-red-500'}
+              textClass={evaluation.retentionScore >= 60 ? 'text-green-600' : evaluation.retentionScore >= 40 ? 'text-amber-600' : 'text-red-500'}
+              bgClass={evaluation.retentionScore >= 60 ? 'bg-green-600' : evaluation.retentionScore >= 40 ? 'bg-amber-600' : 'bg-red-500'}
             />
             <ScoreBar
               label="优秀程度"
               score={evaluation.qualityScore}
               description="作为影视创意的吸引力与完成度"
-              colorClass={evaluation.qualityScore >= 70 ? 'text-green-600' : evaluation.qualityScore >= 50 ? 'text-amber-600' : 'text-red-500'}
+              textClass={evaluation.qualityScore >= 70 ? 'text-green-600' : evaluation.qualityScore >= 50 ? 'text-amber-600' : 'text-red-500'}
+              bgClass={evaluation.qualityScore >= 70 ? 'bg-green-600' : evaluation.qualityScore >= 50 ? 'bg-amber-600' : 'bg-red-500'}
             />
 
             {qualityHint && (
@@ -399,7 +393,7 @@ export default function IdeationDeepenPanel({
         <div className="flex items-center gap-2">
           <button
             onClick={handleDeepen}
-            disabled={isDeepening || isEvaluating || (!selectedOption && !showCustomInput)}
+            disabled={isDeepening || isEvaluating || (selectedOption === null && !showCustomInput)}
             className="flex items-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
           >
             {isDeepening ? (
