@@ -367,31 +367,44 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
               setToast={setToast}
               storyboardMode={storyboardMode}
               setStoryboardMode={setStoryboardMode}
+              readOnly={(() => {
+                const stepId = prismaTypeToStepId(currentStep.stepType)
+                const displayState = stepId ? getStepDisplayState(stepId, project) : null
+                return displayState?.isHidden ?? false
+              })()}
             />
           </div>
 
-          {/* 底部导航 */}
+          {/* 底部导航：隐藏步骤不显示 */}
           {currentStep.status === 'COMPLETED' && (
-            <div className="mt-6 border-t border-stone-100 pt-4">
-              {currentStep.stepType === 'STYLE' && !project.selectedStyleId ? (
-                <button
-                  disabled
-                  className="flex cursor-not-allowed items-center gap-2 rounded-lg bg-stone-300 px-5 py-2.5 text-sm font-medium text-white"
-                >
-                  请先选择一张风格图作为基准
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              ) : (
-                <button
-                  onClick={goToNextStep}
-                  className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
-                >
-                  下一步
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          )}
+            () => {
+              const stepId = prismaTypeToStepId(currentStep.stepType)
+              const displayState = stepId ? getStepDisplayState(stepId, project) : null
+              const isHidden = displayState?.isHidden ?? false
+              if (isHidden) return null
+              return (
+                <div className="mt-6 border-t border-stone-100 pt-4">
+                  {currentStep.stepType === 'STYLE' && !project.selectedStyleId ? (
+                    <button
+                      disabled
+                      className="flex cursor-not-allowed items-center gap-2 rounded-lg bg-stone-300 px-5 py-2.5 text-sm font-medium text-white"
+                    >
+                      请先选择一张风格图作为基准
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={goToNextStep}
+                      className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
+                    >
+                      下一步
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              )
+            }
+          )()}
         </div>
       )}
 
@@ -511,11 +524,6 @@ function StepHeader({
       </div>
 
       <div className="flex items-center gap-2">
-        {/* 隐藏步骤：只展示状态标签，无操作按钮 */}
-        {isHidden && isDone && (
-          <span className="text-xs text-stone-400">此步骤已归档，内容仍可查看</span>
-        )}
-
         {/* 未解锁步骤 */}
         {!isHidden && !isAvailable && (
           <span className="rounded-lg border border-stone-200 px-4 py-2 text-xs text-stone-400">
@@ -559,7 +567,7 @@ function StepHeader({
         )}
 
         {/* 处理中：显示中断按钮 */}
-        {step.status === 'PROCESSING' && (
+        {!isHidden && step.status === 'PROCESSING' && (
           <button
             onClick={onCancel}
             disabled={isExecuting && executing !== step.stepType}
@@ -571,7 +579,7 @@ function StepHeader({
         )}
 
         {/* 失败：显示重试按钮 */}
-        {step.status === 'FAILED' && (
+        {!isHidden && step.status === 'FAILED' && (
           <button
             onClick={onRetry}
             disabled={isExecuting}
@@ -589,7 +597,7 @@ function StepHeader({
         )}
 
         {/* 已完成：显示重新生成 + 下一步 */}
-        {isDone && (
+        {isDone && !isHidden && (
           <>
             {step.stepType === 'FRAMEWORK' && onImport && (
               <button
@@ -633,6 +641,7 @@ function StepContent({
   setToast,
   storyboardMode,
   setStoryboardMode,
+  readOnly,
 }: {
   step: any
   project: any
@@ -644,6 +653,7 @@ function StepContent({
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
   storyboardMode?: 'reference' | 'keyframe'
   setStoryboardMode?: (mode: 'reference' | 'keyframe') => void
+  readOnly?: boolean
 }) {
   switch (step.stepType) {
     case 'IDEATION':
@@ -826,6 +836,7 @@ function IdeationPanel({
   onError,
   projectId,
   mutate,
+  readOnly,
 }: {
   step: any
   project: any
@@ -834,6 +845,7 @@ function IdeationPanel({
   onError: (msg: string | null) => void
   projectId: string
   mutate: () => Promise<any>
+  readOnly?: boolean
 }) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [localDirections, setLocalDirections] = useState<any[]>(step.outputData?.directions || [])
@@ -1388,10 +1400,12 @@ function FrameworkPanel({
   step,
   projectId,
   mutate,
+  readOnly,
 }: {
   step: any
   projectId: string
   mutate: () => Promise<any>
+  readOnly?: boolean
 }) {
   const output = step.outputData
   if (!output) return <ProcessingBlock message="暂无框架数据" />
@@ -1463,7 +1477,8 @@ function FrameworkPanel({
             </p>
           </div>
         )}
-        <ClickToEdit
+        <ReadOrEdit
+          readOnly={readOnly}
           value={localOutput.inspiration || ''}
           onSave={(newVal) => updateField('inspiration', newVal)}
           className="text-sm leading-relaxed text-stone-700"
@@ -1472,7 +1487,8 @@ function FrameworkPanel({
       </CollapsibleSection>
 
       <CollapsibleSection title="背景设定" defaultOpen>
-        <ClickToEdit
+        <ReadOrEdit
+          readOnly={readOnly}
           value={localOutput.background || ''}
           onSave={(newVal) => updateField('background', newVal)}
           className="text-sm leading-relaxed text-stone-700"
@@ -1485,7 +1501,8 @@ function FrameworkPanel({
           <div className="flex gap-4">
             {/* 左侧文字区域 */}
             <div className="flex-1 min-w-0 flex flex-col justify-center">
-              <ClickToEdit
+              <ReadOrEdit
+                readOnly={readOnly}
                 value={localOutput.visualStyle || localOutput.styleGuide || ''}
                 onSave={(newVal) => updateField('visualStyle', newVal)}
                 className="text-sm leading-relaxed text-stone-700"
@@ -1507,7 +1524,8 @@ function FrameworkPanel({
             </div>
           </div>
         ) : (
-          <ClickToEdit
+          <ReadOrEdit
+            readOnly={readOnly}
             value={localOutput.visualStyle || localOutput.styleGuide || ''}
             onSave={(newVal) => updateField('visualStyle', newVal)}
             className="text-sm leading-relaxed text-stone-700"
@@ -1533,7 +1551,8 @@ function FrameworkPanel({
               {/* 基础描述 */}
               <div className="mt-2">
                 <span className="text-xs text-stone-400">基础设定</span>
-                <ClickToEdit
+                <ReadOrEdit
+                  readOnly={readOnly}
                   value={c.description || ''}
                   onSave={(newVal) => {
                     const newChars = [...localOutput.characters]
@@ -1604,7 +1623,8 @@ function FrameworkPanel({
             className="text-sm leading-relaxed text-stone-700"
           />
         ) : (
-          <ClickToEdit
+          <ReadOrEdit
+            readOnly={readOnly}
             value={localOutput.synopsis || ''}
             onSave={(newVal) => updateField('synopsis', newVal)}
             className="text-sm leading-relaxed text-stone-700"
@@ -1636,7 +1656,8 @@ function FrameworkPanel({
               </div>
               <div className="mt-2">
                 <span className="text-xs text-stone-400">原始简述</span>
-                <ClickToEdit
+                <ReadOrEdit
+                  readOnly={readOnly}
                   value={act.content || ''}
                   onSave={(newVal) => {
                     const newActs = [...localOutput.acts]
@@ -1662,7 +1683,8 @@ function FrameworkPanel({
                   <div key={si} className="flex items-start gap-2">
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-stone-400" />
                     <div className="min-w-0 flex-1">
-                      <ClickToEdit
+                      <ReadOrEdit
+                        readOnly={readOnly}
                         value={s || ''}
                         onSave={(newVal) => {
                           const newActs = [...localOutput.acts]
@@ -1738,7 +1760,8 @@ function FrameworkPanel({
                 {/* 兼容旧数据：纯字符串环境 */}
                 {!isObject && (
                   <div className="mt-2">
-                    <ClickToEdit
+                    <ReadOrEdit
+                      readOnly={readOnly}
                       value={String(env)}
                       onSave={(newVal) => {
                         const newEnvs = [...(localOutput.environments || [])]
@@ -1756,7 +1779,8 @@ function FrameworkPanel({
         </div>
         {/* 旧数据兼容：无环境时的编辑区 */}
         {(!localOutput.environments || localOutput.environments.length === 0) && (
-          <ClickToEdit
+          <ReadOrEdit
+            readOnly={readOnly}
             value={(localOutput.environments || []).join('\n')}
             onSave={(newVal) => {
               const lines = newVal.split('\n').filter((l: string) => l.trim())
@@ -1769,7 +1793,8 @@ function FrameworkPanel({
       </CollapsibleSection>
 
       <CollapsibleSection title="整体节奏策略">
-        <ClickToEdit
+        <ReadOrEdit
+          readOnly={readOnly}
           value={localOutput.overallPacing || ''}
           onSave={(newVal) => updateField('overallPacing', newVal)}
           className="text-sm leading-relaxed text-stone-700"
@@ -1781,7 +1806,8 @@ function FrameworkPanel({
         <div className="flex gap-4">
           <div className="flex-1">
             <span className="text-xs text-stone-400">分档</span>
-            <ClickToEdit
+            <ReadOrEdit
+              readOnly={readOnly}
               value={localOutput.storyLength || ''}
               onSave={(newVal) => updateField('storyLength', newVal)}
               className="text-sm text-stone-700"
@@ -1790,7 +1816,8 @@ function FrameworkPanel({
           </div>
           <div className="flex-1">
             <span className="text-xs text-stone-400">预估总时长</span>
-            <ClickToEdit
+            <ReadOrEdit
+              readOnly={readOnly}
               value={localOutput.totalDuration || ''}
               onSave={(newVal) => updateField('totalDuration', newVal)}
               className="text-sm text-stone-700"
@@ -1812,6 +1839,7 @@ function StylePanel({
   onError,
   mutate,
   setToast,
+  readOnly,
 }: {
   step: any
   project: any
@@ -1821,6 +1849,7 @@ function StylePanel({
   onError: (msg: string | null) => void
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
+  readOnly?: boolean
 }) {
   const isExecuting = executing === step.stepType
   const allSteps = project?.steps || []
@@ -1845,7 +1874,7 @@ function StylePanel({
         onConfirm={(ratio, model) => onExecute('STYLE', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
         onRegeneratePrompts={() => onExecute('STYLE', { action: 'generate-prompts' })}
         isExecuting={isExecuting}
-        editable
+        editable={!readOnly}
         projectId={project.id}
         stepType="STYLE"
         onSaveSuccess={() => mutate()}
@@ -2635,6 +2664,7 @@ function CharacterPanel({
   onError,
   mutate,
   setToast,
+  readOnly,
 }: {
   step: any
   projectId: string
@@ -2643,6 +2673,7 @@ function CharacterPanel({
   onError: (msg: string | null) => void
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
+  readOnly?: boolean
 }) {
   const assets = step.resultAssets || []
   const isExecuting = executing === step.stepType
@@ -2667,7 +2698,7 @@ function CharacterPanel({
         onConfirm={(ratio, model) => onExecute('CHARACTER', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
         onRegeneratePrompts={() => onExecute('CHARACTER', { action: 'generate-prompts' })}
         isExecuting={isExecuting}
-        editable
+        editable={!readOnly}
         projectId={projectId}
         stepType="CHARACTER"
         onSaveSuccess={() => mutate()}
@@ -2810,7 +2841,8 @@ function CharacterPanel({
                     </button>
                     {expandedPromptIds.has(asset.id) && (
                       <div className="mt-1">
-                        <ClickToEdit
+                        <ReadOrEdit
+                          readOnly={readOnly}
                           value={asset.metadata?.llmPrompt || ''}
                           onSave={(newVal) => handleUpdatePrompt(asset.metadata?.characterId, newVal)}
                           className="text-[11px] font-mono text-stone-500 leading-relaxed"
@@ -2875,6 +2907,7 @@ function ConceptPanel({
   onError,
   mutate,
   setToast,
+  readOnly,
 }: {
   step: any
   projectId: string
@@ -2883,6 +2916,7 @@ function ConceptPanel({
   onError: (msg: string | null) => void
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
+  readOnly?: boolean
 }) {
   const assets = step.resultAssets || []
   const isExecuting = executing === step.stepType
@@ -2908,7 +2942,7 @@ function ConceptPanel({
         onConfirm={(ratio, model) => onExecute('CONCEPT', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
         onRegeneratePrompts={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
         isExecuting={isExecuting}
-        editable
+        editable={!readOnly}
         projectId={projectId}
         stepType="CONCEPT"
         onSaveSuccess={() => mutate()}
@@ -3086,6 +3120,7 @@ function TrailerPanel({
   onError,
   mutate,
   setToast,
+  readOnly,
 }: {
   step: any
   projectId: string
@@ -3094,6 +3129,7 @@ function TrailerPanel({
   onError: (msg: string | null) => void
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
+  readOnly?: boolean
 }) {
   const videoAsset = step.resultAssets?.find((a: any) => a.type === 'VIDEO')
   const repAssets = step.resultAssets?.filter(
@@ -3318,6 +3354,7 @@ function StoryboardPanel({
   setToast,
   storyboardMode,
   setStoryboardMode,
+  readOnly,
 }: {
   step: any
   projectId: string
@@ -3328,6 +3365,7 @@ function StoryboardPanel({
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
   storyboardMode?: 'reference' | 'keyframe'
   setStoryboardMode?: (mode: 'reference' | 'keyframe') => void
+  readOnly?: boolean
 }) {
   const shots = step.outputData?.shots || []
   const shotAssets = step.resultAssets || []
@@ -3579,12 +3617,14 @@ function KeyframesPanel({
   executing,
   onExecute,
   mutate,
+  readOnly,
 }: {
   step: any
   projectId: string
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
   mutate: () => Promise<any>
+  readOnly?: boolean
 }) {
   const isExecuting = executing === step.stepType
 
@@ -3758,7 +3798,7 @@ function KeyframesPanel({
           onConfirm={(ratio, model) => onExecute('KEYFRAMES', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
           onRegeneratePrompts={() => onExecute('KEYFRAMES', { action: 'generate-prompts' })}
           isExecuting={isExecuting}
-          editable
+          editable={!readOnly}
           projectId={projectId}
           stepType="KEYFRAMES"
           onSaveSuccess={() => mutate()}
@@ -3912,11 +3952,13 @@ function VideoDirectPanel({
   projectId,
   executing,
   onExecute,
+  readOnly,
 }: {
   step: any
   projectId: string
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
+  readOnly?: boolean
 }) {
   const videoAssets =
     step.resultAssets?.filter((a: any) => a.type === 'VIDEO') || []
@@ -4046,7 +4088,7 @@ function VideoDirectPanel({
   )
 }
 
-function PlaceholderPanel({ step }: { step: any }) {
+function PlaceholderPanel({ step, readOnly }: { step: any; readOnly?: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 bg-stone-50 py-16">
       <FileText className="h-10 w-10 text-stone-300" />
