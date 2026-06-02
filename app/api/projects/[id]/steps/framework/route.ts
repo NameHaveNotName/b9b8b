@@ -80,6 +80,76 @@ ${userInput}
 
 // ==================== 自动深化辅助函数 ====================
 
+function truncateText(text: string, maxLen: number): string {
+  if (!text) return ''
+  if (text.length <= maxLen) return text
+  return text.slice(0, maxLen) + '...'
+}
+
+/**
+ * 为角色深化生成精简的框架上下文，避免发送完整 framework JSON 导致 token 爆炸
+ */
+function buildCharacterContext(framework: any, currentCharIndex: number, completedCharacters: any[]) {
+  const chars = framework.characters || []
+  // 已完成角色只保留核心信息
+  const summarizedCompleted = completedCharacters.map((c) => ({
+    name: c.name,
+    role: c.role,
+    description: truncateText(c.description, 80),
+    ...(c.deepened
+      ? {
+          appearance: truncateText(c.deepened.appearance, 60),
+          personality: truncateText(c.deepened.personality, 60),
+          memoryPoints: truncateText(c.deepened.memoryPoints, 40),
+        }
+      : {}),
+  }))
+
+  // 其他未深化角色只保留基础信息
+  const otherChars = chars
+    .filter((_: any, i: number) => i !== currentCharIndex && !completedCharacters.find((cc) => cc.name === _.name))
+    .map((c: any) => ({
+      name: c.name,
+      role: c.role,
+      description: truncateText(c.description, 60),
+    }))
+
+  return {
+    inspiration: truncateText(framework.inspiration, 200),
+    synopsis: truncateText(framework.synopsis, 200),
+    styleGuide: truncateText(framework.styleGuide || framework.visualStyle, 100),
+    completedCharacters: summarizedCompleted,
+    otherCharacters: otherChars,
+  }
+}
+
+/**
+ * 为故事梗概/幕结构深化生成精简的框架上下文
+ */
+function buildNarrativeContext(framework: any) {
+  const chars = framework.characters || []
+  return {
+    inspiration: truncateText(framework.inspiration, 200),
+    synopsis: truncateText(framework.synopsis, 200),
+    styleGuide: truncateText(framework.styleGuide || framework.visualStyle, 100),
+    background: truncateText(framework.background, 100),
+    characters: chars.map((c: any) => ({
+      name: c.name,
+      role: c.role,
+      description: truncateText(c.description, 80),
+      ...(c.deepened
+        ? {
+            appearance: truncateText(c.deepened.appearance, 50),
+            personality: truncateText(c.deepened.personality, 50),
+            memoryPoints: truncateText(c.deepened.memoryPoints, 40),
+          }
+        : {}),
+    })),
+    storyLength: framework.storyLength,
+    totalDuration: framework.totalDuration,
+  }
+}
+
 async function updateDeepeningStatus(stepId: string, framework: any, status: string, progress: any) {
   const deepening = {
     ...(framework.deepening || {}),
@@ -115,9 +185,10 @@ async function deepenCharacters(framework: any, stepId: string) {
     })
 
     try {
+      const context = buildCharacterContext(framework, i, completedCharacters)
       const prompt = loadPromptTemplate('character-deepen', {
-        FRAMEWORK: JSON.stringify(framework, null, 2),
-        COMPLETED_CHARACTERS: JSON.stringify(completedCharacters, null, 2),
+        FRAMEWORK: JSON.stringify(context, null, 2),
+        COMPLETED_CHARACTERS: JSON.stringify(context.completedCharacters, null, 2),
         CHARACTER_NAME: char.name,
         CHARACTER_ROLE: char.role,
         CHARACTER_DESCRIPTION: char.description || '',
@@ -166,9 +237,10 @@ async function deepenSynopsis(framework: any, stepId: string) {
 
   try {
     const textClient = await getTextClient()
+    const context = buildNarrativeContext(framework)
     const prompt = loadPromptTemplate('synopsis-deepen', {
-      FRAMEWORK: JSON.stringify(framework, null, 2),
-      CHARACTERS: JSON.stringify(framework.characters || [], null, 2),
+      FRAMEWORK: JSON.stringify(context, null, 2),
+      CHARACTERS: JSON.stringify(context.characters, null, 2),
     })
 
     const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 })
@@ -203,10 +275,11 @@ async function deepenActs(framework: any, stepId: string) {
     })
 
     try {
+      const context = buildNarrativeContext(framework)
       const prompt = loadPromptTemplate('act-deepen', {
-        FRAMEWORK: JSON.stringify(framework, null, 2),
-        CHARACTERS: JSON.stringify(framework.characters || [], null, 2),
-        SYNOPSIS: framework.synopsis || '',
+        FRAMEWORK: JSON.stringify(context, null, 2),
+        CHARACTERS: JSON.stringify(context.characters, null, 2),
+        SYNOPSIS: context.synopsis,
         PREV_ACT: i > 0 ? (deepenedActs[i - 1]?.deepenedContent || '') : '',
         ACT_NO: String(act.actNo || i + 1),
         ACT_TITLE: act.title || '',
@@ -250,10 +323,16 @@ async function extractAndDeepenEnvironments(framework: any, stepId: string) {
   try {
     // 1. 提取环境列表
     const textClient = await getTextClient()
+    const context = buildNarrativeContext(framework)
     const extractPrompt = loadPromptTemplate('environment-extract', {
-      FRAMEWORK: JSON.stringify(framework, null, 2),
-      CHARACTERS: JSON.stringify(framework.characters || [], null, 2),
-      ACTS: JSON.stringify(framework.acts || [], null, 2),
+      FRAMEWORK: JSON.stringify(context, null, 2),
+      CHARACTERS: JSON.stringify(context.characters, null, 2),
+      ACTS: JSON.stringify((framework.acts || []).map((a: any) => ({
+        actNo: a.actNo,
+        title: truncateText(a.title, 40),
+        content: truncateText(a.content, 100),
+        keyScenes: (a.keyScenes || []).slice(0, 3),
+      })), null, 2),
     })
 
     const extractResult = await textClient.generate(extractPrompt, { temperature: 0.7, maxTokens: 4096 })
@@ -280,10 +359,16 @@ async function extractAndDeepenEnvironments(framework: any, stepId: string) {
       })
 
       try {
+        const deepenContext = buildNarrativeContext(framework)
         const deepenPrompt = loadPromptTemplate('environment-deepen', {
-          FRAMEWORK: JSON.stringify(framework, null, 2),
-          CHARACTERS: JSON.stringify(framework.characters || [], null, 2),
-          ACTS: JSON.stringify(framework.acts || [], null, 2),
+          FRAMEWORK: JSON.stringify(deepenContext, null, 2),
+          CHARACTERS: JSON.stringify(deepenContext.characters, null, 2),
+          ACTS: JSON.stringify((framework.acts || []).map((a: any) => ({
+            actNo: a.actNo,
+            title: truncateText(a.title, 40),
+            content: truncateText(a.content, 100),
+            keyScenes: (a.keyScenes || []).slice(0, 3),
+          })), null, 2),
           ENV_NAME: env.name,
           ENV_BRIEF: env.brief || '',
         })
@@ -428,7 +513,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   await startStep(step.id)
 
   try {
-    const prompt = buildFrameworkPrompt(project.rawIdea, selectedDirection, storyLength)
+    // 优先使用 CreativeIteration 中当前版本的创意内容
+  const currentIteration = await prisma.creativeIteration.findFirst({
+    where: { projectId: params.id, isCurrent: true },
+    orderBy: { versionNumber: 'desc' },
+  })
+  const creativeSource = currentIteration?.creativeContent || project.rawIdea
+  const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength)
     const textClient = await getTextClient()
     const fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000 })
 
@@ -450,6 +541,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const framework = {
       inspiration: fw.inspiration || '',
+      inspirationSource: creativeSource,
       styleGuide: fw.styleGuide || '',
       background: fw.background || '',
       characters: Array.isArray(fw.characters) ? fw.characters : [],

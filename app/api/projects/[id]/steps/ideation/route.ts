@@ -31,10 +31,27 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     step = await createStep(params.id, 'IDEATION', 0)
   }
 
+  // 工作指令.txt（2026-06-02）：如果请求体传了 creativeInput，先保存到 project.rawIdea
+  const body = await _req.json().catch(() => ({}))
+  const creativeInput = body?.creativeInput
+
+  // 强制重新生成：重置步骤状态并清除历史输出
+  if (body?.force === true && step.status === 'COMPLETED') {
+    console.log('[IDEATION] force regeneration requested, resetting step')
+    await prisma.workflowStep.update({
+      where: { id: step.id },
+      data: { status: 'PENDING', outputData: {}, errorMessage: null },
+    })
+    step = await prisma.workflowStep.findUnique({ where: { id: step.id } })
+    if (!step) {
+      return NextResponse.json({ error: 'WORKFLOW_005', message: '步骤重置失败' }, { status: 500 })
+    }
+  }
+
   // 幂等保护：已完成则直接返回历史结果，避免重复消耗 API 配额并覆盖结果
-  if (step.status === 'COMPLETED' && step.outputData) {
+  if (step!.status === 'COMPLETED' && step!.outputData) {
     console.log('[IDEATION] step already completed, returning cached result')
-    return NextResponse.json({ success: true, data: step.outputData, cached: true })
+    return NextResponse.json({ success: true, data: step!.outputData, cached: true })
   }
 
   const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
@@ -42,9 +59,6 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  // 工作指令.txt（2026-06-02）：如果请求体传了 creativeInput，先保存到 project.rawIdea
-  const body = await _req.json().catch(() => ({}))
-  const creativeInput = body?.creativeInput
   if (creativeInput && typeof creativeInput === 'string' && creativeInput.trim().length > 0) {
     await prisma.project.update({
       where: { id: params.id },

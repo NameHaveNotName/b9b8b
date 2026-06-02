@@ -23,6 +23,7 @@ import {
   FileSpreadsheet,
   Square,
   Upload,
+  Clock,
 } from 'lucide-react'
 // @ts-ignore — xlsx 包类型定义不完整，运行时可用
 import * as XLSX from 'xlsx'
@@ -837,6 +838,8 @@ function IdeationPanel({
   const [creativeInput, setCreativeInput] = useState<string>(project.rawIdea || '')
   const [savingInput, setSavingInput] = useState(false)
   const [deepenMode, setDeepenMode] = useState(false)
+  const [iterations, setIterations] = useState<any[]>([])
+  const [isLoadingIterations, setIsLoadingIterations] = useState(false)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
@@ -844,6 +847,20 @@ function IdeationPanel({
   const isExecuting = executing === step.stepType
   const directions = step.outputData?.directions || []
   const errorMessage = step.errorMessage || ''
+
+  // 获取创意迭代历史（用于 review 模式展示）
+  useEffect(() => {
+    if (step.status === 'COMPLETED') {
+      setIsLoadingIterations(true)
+      fetch(`/api/projects/${projectId}/steps/ideation/iterations`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success) setIterations(data.iterations || [])
+        })
+        .catch((e) => console.error('[IDEATION] fetch iterations failed:', e))
+        .finally(() => setIsLoadingIterations(false))
+    }
+  }, [step.status, projectId])
 
   useEffect(() => {
     const dirsJson = JSON.stringify(directions)
@@ -938,6 +955,26 @@ function IdeationPanel({
       console.log('[TEXT-EDIT-IDEATION] 保存 storyLength 成功:', key)
     } catch (e: any) {
       console.error('[TEXT-EDIT-IDEATION] 保存 storyLength 失败:', e.message)
+    }
+  }
+
+  async function handleResetIdeation() {
+    if (!confirm('确定要重新进行创意扩散吗？这将清除当前的所有创意方向。')) return
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/ideation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        throw new Error(data.message || '重置失败')
+      }
+      await mutate()
+      setSelectedIdx(null)
+      setIterations([])
+    } catch (e: any) {
+      onError(e.message || '重置失败')
     }
   }
 
@@ -1047,8 +1084,23 @@ function IdeationPanel({
 
     return (
       <div className="space-y-6">
+        {/* Review 模式横幅 */}
+        <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50/50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Check className="h-4 w-4 text-green-600" />
+            <span className="text-sm text-stone-600">创意扩散已完成</span>
+          </div>
+          <button
+            onClick={handleResetIdeation}
+            className="flex items-center gap-1.5 rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-100"
+          >
+            <RefreshCw className="h-3 w-3" />
+            重新创意扩散
+          </button>
+        </div>
+
         <StoryLengthSelector value={localStoryLength} onChange={handleStoryLengthChange} />
-        <p className="text-sm text-stone-600">请选择最符合你预期的创意方向（点击卡片选择，标题和描述可双击编辑）：</p>
+        <p className="text-sm text-stone-600">已生成的创意方向（点击卡片选择）：</p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {displayDirections.map((d: any, idx: number) => (
             <div
@@ -1060,22 +1112,8 @@ function IdeationPanel({
                   : 'border-stone-200 bg-white hover:border-stone-400'
               }`}
             >
-              <div onClick={(e) => e.stopPropagation()}>
-                <ClickToEdit
-                  value={d.title || ''}
-                  onSave={(newVal) => handleUpdateDirection(idx, 'title', newVal)}
-                  className="font-semibold text-stone-800"
-                  placeholder="方向标题"
-                />
-              </div>
-              <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                <ClickToEdit
-                  value={d.description || ''}
-                  onSave={(newVal) => handleUpdateDirection(idx, 'description', newVal)}
-                  className="text-sm leading-relaxed text-stone-600"
-                  placeholder="方向描述"
-                />
-              </div>
+              <h4 className="font-semibold text-stone-800">{d.title || '未命名方向'}</h4>
+              <p className="mt-2 text-sm leading-relaxed text-stone-600">{d.description || ''}</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {d.keywords?.map((k: string) => (
                   <span
@@ -1118,6 +1156,39 @@ function IdeationPanel({
               </button>
               <CostBadge cost={DEFAULT_GENERATE_COST} />
             </div>
+          </div>
+        )}
+
+        {/* 迭代历史版本 */}
+        {iterations.length > 0 && (
+          <div className="rounded-lg border border-stone-200 bg-stone-50/50 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <Clock className="h-4 w-4 text-stone-400" />
+              <span className="text-sm font-medium text-stone-600">深化历史版本</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {iterations.map((iter: any) => (
+                <div
+                  key={iter.id}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+                    iter.isCurrent
+                      ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-300'
+                      : 'bg-white text-stone-600 ring-1 ring-stone-200'
+                  }`}
+                >
+                  版本{iter.versionNumber}
+                  {typeof iter.qualityScore === 'number' && (
+                    <span className="ml-1 text-[10px] opacity-70">({iter.qualityScore}分)</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {isLoadingIterations && (
+          <div className="flex items-center gap-2 py-2 text-xs text-stone-400">
+            <LoaderCircle className="h-3 w-3 animate-spin" />
+            加载历史版本...
           </div>
         )}
       </div>
@@ -1348,6 +1419,14 @@ function FrameworkPanel({
       <DeepeningStatus deepening={deepening} />
 
       <CollapsibleSection title="灵感阐释" defaultOpen>
+        {localOutput.inspirationSource && (
+          <div className="mb-3 rounded-md border border-amber-100 bg-amber-50/50 px-3 py-2">
+            <p className="text-xs font-medium text-amber-700">原始灵感来源（深化后）</p>
+            <p className="mt-1 text-xs leading-relaxed text-stone-600 line-clamp-4">
+              {localOutput.inspirationSource}
+            </p>
+          </div>
+        )}
         <ClickToEdit
           value={localOutput.inspiration || ''}
           onSave={(newVal) => updateField('inspiration', newVal)}
