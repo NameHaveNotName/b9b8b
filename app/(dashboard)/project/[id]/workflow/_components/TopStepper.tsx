@@ -10,151 +10,136 @@ import {
   LayoutGrid,
   Frame,
   Video,
-  Wand,
-  Camera,
-  CircleCheck,
   Check,
-  X,
   LoaderCircle,
+  Lock,
 } from 'lucide-react'
-import { VISIBLE_STEP_TYPES } from '@/lib/workflow'
+import {
+  STEP_ORDER,
+  STEP_LABELS,
+  STEP_ID_TO_TYPE,
+  getStepDisplayState,
+  type StepId,
+  type ProjectState,
+} from '@/lib/workflow-state'
 
-const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  IDEATION: Lightbulb,
-  FRAMEWORK: PanelsTopLeft,
-  STYLE: Palette,
-  CHARACTER: User,
-  CONCEPT: Image,
-  TRAILER: Play,
-  STORYBOARD: LayoutGrid,
-  KEYFRAMES: Frame,
-  VIDEO_DIRECT: Video,
-  VIDEO_RENDER: Wand,
-  CAMERA: Camera,
-  REVIEW: CircleCheck,
-}
-
-const STEP_LABELS: Record<string, string> = {
-  IDEATION: '创意扩散',
-  FRAMEWORK: '框架搭建',
-  STYLE: '风格统一',
-  CHARACTER: '人物设计',
-  CONCEPT: '概念图',
-  TRAILER: '宣传片',
-  STORYBOARD: '分镜设计',
-  KEYFRAMES: '生成尾帧',
-  VIDEO_DIRECT: '直生视频',
-  VIDEO_RENDER: 'AI渲染',
-  CAMERA: '电脑运镜',
-  REVIEW: '评测优化',
+const STEP_ICONS: Record<StepId, React.ComponentType<{ className?: string }>> = {
+  idea: Lightbulb,
+  framework: PanelsTopLeft,
+  style: Palette,
+  character: User,
+  concept: Image,
+  trailer: Play,
+  storyboard: LayoutGrid,
+  ending: Frame,
+  direct: Video,
 }
 
 interface Step {
-  id: string
   stepType: string
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
-  order: number
 }
 
 interface TopStepperProps {
   steps: Step[]
+  project: ProjectState
   activeStepType: string
   onStepClick: (stepType: string) => void
 }
 
-const VISIBLE_SET = new Set(VISIBLE_STEP_TYPES)
+export default function TopStepper({ steps, project, activeStepType, onStepClick }: TopStepperProps) {
+  // 计算每个可见步骤的显示状态
+  const visibleSteps = STEP_ORDER.map((stepId) => {
+    const display = getStepDisplayState(stepId, project)
+    const prismaType = STEP_ID_TO_TYPE[stepId]
+    const stepRecord = steps.find((s) => s.stepType === prismaType)
+    const isProcessing = stepRecord?.status === 'PROCESSING'
+    const isFailed = stepRecord?.status === 'FAILED'
+    const isActive = activeStepType === prismaType
 
-const STEP_ORDER = Object.entries(STEP_LABELS).map(([stepType, label]) => ({
-  stepType,
-  label,
-  order: Object.keys(STEP_LABELS).indexOf(stepType),
-}))
+    return {
+      stepId,
+      stepType: prismaType,
+      label: STEP_LABELS[stepId],
+      ...display,
+      isProcessing,
+      isFailed,
+      isActive,
+    }
+  }).filter((s) => !s.isHidden)
 
-export default function TopStepper({ steps, activeStepType, onStepClick }: TopStepperProps) {
-  // [WORKFLOW-FIX] 只渲染 VISIBLE_STEP_TYPES 的 9 个节点，隐藏步骤完全不显示
-  const visibleSet = new Set(VISIBLE_STEP_TYPES)
-
-  const displaySteps = steps.length > 0
-    ? steps.filter((s: Step) => visibleSet.has(s.stepType as any)).sort((a, b) => a.order - b.order)
-    : STEP_ORDER.filter((s) => visibleSet.has(s.stepType as any)).map((s) => ({
-        id: `skeleton-${s.stepType}`,
-        stepType: s.stepType,
-        status: 'PENDING' as const,
-        order: s.order,
-      }))
   return (
     <div className="mb-8 overflow-x-auto pb-2">
       <div className="flex min-w-max items-center px-1">
-        {displaySteps.map((step, idx) => {
-          const isActive = activeStepType === step.stepType
-          const isCompleted = step.status === 'COMPLETED'
-          const isProcessing = step.status === 'PROCESSING'
-          const isFailed = step.status === 'FAILED'
-          const isSkipped = step.status === 'SKIPPED'
-          const canClick = isCompleted || isFailed || isProcessing
-
-          const Icon = STEP_ICONS[step.stepType]
+        {visibleSteps.map((step, idx) => {
+          const Icon = STEP_ICONS[step.stepId]
+          const canClick = step.isDone || step.isFailed || step.isProcessing || step.isAvailable
 
           return (
-            <div key={step.id} className="flex items-center">
+            <div key={step.stepId} className="flex items-center">
               <button
                 onClick={() => canClick && onStepClick(step.stepType)}
                 disabled={!canClick}
-                className={`flex flex-col items-center gap-1 px-1.5 py-1 transition ${canClick ? 'cursor-pointer opacity-100 hover:opacity-80' : 'cursor-not-allowed opacity-60'}`}
+                title={
+                  !step.isUnlocked
+                    ? '请先完成前置步骤'
+                    : step.isDone
+                      ? '已完成，点击查看'
+                      : step.isProcessing
+                        ? '生成中...'
+                        : '点击执行'
+                }
+                className={`group flex flex-col items-center gap-1 px-1.5 py-1 transition ${
+                  canClick ? 'cursor-pointer opacity-100 hover:opacity-80' : 'cursor-not-allowed opacity-50'
+                }`}
               >
                 <div
                   className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition ${
-                    isProcessing
+                    step.isProcessing
                       ? 'border-blue-500 bg-blue-50'
-                      : isCompleted
-                        ? 'border-green-500 bg-green-500 text-white'
-                        : isFailed
-                          ? 'border-red-500 bg-red-50'
-                          : isSkipped
-                            ? 'border-stone-300 border-dashed bg-stone-50'
-                            : isActive
-                              ? 'border-amber-500 bg-amber-50'
-                              : 'border-stone-200 bg-white'
+                      : step.isFailed
+                        ? 'border-red-500 bg-red-50'
+                        : step.isDone
+                          ? 'border-green-500 bg-green-500 text-white'
+                          : step.isAvailable
+                            ? 'border-amber-500 bg-amber-50'
+                            : 'border-stone-200 bg-white'
                   }`}
                 >
-                  {isCompleted ? (
+                  {step.isDone ? (
                     <Check className="h-4 w-4 text-white" />
-                  ) : isFailed ? (
-                    <X className="h-4 w-4 text-red-500" />
-                  ) : isProcessing ? (
+                  ) : step.isFailed ? (
+                    <span className="text-xs font-bold text-red-500">!</span>
+                  ) : step.isProcessing ? (
                     <LoaderCircle className="h-4 w-4 animate-spin text-blue-500" />
-                  ) : isSkipped ? (
-                    Icon && <Icon className="h-4 w-4 text-stone-400" />
+                  ) : !step.isUnlocked ? (
+                    <Lock className="h-3.5 w-3.5 text-stone-300" />
                   ) : (
-                    Icon && (
-                      <Icon
-                        className={`h-4 w-4 ${isActive ? 'text-amber-600' : 'text-stone-300'}`}
-                      />
-                    )
+                    Icon && <Icon className={`h-4 w-4 ${step.isActive ? 'text-amber-600' : 'text-stone-400'}`} />
                   )}
                 </div>
                 <span
                   className={`whitespace-nowrap text-[10px] font-medium ${
-                    isActive
+                    step.isActive
                       ? 'text-amber-700'
-                      : isCompleted
+                      : step.isDone
                         ? 'text-green-600'
-                        : isFailed
+                        : step.isFailed
                           ? 'text-red-500'
-                          : isSkipped
-                            ? 'text-stone-400 line-through'
+                          : step.isAvailable
+                            ? 'text-stone-600'
                             : 'text-stone-400'
                   }`}
                 >
-                  {STEP_LABELS[step.stepType]}
+                  {step.label}
                 </span>
               </button>
 
-              {/* 连接线 */}
-              {idx < displaySteps.length - 1 && (
+              {/* 连接线：已完成步骤之间用实线，其他用虚线 */}
+              {idx < visibleSteps.length - 1 && (
                 <div
                   className={`mx-0.5 h-0.5 w-4 md:mx-1 md:w-8 ${
-                    isCompleted ? 'bg-green-500' : 'border-t-2 border-dashed border-stone-200'
+                    step.isDone ? 'bg-green-500' : 'border-t-2 border-dashed border-stone-200'
                   }`}
                 />
               )}

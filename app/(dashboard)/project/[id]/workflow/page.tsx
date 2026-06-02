@@ -175,31 +175,6 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
     [params.id, mutate]
   )
 
-  // [WORKFLOW-FIX] 跳过步骤
-  const skipStep = useCallback(
-    async (stepType: string) => {
-      try {
-        const res = await fetch(`/api/projects/${params.id}/steps/skip`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stepType }),
-        })
-        const result = await res.json()
-        if (!res.ok || !result.success) {
-          setToast({ kind: 'error', message: `跳过失败：${result.error || '未知错误'}` })
-          return
-        }
-        setToast({ kind: 'success', message: result.message || '已跳过' })
-        // 自动跳转至下一步
-        if (result.nextStepType) setActiveStepType(result.nextStepType)
-        await mutate()
-      } catch (e: any) {
-        setToast({ kind: 'error', message: '跳过失败：' + e.message })
-      }
-    },
-    [params.id, mutate]
-  )
-
   const selectStyle = useCallback(
     async (styleId: string, styleRefUrl?: string) => {
       // 【强制日志5】确认前端传的值
@@ -348,6 +323,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
       {/* TopStepper */}
       <TopStepper
         steps={steps}
+        project={project}
         activeStepType={currentActive}
         onStepClick={(type) => setActiveStepType(type)}
       />
@@ -381,7 +357,6 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
               onError={setLastError}
               mutate={mutate}
               setToast={setToast}
-              skipStep={skipStep}
               storyboardMode={storyboardMode}
               setStoryboardMode={setStoryboardMode}
             />
@@ -487,7 +462,6 @@ function StepHeader({
     PROCESSING: { label: '进行中', className: 'bg-blue-50 text-blue-600' },
     COMPLETED: { label: '已完成', className: 'bg-green-50 text-green-600' },
     FAILED: { label: isCancelled ? '已中断' : '失败', className: isCancelled ? 'bg-stone-100 text-stone-500' : 'bg-red-50 text-red-600' },
-    SKIPPED: { label: '已跳过', className: 'bg-stone-50 text-stone-400' },
   }
 
   const config = statusConfig[step.status] || statusConfig.PENDING
@@ -580,7 +554,6 @@ function StepContent({
   onError,
   mutate,
   setToast,
-  skipStep,
   storyboardMode,
   setStoryboardMode,
 }: {
@@ -592,7 +565,6 @@ function StepContent({
   onError: (msg: string | null) => void
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
-  skipStep?: (stepType: string) => Promise<void>
   storyboardMode?: 'reference' | 'keyframe'
   setStoryboardMode?: (mode: 'reference' | 'keyframe') => void
 }) {
@@ -622,7 +594,6 @@ function StepContent({
           onError={onError}
           mutate={mutate}
           setToast={setToast}
-          onSkip={skipStep}
         />
       )
     case 'CHARACTER':
@@ -647,7 +618,6 @@ function StepContent({
           onError={onError}
           mutate={mutate}
           setToast={setToast}
-          onSkip={skipStep}
         />
       )
     case 'TRAILER':
@@ -660,7 +630,6 @@ function StepContent({
           onError={onError}
           mutate={mutate}
           setToast={setToast}
-          onSkip={skipStep}
         />
       )
     case 'STORYBOARD':
@@ -685,7 +654,6 @@ function StepContent({
           executing={executing}
           onExecute={onExecute}
           mutate={mutate}
-          onSkip={skipStep}
         />
       )
     case 'VIDEO_DIRECT':
@@ -1589,7 +1557,6 @@ function StylePanel({
   onError,
   mutate,
   setToast,
-  onSkip,
 }: {
   step: any
   project: any
@@ -1599,7 +1566,6 @@ function StylePanel({
   onError: (msg: string | null) => void
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
-  onSkip?: (stepType: string) => Promise<void>
 }) {
   const isExecuting = executing === step.stepType
   const allSteps = project?.steps || []
@@ -1623,7 +1589,6 @@ function StylePanel({
         defaultModel={defaultModel}
         onConfirm={(ratio, model) => onExecute('STYLE', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
         onRegeneratePrompts={() => onExecute('STYLE', { action: 'generate-prompts' })}
-        onSkip={onSkip ? () => onSkip('STYLE') : undefined}
         isExecuting={isExecuting}
         editable
         projectId={project.id}
@@ -1665,18 +1630,6 @@ function StylePanel({
             </button>
             <CostBadge cost={DEFAULT_GENERATE_COST} />
           </div>
-          {onSkip && (
-            <button
-              onClick={() => {
-                if (confirm('跳过此步骤将直接进入下一步，后续可随时回来补做，是否确认？')) {
-                  onSkip('STYLE')
-                }
-              }}
-              className="rounded-lg border border-stone-200 px-5 py-3 text-sm font-medium text-stone-500 transition hover:bg-stone-50 hover:text-stone-700"
-            >
-              跳过
-            </button>
-          )}
         </div>
       </div>
     )
@@ -1933,7 +1886,6 @@ function PromptPreview({
   stepLabel,
   onConfirm,
   onRegeneratePrompts,
-  onSkip,
   isExecuting,
   aspectRatio,
   onAspectRatioChange,
@@ -1955,7 +1907,6 @@ function PromptPreview({
   stepLabel: string
   onConfirm: () => void
   onRegeneratePrompts: () => void
-  onSkip?: () => void
   isExecuting: boolean
   aspectRatio?: string
   onAspectRatioChange?: (ratio: string) => void
@@ -2185,14 +2136,6 @@ function PromptPreview({
           重新生成提示词
         </button>
         <div className="flex items-center gap-3">
-          {onSkip && (
-            <button
-              onClick={onSkip}
-              className="rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-500 transition hover:bg-stone-50 hover:text-stone-700"
-            >
-              跳过
-            </button>
-          )}
           <div className="relative inline-block">
             <button
               onClick={onConfirm}
@@ -2221,7 +2164,6 @@ function PromptPreviewWithRatio({
   defaultModel,
   onConfirm,
   onRegeneratePrompts,
-  onSkip,
   isExecuting,
   editable,
   projectId,
@@ -2235,7 +2177,6 @@ function PromptPreviewWithRatio({
   defaultModel: string
   onConfirm: (ratio: string, model: string) => void
   onRegeneratePrompts: () => void
-  onSkip?: () => void
   isExecuting: boolean
   editable?: boolean
   projectId?: string
@@ -2251,7 +2192,6 @@ function PromptPreviewWithRatio({
       stepLabel={stepLabel}
       onConfirm={() => onConfirm(selectedRatio, selectedModel)}
       onRegeneratePrompts={onRegeneratePrompts}
-      onSkip={onSkip}
       isExecuting={isExecuting}
       aspectRatio={selectedRatio}
       onAspectRatioChange={setSelectedRatio}
@@ -2680,7 +2620,6 @@ function ConceptPanel({
   onError,
   mutate,
   setToast,
-  onSkip,
 }: {
   step: any
   projectId: string
@@ -2689,7 +2628,6 @@ function ConceptPanel({
   onError: (msg: string | null) => void
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
-  onSkip?: (stepType: string) => Promise<void>
 }) {
   const assets = step.resultAssets || []
   const isExecuting = executing === step.stepType
@@ -2714,7 +2652,6 @@ function ConceptPanel({
         defaultModel={defaultModel}
         onConfirm={(ratio, model) => onExecute('CONCEPT', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
         onRegeneratePrompts={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
-        onSkip={onSkip ? () => onSkip('CONCEPT') : undefined}
         isExecuting={isExecuting}
         editable
         projectId={projectId}
@@ -2724,7 +2661,7 @@ function ConceptPanel({
     )
   }
 
-  // [WORKFLOW-FIX] PENDING 状态显示生成按钮 + 跳过按钮
+  // PENDING 状态显示生成按钮
   if (step.status === 'PENDING') {
     return (
       <div className="flex flex-col items-center justify-center gap-6 py-12">
@@ -2744,18 +2681,6 @@ function ConceptPanel({
             </button>
             <CostBadge cost={DEFAULT_GENERATE_COST} />
           </div>
-          {onSkip && (
-            <button
-              onClick={() => {
-                if (confirm('跳过此步骤将直接进入下一步，后续可随时回来补做，是否确认？')) {
-                  onSkip('CONCEPT')
-                }
-              }}
-              className="rounded-lg border border-stone-200 px-5 py-3 text-sm font-medium text-stone-500 transition hover:bg-stone-50 hover:text-stone-700"
-            >
-              跳过
-            </button>
-          )}
         </div>
       </div>
     )
@@ -2906,7 +2831,6 @@ function TrailerPanel({
   onError,
   mutate,
   setToast,
-  onSkip,
 }: {
   step: any
   projectId: string
@@ -2915,7 +2839,6 @@ function TrailerPanel({
   onError: (msg: string | null) => void
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
-  onSkip?: (stepType: string) => Promise<void>
 }) {
   const videoAsset = step.resultAssets?.find((a: any) => a.type === 'VIDEO')
   const repAssets = step.resultAssets?.filter(
@@ -3082,18 +3005,6 @@ function TrailerPanel({
               </button>
               <CostBadge cost={DEFAULT_GENERATE_COST} />
             </div>
-            {onSkip && (
-              <button
-                onClick={() => {
-                  if (confirm('跳过此步骤将直接进入下一步，后续可随时回来补做，是否确认？')) {
-                    onSkip('TRAILER')
-                  }
-                }}
-                className="rounded-lg border border-stone-200 px-5 py-3 text-sm font-medium text-stone-500 transition hover:bg-stone-50 hover:text-stone-700"
-              >
-                跳过
-              </button>
-            )}
           </div>
         </div>
       ) : step.status === 'PROCESSING' ? (
@@ -3413,14 +3324,12 @@ function KeyframesPanel({
   executing,
   onExecute,
   mutate,
-  onSkip,
 }: {
   step: any
   projectId: string
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
   mutate: () => Promise<any>
-  onSkip?: (stepType: string) => Promise<void>
 }) {
   const isExecuting = executing === step.stepType
 
@@ -3593,7 +3502,6 @@ function KeyframesPanel({
           defaultModel={kfDefaultModel}
           onConfirm={(ratio, model) => onExecute('KEYFRAMES', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
           onRegeneratePrompts={() => onExecute('KEYFRAMES', { action: 'generate-prompts' })}
-          onSkip={onSkip ? () => onSkip('KEYFRAMES') : undefined}
           isExecuting={isExecuting}
           editable
           projectId={projectId}
@@ -3739,18 +3647,6 @@ function KeyframesPanel({
           </button>
           <CostBadge cost={DEFAULT_GENERATE_COST} />
         </div>
-        {onSkip && (
-          <button
-            onClick={() => {
-              if (confirm('跳过此步骤将直接进入下一步，后续可随时回来补做，是否确认？')) {
-                onSkip('KEYFRAMES')
-              }
-            }}
-            className="rounded-lg border border-stone-200 px-5 py-3 text-sm font-medium text-stone-500 transition hover:bg-stone-50 hover:text-stone-700"
-          >
-            跳过
-          </button>
-        )}
       </div>
     </div>
   )
