@@ -78,7 +78,12 @@ export default async function DashboardPage() {
       where: { status: 'ACTIVE', userId },
       orderBy: { updatedAt: 'desc' },
       take: 20,
-      include: {
+      select: {
+        id: true,
+        title: true,
+        rawIdea: true,
+        createdAt: true,
+        updatedAt: true,
         _count: { select: { assets: true } },
         steps: { select: { order: true, status: true } },
       },
