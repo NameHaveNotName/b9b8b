@@ -66,7 +66,7 @@ export default function TopStepper({ steps, project, activeStepType, onStepClick
       isFailed,
       isActive,
     }
-  }).filter((s) => !s.isHidden)
+  })
 
   return (
     <div className="mb-8 overflow-x-auto pb-2">
@@ -95,18 +95,22 @@ export default function TopStepper({ steps, project, activeStepType, onStepClick
               >
                 <div
                   className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition ${
-                    step.isProcessing
-                      ? 'border-blue-500 bg-blue-50'
-                      : step.isFailed
-                        ? 'border-red-500 bg-red-50'
-                        : step.isDone
-                          ? 'border-green-500 bg-green-500 text-white'
-                          : step.isAvailable
-                            ? 'border-amber-500 bg-amber-50'
-                            : 'border-stone-200 bg-white'
+                    step.isHidden && step.isDone
+                      ? 'border-stone-300 bg-stone-100 text-stone-400'
+                      : step.isProcessing
+                        ? 'border-blue-500 bg-blue-50'
+                        : step.isFailed
+                          ? 'border-red-500 bg-red-50'
+                          : step.isDone
+                            ? 'border-green-500 bg-green-500 text-white'
+                            : step.isAvailable
+                              ? 'border-amber-500 bg-amber-50'
+                              : 'border-stone-200 bg-white'
                   }`}
                 >
-                  {step.isDone ? (
+                  {step.isHidden && step.isDone ? (
+                    <Check className="h-4 w-4 text-stone-400" />
+                  ) : step.isDone ? (
                     <Check className="h-4 w-4 text-white" />
                   ) : step.isFailed ? (
                     <span className="text-xs font-bold text-red-500">!</span>
@@ -120,15 +124,17 @@ export default function TopStepper({ steps, project, activeStepType, onStepClick
                 </div>
                 <span
                   className={`whitespace-nowrap text-[10px] font-medium ${
-                    step.isActive
-                      ? 'text-amber-700'
-                      : step.isDone
-                        ? 'text-green-600'
-                        : step.isFailed
-                          ? 'text-red-500'
-                          : step.isAvailable
-                            ? 'text-stone-600'
-                            : 'text-stone-400'
+                    step.isHidden && step.isDone
+                      ? 'text-stone-400'
+                      : step.isActive
+                        ? 'text-amber-700'
+                        : step.isDone
+                          ? 'text-green-600'
+                          : step.isFailed
+                            ? 'text-red-500'
+                            : step.isAvailable
+                              ? 'text-stone-600'
+                              : 'text-stone-400'
                   }`}
                 >
                   {step.label}

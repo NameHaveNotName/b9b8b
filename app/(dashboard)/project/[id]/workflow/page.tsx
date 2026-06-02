@@ -491,7 +491,7 @@ function StepHeader({
   > = {
     PENDING: { label: isAvailable ? '待开始' : '未解锁', className: 'bg-stone-100 text-stone-500' },
     PROCESSING: { label: '进行中', className: 'bg-blue-50 text-blue-600' },
-    COMPLETED: { label: '已完成', className: 'bg-green-50 text-green-600' },
+    COMPLETED: { label: isHidden ? '已完成 · 已归档' : '已完成', className: isHidden ? 'bg-stone-100 text-stone-500' : 'bg-green-50 text-green-600' },
     FAILED: { label: isCancelled ? '已中断' : '失败', className: isCancelled ? 'bg-stone-100 text-stone-500' : 'bg-red-50 text-red-600' },
   }
 
@@ -608,15 +608,13 @@ function StepHeader({
               <RefreshCw className="h-4 w-4" />
               重新生成
             </button>
-            {!isHidden && (
-              <button
-                onClick={onNext}
-                className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
-              >
-                下一步
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            )}
+            <button
+              onClick={onNext}
+              className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
+            >
+              下一步
+              <ArrowRight className="h-4 w-4" />
+            </button>
           </>
         )}
       </div>
@@ -658,10 +656,11 @@ function StepContent({
           onError={onError}
           projectId={project.id}
           mutate={mutate}
+  readOnly={readOnly}
         />
       )
     case 'FRAMEWORK':
-      return <FrameworkPanel step={step} projectId={project.id} mutate={mutate} />
+      return <FrameworkPanel step={step} projectId={project.id} mutate={mutate} readOnly={readOnly} />
     case 'STYLE':
       return (
         <StylePanel
@@ -673,6 +672,7 @@ function StepContent({
           onError={onError}
           mutate={mutate}
           setToast={setToast}
+  readOnly={readOnly}
         />
       )
     case 'CHARACTER':
@@ -685,6 +685,7 @@ function StepContent({
           onError={onError}
           mutate={mutate}
           setToast={setToast}
+  readOnly={readOnly}
         />
       )
     case 'CONCEPT':
@@ -697,6 +698,7 @@ function StepContent({
           onError={onError}
           mutate={mutate}
           setToast={setToast}
+  readOnly={readOnly}
         />
       )
     case 'TRAILER':
@@ -709,6 +711,7 @@ function StepContent({
           onError={onError}
           mutate={mutate}
           setToast={setToast}
+  readOnly={readOnly}
         />
       )
     case 'STORYBOARD':
@@ -723,6 +726,7 @@ function StepContent({
           setToast={setToast}
           storyboardMode={storyboardMode}
           setStoryboardMode={setStoryboardMode}
+  readOnly={readOnly}
         />
       )
     case 'KEYFRAMES':
@@ -733,6 +737,7 @@ function StepContent({
           executing={executing}
           onExecute={onExecute}
           mutate={mutate}
+  readOnly={readOnly}
         />
       )
     case 'VIDEO_DIRECT':
@@ -742,12 +747,13 @@ function StepContent({
           projectId={project.id}
           executing={executing}
           onExecute={onExecute}
+  readOnly={readOnly}
         />
       )
     case 'VIDEO_RENDER':
     case 'CAMERA':
     case 'REVIEW':
-      return <PlaceholderPanel step={step} />
+      return <PlaceholderPanel step={step} readOnly={readOnly} />
     default:
       return <p className="text-stone-500">暂无内容</p>
   }
@@ -1127,7 +1133,7 @@ function IdeationPanel({
             </div>
           ))}
         </div>
-        {selectedIdx !== null && (
+        {selectedIdx !== null && !readOnly && (
           <div className="flex justify-center gap-3">
             <button
               onClick={() => setDeepenMode(true)}
@@ -1345,6 +1351,36 @@ function DeepeningStatus({ deepening }: { deepening?: any }) {
         </div>
       )}
     </div>
+  )
+}
+
+function ReadOrEdit({
+  readOnly,
+  value,
+  onSave,
+  className,
+  placeholder,
+}: {
+  readOnly?: boolean
+  value: string
+  onSave: (val: string) => void
+  className?: string
+  placeholder?: string
+}) {
+  if (readOnly) {
+    return (
+      <p className={className}>
+        {value || <span className="text-stone-400">{placeholder}</span>}
+      </p>
+    )
+  }
+  return (
+    <ClickToEdit
+      value={value}
+      onSave={onSave}
+      className={className}
+      placeholder={placeholder}
+    />
   )
 }
 
