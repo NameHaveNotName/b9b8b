@@ -42,13 +42,16 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
   const body = await req.json()
 
-  // 目前仅支持更新 selectedStyleId
+  // 目前仅支持更新 selectedStyleId / title / rawIdea
   const updateData: any = {}
   if (body.selectedStyleId !== undefined) {
     updateData.selectedStyleId = body.selectedStyleId
   }
   if (body.title !== undefined) {
     updateData.title = body.title
+  }
+  if (body.rawIdea !== undefined) {
+    updateData.rawIdea = body.rawIdea
   }
 
   const updated = await prisma.project.update({

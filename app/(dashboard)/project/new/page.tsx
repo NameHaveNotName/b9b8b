@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation'
 import { Sparkles, Loader2 } from 'lucide-react'
 
 export default function NewProjectPage() {
-  const [rawIdea, setRawIdea] = useState('')
+  const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
 
-  const charCount = rawIdea.length
-  const isValid = charCount >= 5 && charCount <= 1000
+  const charCount = title.length
+  const isValid = charCount >= 1 && charCount <= 1000
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -21,7 +21,7 @@ export default function NewProjectPage() {
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rawIdea: rawIdea.trim() }),
+        body: JSON.stringify({ title: title.trim() }),
       })
       const data = await res.json()
       if (data.project?.id) {
@@ -41,30 +41,30 @@ export default function NewProjectPage() {
       {/* 页面标题 */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight text-stone-800">新建项目</h1>
-        <p className="mt-1 text-sm text-stone-500">输入一段灵感，AI 将帮你扩散为完整的影视创意</p>
+        <p className="mt-1 text-sm text-stone-500">输入项目标题，开始你的 AI 影视创作</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* 大文本输入区 */}
         <div className="relative">
           <textarea
-            value={rawIdea}
-            onChange={(e) => setRawIdea(e.target.value)}
-            placeholder="输入你的灵感，例如：赛博朋克风格的剑客在雨夜霓虹中复仇..."
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="为你的项目起个名字，例如：雨夜回收站、记忆修复师..."
             maxLength={1000}
-            className="min-h-[200px] w-full resize-y rounded-xl border border-stone-200 bg-white p-5 text-lg leading-relaxed text-stone-800 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
+            className="min-h-[120px] w-full resize-y rounded-xl border border-stone-200 bg-white p-5 text-lg leading-relaxed text-stone-800 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
           />
           <div className="absolute bottom-3 right-4 text-xs text-stone-400">
             {charCount} / 1000
           </div>
         </div>
 
-        {/* 原始灵感锚点提示 */}
+        {/* 提示 */}
         <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-4 py-3">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-amber-500" />
             <p className="text-sm text-amber-700">
-              系统将始终保留你的原始灵感，所有扩展都基于此锚点
+              项目标题将作为创作锚点，后续所有内容基于此展开
             </p>
           </div>
         </div>
@@ -78,18 +78,18 @@ export default function NewProjectPage() {
           {loading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              生成中...
+              创建中...
             </>
           ) : (
             <>
               <Sparkles className="h-4 w-4" />
-              开始创意扩散
+              创建项目
             </>
           )}
         </button>
 
-        {charCount > 0 && charCount < 5 && (
-          <p className="text-xs text-red-500">至少需要 5 个字符</p>
+        {charCount > 0 && charCount < 1 && (
+          <p className="text-xs text-red-500">至少需要 1 个字符</p>
         )}
       </form>
     </div>

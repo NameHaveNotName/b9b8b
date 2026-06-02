@@ -34,16 +34,19 @@ export async function POST(req: Request) {
 
   console.log('[POST /api/projects] userId:', user.id)
 
-  const { rawIdea } = await req.json();
-  if (!rawIdea || typeof rawIdea !== 'string') {
-    return NextResponse.json({ error: 'VALID_001' }, { status: 400 });
+  const body = await req.json().catch(() => ({}));
+  const title = body?.title || body?.rawIdea;
+  if (!title || typeof title !== 'string' || title.trim().length === 0) {
+    return NextResponse.json({ error: 'VALID_001', message: '项目标题不能为空' }, { status: 400 });
   }
+
+  const trimmedTitle = title.trim();
 
   const project = await prisma.project.create({
     data: {
       userId: user.id,
-      rawIdea,
-      title: rawIdea.slice(0, 20) + (rawIdea.length > 20 ? '...' : ''),
+      title: trimmedTitle,
+      rawIdea: '',
       status: 'ACTIVE',
     },
   });

@@ -90,9 +90,17 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   if (data) console.log('[workflow] steps:', steps.length, 'project:', !!project)
 
   // 自动设置激活步骤
+  // 工作指令.txt（2026-06-02）：IDEATION 完成后不要自动跳到 FRAMEWORK，
+  // 让用户在创意扩散步骤手动选择方向后再进入下一步
+  const ideationStep = steps.find((s: any) => s.stepType === 'IDEATION')
+  const frameworkStep = steps.find((s: any) => s.stepType === 'FRAMEWORK')
+  const shouldStayOnIdeation =
+    ideationStep?.status === 'COMPLETED' && frameworkStep?.status === 'PENDING'
+
   const currentActive =
     activeStepType ||
     steps.find((s: any) => s.status === 'PROCESSING')?.stepType ||
+    (shouldStayOnIdeation ? 'IDEATION' : undefined) ||
     steps.find((s: any) => s.status === 'PENDING')?.stepType ||
     steps[steps.length - 1]?.stepType
 
@@ -779,9 +787,13 @@ function IdeationPanel({
   const [localStoryLength, setLocalStoryLength] = useState<string>(
     step.outputData?.storyLength || 'short'
   )
+  // 工作指令.txt（2026-06-02）：创意输入区域
+  const [creativeInput, setCreativeInput] = useState<string>(project.rawIdea || '')
+  const [savingInput, setSavingInput] = useState(false)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
+  const inputSaveRef = useRef<NodeJS.Timeout | null>(null)
   const isExecuting = executing === step.stepType
   const directions = step.outputData?.directions || []
   const errorMessage = step.errorMessage || ''
@@ -837,6 +849,33 @@ function IdeationPanel({
     }, 300)
   }
 
+  // 工作指令.txt（2026-06-02）：保存创意输入到 project.rawIdea
+  async function saveCreativeInput(value: string) {
+    try {
+      setSavingInput(true)
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rawIdea: value.trim() }),
+      })
+      if (!res.ok) throw new Error('保存失败')
+      await mutate()
+      console.log('[IDEATION-INPUT] 保存创意输入成功')
+    } catch (e: any) {
+      console.error('[IDEATION-INPUT] 保存创意输入失败:', e.message)
+    } finally {
+      setSavingInput(false)
+    }
+  }
+
+  function handleCreativeInputChange(value: string) {
+    setCreativeInput(value)
+    if (inputSaveRef.current) clearTimeout(inputSaveRef.current)
+    inputSaveRef.current = setTimeout(() => {
+      saveCreativeInput(value)
+    }, 800)
+  }
+
   async function saveStoryLength(key: string, opt?: typeof STORY_LENGTH_OPTIONS[0]) {
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/ideation`, {
@@ -858,15 +897,46 @@ function IdeationPanel({
   const displayDirections = step.status === 'COMPLETED' ? localDirections : directions
 
   if (step.status === 'PENDING') {
+    const canGenerate = creativeInput.trim().length >= 10
     return (
       <div className="space-y-6">
-        <IdeaAnchor text={project.rawIdea} />
+        {/* 项目标题锚点 */}
+        <div className="rounded-lg border border-stone-200 bg-stone-50/50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-stone-400">项目标题</span>
+            <span className="text-sm font-semibold text-stone-700">{project.title}</span>
+          </div>
+        </div>
+
+        {/* 创意输入区域 */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-stone-700">
+            输入你的创意方向
+          </label>
+          <div className="relative">
+            <textarea
+              value={creativeInput}
+              onChange={(e) => handleCreativeInputChange(e.target.value)}
+              placeholder="描述你的故事核心、世界观或情绪基调，例如：一个被遗弃的机器人在雨夜城市中收集人类情感残影..."
+              maxLength={1000}
+              className="min-h-[160px] w-full resize-y rounded-lg border border-stone-200 bg-white p-4 text-sm leading-relaxed text-stone-800 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
+            />
+            <div className="absolute bottom-3 right-3 text-xs text-stone-400">
+              {creativeInput.length} / 1000
+              {savingInput && <span className="ml-2 text-amber-500">保存中...</span>}
+            </div>
+          </div>
+          {creativeInput.length > 0 && creativeInput.length < 10 && (
+            <p className="text-xs text-amber-600">至少需要 10 个字符才能生成</p>
+          )}
+        </div>
+
         <div className="flex justify-center">
           <div className="relative inline-block">
             <button
-              onClick={() => onExecute('IDEATION')}
-              disabled={isExecuting}
-              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+              onClick={() => onExecute('IDEATION', { creativeInput: creativeInput.trim() })}
+              disabled={isExecuting || !canGenerate}
+              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isExecuting ? (
                 <>
@@ -937,7 +1007,7 @@ function IdeationPanel({
           ))}
         </div>
         {selectedIdx !== null && (
-          <div className="flex justify-center">
+          <div className="flex justify-center gap-3">
             <div className="relative inline-block">
               <button
                 onClick={() => onExecute('FRAMEWORK', { directionIndex: selectedIdx })}
@@ -951,7 +1021,7 @@ function IdeationPanel({
                   </>
                 ) : (
                   <>
-                    选择此方向并继续
+                    进入框架搭建
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -965,18 +1035,49 @@ function IdeationPanel({
   }
 
   if (step.status === 'FAILED') {
+    const canGenerate = creativeInput.trim().length >= 10
     return (
       <div className="space-y-6">
-        <IdeaAnchor text={project.rawIdea} />
+        {/* 项目标题锚点 */}
+        <div className="rounded-lg border border-stone-200 bg-stone-50/50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-stone-400">项目标题</span>
+            <span className="text-sm font-semibold text-stone-700">{project.title}</span>
+          </div>
+        </div>
+
+        {/* 创意输入区域 */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-stone-700">
+            输入你的创意方向
+          </label>
+          <div className="relative">
+            <textarea
+              value={creativeInput}
+              onChange={(e) => handleCreativeInputChange(e.target.value)}
+              placeholder="描述你的故事核心、世界观或情绪基调，例如：一个被遗弃的机器人在雨夜城市中收集人类情感残影..."
+              maxLength={1000}
+              className="min-h-[160px] w-full resize-y rounded-lg border border-stone-200 bg-white p-4 text-sm leading-relaxed text-stone-800 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
+            />
+            <div className="absolute bottom-3 right-3 text-xs text-stone-400">
+              {creativeInput.length} / 1000
+              {savingInput && <span className="ml-2 text-amber-500">保存中...</span>}
+            </div>
+          </div>
+          {creativeInput.length > 0 && creativeInput.length < 10 && (
+            <p className="text-xs text-amber-600">至少需要 10 个字符才能生成</p>
+          )}
+        </div>
+
         <ErrorBanner
           message={`生成失败：${errorMessage || '未知错误'}，请检查 API 密钥配置后重试`}
           onDismiss={() => onError(null)}
         />
         <div className="flex justify-center">
           <button
-            onClick={() => onExecute('IDEATION')}
-            disabled={isExecuting}
-            className="flex items-center gap-2 rounded-lg bg-red-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+            onClick={() => onExecute('IDEATION', { creativeInput: creativeInput.trim() })}
+            disabled={isExecuting || !canGenerate}
+            className="flex items-center gap-2 rounded-lg bg-red-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isExecuting ? (
               <>

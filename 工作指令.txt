@@ -1,128 +1,98 @@
-这是典型的**后端错误未向前端传播** + **前端轮询无超时/错误检测**导致的任务挂死。flux 模型请求失败（图17）但前端仍显示"进行中 90%"，说明错误被吞掉了。
-
 ---
 
 ## Kimi Code 执行提示词
 
-**任务：修复风格统一生图任务卡死问题 —— 后端错误传播 + 前端超时检测**
+**任务：重构新建项目输入 + 创意扩散步骤独立输入 + 修复生成后错误跳转**
 
 ---
 
-### Phase 1: 后端 — 生图 API 错误捕获与状态回传
+### Phase 1: 新建项目页面 — 输入内容改为"标题"
 
-**问题**：flux.1-kontext-pro 请求失败（图17），但任务状态未更新为 `failed`，前端永远读到 `processing`。
+**改动范围**：`app/project/new/page.tsx`（或对应新建项目路由）
 
-**修复逻辑**：
-
-1. 打开风格统一步骤的生图 API（通常是 `app/api/style/generate/route.ts` 或类似路径）。
-2. 找到调用外部生图 API（即梦/海螺/flux 等）的代码块。
-3. **确保 `try-catch` 覆盖整个外部 API 调用链路**，包括：
-   - 请求发送
-   - 响应等待
-   - 结果解析
-4. **catch 块中必须执行**：
-   ```ts
-   // 1. 记录失败日志
-   await logOperation({ ... status: 'failed', metadata: { error: error.message, model: selectedModel } });
-   
-   // 2. 更新任务/项目状态为失败
-   await supabase.from('Project').update({ 
-     styleStatus: 'failed',
-     styleError: error.message 
-   }).eq('id', projectId);
-   
-   // 3. 返回明确的错误响应给前端
-   return NextResponse.json({ error: '生成失败', details: error.message }, { status: 500 });
-   ```
-5. **特别注意**：如果使用了队列系统（如 `generateQueue`），确保队列中的 `job` 在失败时标记为 `failed`，而不是永远 `active` 或 `processing`。
+**具体修改**：
+1. 页面主标题从"输入一段灵感，AI 将帮你扩散为完整的影视创意"改为"输入项目标题，开始你的 AI 影视创作"。
+2. 输入框 `placeholder` 从灵感示例（如"赛博朋克风格的剑客在雨夜霓虹中复仇..."）改为标题示例（如"雨夜回收站"、"记忆修复师"）。
+3. 输入框右下角字数统计保持 `0 / 1000` 不变。
+4. 底部提示文案从"系统将始终保留你的原始灵感，所有扩展都基于此锚点"改为"项目标题将作为创作锚点，后续所有内容基于此展开"。
+5. 按钮文案从"开始创意扩散"改为"创建项目"。
+6. **数据存储**：确认 `Project` 表是否有 `title` 字段。如果有，直接存入 `title`；如果没有，先执行 migration 添加 `title TEXT` 字段，然后将用户输入存入 `title`。同时，`Project` 表应保留一个 `idea` 或 `inspiration` 字段（用于后续创意扩散步骤填写），但新建时可为空或默认值。
+7. **创建后跳转**：创建项目成功后，跳转到该项目的工作流页面（`/project/[id]/workflow`），并停留在"创意扩散"步骤。
 
 ---
 
-### Phase 2: 前端 — 轮询/长连接增加超时与错误检测
+### Phase 2: 创意扩散步骤 — 新增创意输入区域
 
-**问题**：前端显示"已 44690s"仍 90%，说明轮询逻辑没有识别后端错误。
+**改动范围**：`app/(dashboard)/project/[id]/workflow/page.tsx` 中创意扩散步骤对应的子组件/渲染逻辑
+
+**具体修改**：
+1. 在创意扩散步骤卡片内，"原始灵感锚点"下方（或上方，根据布局美观判断），**新增一个输入区域**：
+   - 标签："输入你的创意方向"
+   - 占位符："描述你的故事核心、世界观或情绪基调，例如：一个被遗弃的机器人在雨夜城市中收集人类情感残影..."
+   - 多行文本框，字数限制 1000 字
+   - 这是一个**可编辑的输入框**，不是只读展示
+2. **数据绑定**：
+   - 用户输入的内容保存到 `Project` 表的 `idea` / `inspiration` / `creative_input` 字段（确认实际字段名）。
+   - 点击"生成创意方向"时，将**这个输入框的内容**作为参数发送给后端 API，而不是发送项目标题。
+3. **按钮状态**：输入框为空时，"生成创意方向"按钮 disabled；有内容后启用。
+
+---
+
+### Phase 3: 修复"生成创意方向"后错误跳转到框架搭建
+
+**问题**：点击"生成创意方向"后，界面直接跳到框架搭建，而不是留在创意扩散展示结果。
+
+**根因排查**：
+1. 找到创意扩散步骤中"生成创意方向"按钮的 `onClick` 处理函数。
+2. 检查该函数成功后的逻辑：
+   - 是否调用了 `router.push()` 或 `setCurrentStep('framework')`？
+   - 是否在后端 API 返回后，前端错误地更新了全局步骤状态？
+3. 检查工作流进度条的步骤高亮逻辑，确认它是根据 `project.currentStep` 还是前端本地状态渲染。
 
 **修复逻辑**：
+1. **前端**：生成创意方向成功后，**只更新当前步骤的数据**（如将生成的创意方向列表存入 `project.ideaDirections` 或类似字段），**绝不修改 `currentStep` 或 `activeStep`**。
+2. 生成完成后，创意扩散步骤的 UI 应切换为"展示模式"：
+   - 显示生成的多个创意方向卡片/列表
+   - 提供"选择此方向"或"重新生成"按钮
+   - 用户**手动选择**某个方向后，再提供"进入框架搭建"的按钮，此时才推进到下一步。
+3. **后端**：确认 `POST /api/idea/generate`（或对应 API）不会返回 `nextStep: 'framework'` 或类似误导前端的字段。如果有，删除该字段。
+4. **数据库**：确认生成创意方向后，`Project` 表的 `currentStep` 字段不会被后端更新为 `framework`。它应保持为 `idea_diffusion` 或 `creative_diffusion`，直到用户手动确认进入下一步。
 
-1. 打开风格统一步骤的前端组件（`workflow/page.tsx` 或 `style-unify.tsx`）。
-2. 找到轮询任务状态的 `useEffect` 或 `setInterval`。
-3. **增加以下检测**：
+---
 
-```ts
-// 在轮询逻辑中
-const pollTask = async () => {
-  const res = await fetch(`/api/project/${projectId}/status`);
-  const data = await res.json();
-  
-  // 状态为成功或失败都停止轮询
-  if (data.status === 'completed') {
-    setGenerating(false);
-    setProgress(100);
-    return;
-  }
-  
-  if (data.status === 'failed') {
-    setGenerating(false);
-    setError(data.error || '生成失败，请重试');
-    return; // 停止轮询
-  }
-  
-  // 超时检测：如果单个步骤超过 10 分钟（600s）仍在 processing
-  const elapsed = Date.now() - startTime;
-  if (elapsed > 600_000) {
-    setGenerating(false);
-    setError('生成超时，请检查网络或稍后重试');
-    return; // 停止轮询
-  }
-  
-  // 继续轮询
-  setTimeout(pollTask, 3000);
-};
+### Phase 4: 数据流与状态机梳理
+
+**确保以下流程成立**：
+
+```
+新建项目
+  ↓ 输入标题 → 创建项目 → 跳转工作流（创意扩散步骤）
+创意扩散步骤
+  ↓ 显示项目标题（只读锚点）
+  ↓ 用户输入创意描述（可编辑）
+  ↓ 点击"生成创意方向" → 调用 API → 返回创意方向列表
+  ↓ 前端展示创意方向（留在本步骤）
+  ↓ 用户选择方向 / 重新生成
+  ↓ 用户点击"进入框架搭建" → 推进到框架搭建步骤
 ```
 
-4. **UI 层**：当检测到 `failed` 或 `timeout` 时：
-   - 停止 loading/进度条动画
-   - 显示错误提示（红色文字或 Alert 组件）
-   - 提供"重试"按钮
-   - 隐藏"中断"按钮或将其改为"清除错误"
+**状态字段建议**：
+- `Project.title`：新建时填入
+- `Project.ideaInput`：创意扩散步骤中用户输入的创意
+- `Project.ideaDirections`：AI 生成的创意方向数组（JSONB）
+- `Project.selectedDirection`：用户选定的方向索引/ID
+- `Project.currentStep`：当前进行到的步骤（枚举值）
 
 ---
 
-### Phase 3: 生成队列 — 失败任务清理
+### Phase 5: 边界检查
 
-**问题**：图16右下角"生成队列"显示"1 进行中"，说明队列中有死任务。
-
-**修复逻辑**：
-
-1. 打开生成队列相关组件（`GenerationQueue` 或 `TaskQueue`）。
-2. 在队列状态同步逻辑中，增加对 `failed` 状态的识别：
-   - 如果后端返回任务状态为 `failed`，将该任务从"进行中"移到"失败"列表，或标记为失败并允许用户删除/重试。
-3. 增加队列级超时：
-   - 如果某任务在队列中超过 15 分钟仍无进展，自动标记为超时失败。
+1. **旧数据兼容**：如果已有项目的 `title` 字段为空，在仪表盘/项目列表中显示时，fallback 到 `idea` 字段或显示"未命名项目"。
+2. **输入校验**：新建项目时标题不能为空；创意扩散时创意输入不能为空（至少 10 字）。
+3. **URL 参数**：确认从新建项目跳转到工作流时，URL 正确携带项目 ID，不需要额外 query 参数来指定步骤。
 
 ---
 
-### Phase 4: 模型降级或重试（可选但建议）
+**执行顺序**：Phase 1（新建项目）→ Phase 2（创意扩散输入）→ Phase 3（修复跳转）→ Phase 4（状态机梳理）→ Phase 5（边界检查）。
 
-**问题**：flux.1-kontext-pro 连续失败（图17），可能是该模型当前不可用。
-
-**修复逻辑**：
-
-1. 在后端生图逻辑中，增加**一次重试**：
-   - 如果 flux.1-kontext-pro 失败，自动切换到备用模型（如 gpt-image-2 或即梦 4.5），或至少告知用户。
-2. 或在前端模型选择中，如果某模型连续失败，临时禁用该选项并提示"当前不可用"。
-
----
-
-### Phase 5: 验证修复
-
-1. 本地模拟一次外部 API 失败（如临时改错 API key 或 URL）。
-2. 确认前端在 1-2 个轮询周期内（6-10 秒）显示"生成失败"而非永远 loading。
-3. 确认 Supabase 中 `Project` 表的 `styleStatus` 字段正确变为 `failed`。
-4. 确认生成队列中该任务不再显示"进行中"。
-
----
-
-**执行顺序**：Phase 1（后端错误回传）→ Phase 2（前端轮询检测）→ Phase 3（队列清理）→ Phase 4（模型降级）→ Phase 5（验证）。
-
-**最优先**：Phase 1 + Phase 2，这两项解决"卡死"的核心问题。Phase 3 解决队列脏数据。
+**先执行 Phase 1 + Phase 3，这两项是用户最直观的需求。Phase 2 在确认数据库字段后执行。**

@@ -42,6 +42,18 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
+  // 工作指令.txt（2026-06-02）：如果请求体传了 creativeInput，先保存到 project.rawIdea
+  const body = await _req.json().catch(() => ({}))
+  const creativeInput = body?.creativeInput
+  if (creativeInput && typeof creativeInput === 'string' && creativeInput.trim().length > 0) {
+    await prisma.project.update({
+      where: { id: params.id },
+      data: { rawIdea: creativeInput.trim() },
+    })
+    // 更新本地引用，后续生成使用新内容
+    project.rawIdea = creativeInput.trim()
+  }
+
   await startStep(step.id)
 
   try {
