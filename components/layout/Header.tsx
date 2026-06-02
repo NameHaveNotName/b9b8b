@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
-import { Bell, User, LogOut, Settings, ChevronDown, Zap } from 'lucide-react'
+import { Bell, User, LogOut, Settings, ChevronDown, Zap, Diamond, Receipt } from 'lucide-react'
+import RechargeModal from '@/components/recharge/RechargeModal'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': '仪表盘',
@@ -49,16 +50,26 @@ export default function Header() {
   const userDropdown = useDropdown()
   const notifDropdown = useDropdown()
   const [points, setPoints] = useState<number | null>(null)
+  const [showRecharge, setShowRecharge] = useState(false)
 
+  // 初始加载 + 轮询刷新点数（Phase 8）
   useEffect(() => {
-    fetch('/api/user')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.user?.points !== undefined) {
+    let mounted = true
+    async function loadPoints() {
+      try {
+        const res = await fetch('/api/user')
+        const data = await res.json()
+        if (mounted && data.user?.points !== undefined) {
           setPoints(data.user.points)
         }
-      })
-      .catch(() => {})
+      } catch {}
+    }
+    loadPoints()
+    const interval = setInterval(loadPoints, 15000) // 15秒轮询
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
   }, [])
 
   const userName = user?.user_metadata?.name || user?.email?.split('@')[0] || '用户'
@@ -124,10 +135,30 @@ export default function Header() {
 
               {/* 菜单项 */}
               {typeof points === 'number' && (
-                <div className="flex items-center gap-2 px-4 py-2 text-sm text-stone-500">
-                  <Zap className="h-4 w-4 text-amber-500" />
-                  剩余点数: {points}
-                </div>
+                <>
+                  <div className="flex items-center gap-2 px-4 py-2 text-sm text-stone-500">
+                    <Zap className="h-4 w-4 text-amber-500" />
+                    剩余点数: {points}
+                  </div>
+                  <button
+                    onClick={() => {
+                      userDropdown.setOpen(false)
+                      setShowRecharge(true)
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-sm text-stone-600 transition hover:bg-stone-50"
+                  >
+                    <Diamond className="h-4 w-4 text-amber-500" />
+                    充值点数
+                  </button>
+                  <Link
+                    href="/settings/recharges"
+                    onClick={() => userDropdown.setOpen(false)}
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-stone-600 transition hover:bg-stone-50"
+                  >
+                    <Receipt className="h-4 w-4 text-stone-400" />
+                    充值记录
+                  </Link>
+                </>
               )}
               <Link
                 href="/settings/profile"
@@ -158,6 +189,14 @@ export default function Header() {
                 <LogOut className="h-4 w-4" />
                 退出登录
               </button>
+
+              {showRecharge && (
+                <RechargeModal
+                  currentPoints={points ?? 0}
+                  onClose={() => setShowRecharge(false)}
+                  onSuccess={(newPoints: number) => setPoints(newPoints)}
+                />
+              )}
             </div>
           )}
         </div>

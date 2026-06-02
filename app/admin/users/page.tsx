@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Users, Search, Eye, Calendar, Hash, Mail, Crown } from 'lucide-react'
+import { Users, Search, Eye, Calendar, Hash, Mail, Crown, Plus, Loader2, X, Check } from 'lucide-react'
 
 interface AdminUser {
   id: string
@@ -20,6 +20,11 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const router = useRouter()
+
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
+  const [adjustPoints, setAdjustPoints] = useState('')
+  const [adjustReason, setAdjustReason] = useState('')
+  const [adjustLoading, setAdjustLoading] = useState(false)
 
   useEffect(() => {
     fetch('/api/admin/users')
@@ -39,6 +44,32 @@ export default function AdminUsersPage() {
 
   const handleViewUser = (userId: string) => {
     router.push(`/admin/users/${userId}/projects`)
+  }
+
+  async function handleAdjustPoints(userId: string) {
+    const points = parseInt(adjustPoints, 10)
+    if (!points || points === 0) return
+    setAdjustLoading(true)
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/points`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points, reason: adjustReason || undefined }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setUsers((prev) =>
+          prev.map((u) => (u.id === userId ? { ...u, points: data.newPoints ?? u.points } : u))
+        )
+        setEditingUserId(null)
+        setAdjustPoints('')
+        setAdjustReason('')
+      }
+    } catch (e) {
+      console.error('adjust points error:', e)
+    } finally {
+      setAdjustLoading(false)
+    }
   }
 
   if (loading) {
@@ -152,14 +183,66 @@ export default function AdminUsersPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleViewUser(user.id)}
-                      className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-stone-500 transition hover:bg-stone-100 hover:text-stone-700"
-                      title="查看用户详情"
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      查看
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleViewUser(user.id)}
+                        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-stone-500 transition hover:bg-stone-100 hover:text-stone-700"
+                        title="查看用户详情"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        查看
+                      </button>
+                      {editingUserId === user.id ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={adjustPoints}
+                            onChange={(e) => setAdjustPoints(e.target.value)}
+                            placeholder="数值"
+                            className="w-16 rounded border border-stone-200 px-1.5 py-0.5 text-[11px] text-stone-700 placeholder:text-stone-300"
+                          />
+                          <input
+                            type="text"
+                            value={adjustReason}
+                            onChange={(e) => setAdjustReason(e.target.value)}
+                            placeholder="原因"
+                            className="w-20 rounded border border-stone-200 px-1.5 py-0.5 text-[11px] text-stone-700 placeholder:text-stone-300"
+                          />
+                          <button
+                            onClick={() => handleAdjustPoints(user.id)}
+                            disabled={adjustLoading}
+                            className="rounded-md bg-green-50 p-1 text-green-600 transition hover:bg-green-100 disabled:opacity-50"
+                            title="确认"
+                          >
+                            {adjustLoading ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Check className="h-3 w-3" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingUserId(null)
+                              setAdjustPoints('')
+                              setAdjustReason('')
+                            }}
+                            className="rounded-md bg-stone-50 p-1 text-stone-500 transition hover:bg-stone-100"
+                            title="取消"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setEditingUserId(user.id)}
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-600 transition hover:bg-amber-50"
+                          title="加点/扣点"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          加点
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

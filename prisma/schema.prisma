@@ -106,6 +106,7 @@ model User {
   projects      Project[]
   auditLogs     AuditLog[]
   operationLogs OperationLog[]
+  rechargeOrders RechargeOrder[]
   createdAt     DateTime       @default(now())
 }
 
@@ -126,6 +127,25 @@ model Project {
   updatedAt         DateTime       @updatedAt
 
   @@index([userId, status])
+}
+
+// 充值订单
+model RechargeOrder {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountYuan      Int      @map("amount_yuan") // 人民币金额（分）
+  points          Int      // 对应点数
+  paymentMethod   String   @default("bank_transfer") @map("payment_method") // bank_transfer | alipay | wechat
+  proofImageUrl   String?  @map("proof_image_url") // 转账凭证图片URL
+  status          String   @default("pending") // pending | approved | rejected
+  adminNote       String?  @map("admin_note") // 管理员审核备注
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@map("recharge_orders")
 }
 
 model WorkflowStep {

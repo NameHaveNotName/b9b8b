@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth-helpers'
-import { User, Mail, Calendar } from 'lucide-react'
+import { User, Mail, Calendar, Receipt, ChevronRight } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,6 +61,23 @@ export default async function ProfilePage() {
             <code className="rounded bg-stone-100 px-2 py-1 text-xs text-stone-600">{user.id}</code>
           </div>
         </div>
+
+        {/* 充值记录入口 */}
+        <Link
+          href="/settings/recharges"
+          className="flex items-center justify-between rounded-xl border border-stone-200 bg-white p-5 shadow-sm transition hover:border-amber-200 hover:bg-amber-50/30"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50">
+              <Receipt className="h-5 w-5 text-amber-600" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-stone-800">充值记录</p>
+              <p className="text-xs text-stone-500">查看充值申请和历史记录</p>
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-stone-400" />
+        </Link>
       </div>
     </div>
   )
