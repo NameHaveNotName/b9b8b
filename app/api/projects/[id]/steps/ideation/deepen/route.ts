@@ -25,7 +25,18 @@ async function generateDeepenedVersion(
   const improvementsText = selectedImprovements.map((imp, i) => `${i + 1}. ${imp}`).join('\n')
   const customText = customFeedback ? `\n【用户自定义反馈】\n${customFeedback}` : ''
 
-  const prompt = `你是一位顶级影视创意顾问。请基于以下信息，优化当前创意，生成一个更吸引人的新版本。
+  const prompt = `你是一位顶级影视创意顾问。请基于以下信息，针对用户选中的改进方向，精准优化当前创意。
+
+【阶段边界限定 - 严格执行】
+你当前处于"创意扩散"阶段，只负责优化"创意概念"本身。
+绝对禁止输出以下内容：
+- 幕结构建议（几幕、起承转合、分段、节奏曲线）
+- 角色设定细节（角色数量、角色关系网、角色背景故事）
+- 场景清单或场景动作描写
+- 分镜感描述（镜头如何运动、画面如何切换）
+- 剧本格式内容（对白、动作指示、场次编号）
+
+你只允许优化：故事钩子、世界观辨识度、情绪基调、核心意象、概念独特性。
 
 【用户原始创意】
 ${originalInput}
@@ -33,13 +44,26 @@ ${originalInput}
 【当前版本创意】
 ${currentCreative}
 
-【用户选择的改进方向】
+【用户选中的改进方向（只修改这一项）】
 ${improvementsText}${customText}
 
-优化目标：
-1. 让创意更吸引人（更强的钩子、更独特的世界观、更鲜明的情绪）
-2. 保留原始创意的核心锚点，不要偏离到认不出原始输入
-3. 这只是创意优化，不是框架搭建。输出中不应出现角色设定、幕结构、分镜等执行层内容
+优化约束：
+1. **精准修改**：只针对选中的改进方向进行修改，没问题的部分保持原样，不要重写整个世界观
+2. **篇幅严格限制**：
+   - directionTitle：一句话，≤30字
+   - directionDescription：200-400字，绝对禁止超过500字
+   - 如果修改后超出400字，必须压缩删减，保留核心概念
+3. **内容黑名单**：
+   - 禁止出现具体场景动作描写
+   - 禁止出现角色对话
+   - 禁止出现幕结构、起承转合、分段建议
+   - 禁止出现"第一幕...第二幕..."等结构词汇
+   - 禁止出现场景清单或角色数量设定
+4. **格式要求**：
+   - 一句话核心概念（钩子）
+   - 一段世界观/情绪描述（≤300字）
+   - 2-4个关键词标签
+5. 保留原始创意的核心锚点，不要偏离到认不出原始输入
 
 请输出一个创意方向的 JSON，格式如下：
 {
@@ -49,12 +73,10 @@ ${improvementsText}${customText}
 }
 
 约束：
-- title 要简洁有力，能一句话概括核心创意
-- description 要包含世界观、情绪基调、核心冲突、独特卖点
-- keywords 3-5 个，每个词要能触发视觉想象
-- 返回严格 JSON，不要 Markdown 代码块`
+- 返回严格 JSON，不要 Markdown 代码块
+- 不要解释你的修改逻辑，只输出 JSON`
 
-  const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 4096 })
+  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
   const parsed = extractJsonFromMarkdown(resultText)
 
   const directionTitle = String(parsed.directionTitle ?? parsed.title ?? '优化后的创意')

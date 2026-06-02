@@ -91,11 +91,12 @@ export default function IdeationDeepenPanel({
   const [creativeDesc, setCreativeDesc] = useState(directionDescription)
   const [creativeKeywords, setCreativeKeywords] = useState(keywords)
 
-  // 初始评估
+  // 初始评估（仅在挂载时执行一次）
   useEffect(() => {
     if (!evaluation && !isEvaluating) {
       runEvaluation()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 获取历史版本
@@ -119,16 +120,27 @@ export default function IdeationDeepenPanel({
     fetchIterations()
   }, [fetchIterations])
 
-  async function runEvaluation() {
+  async function runEvaluation(overrideCreative?: string) {
     setIsEvaluating(true)
     setError(null)
     try {
+      const targetCreative = overrideCreative || creativeText
+
+      // 获取上一个版本的信息（用于对比评估）
+      const prevIteration = iterations
+        .filter((i) => i.versionNumber < (currentVersion?.versionNumber ?? Infinity))
+        .sort((a, b) => b.versionNumber - a.versionNumber)[0]
+
       const res = await fetch(`/api/projects/${projectId}/steps/ideation/evaluate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           originalInput,
-          currentCreative: creativeText,
+          currentCreative: targetCreative,
+          previousCreative: prevIteration?.creativeContent || '',
+          previousScore: prevIteration?.qualityScore || null,
+          selectedImprovement: prevIteration?.selectedImprovement || '',
+          iterationId: currentVersion?.id,
         }),
       })
       const data = await res.json()
@@ -138,6 +150,7 @@ export default function IdeationDeepenPanel({
       setEvaluation(data.evaluation)
     } catch (e: any) {
       setError(e.message || '评估失败')
+      // 降级：显示空评估
       setEvaluation({
         retentionScore: 0,
         qualityScore: 0,
@@ -182,19 +195,25 @@ export default function IdeationDeepenPanel({
         throw new Error(data.message || '深化生成失败')
       }
 
+      // 更新当前版本
       await fetchIterations()
 
+      // 解析新生成的创意内容
       const { directionTitle: newTitle, directionDescription: newDesc, keywords: newKeywords } = data.iteration
-      setCreativeTitle(newTitle)
-      setCreativeDesc(newDesc)
-      setCreativeKeywords(newKeywords)
-      setCreativeText(data.iteration.creativeContent)
+      const newCreativeContent = data.iteration.creativeContent
 
+      setCreativeTitle(newTitle || directionTitle)
+      setCreativeDesc(newDesc || directionDescription)
+      setCreativeKeywords(newKeywords || [])
+      setCreativeText(newCreativeContent || creativeText)
+
+      // 清除选择
       setSelectedOption(null)
       setCustomFeedback('')
       setShowCustomInput(false)
 
-      setEvaluation(null)
+      // 使用新内容立即重新评估
+      await runEvaluation(newCreativeContent)
     } catch (e: any) {
       setError(e.message || '深化生成失败')
     } finally {
@@ -212,14 +231,28 @@ export default function IdeationDeepenPanel({
       const data = await res.json()
       if (data.success) {
         await fetchIterations()
+        // 更新当前显示
         const target = iterations.find((i) => i.id === iterationId)
         if (target) {
           setCurrentVersion(target)
           setCreativeText(target.creativeContent)
-          const lines = target.creativeContent.split('\n')
-          setCreativeTitle(lines[0]?.replace(/^#+\s*/, '') || directionTitle)
-          setCreativeDesc(lines[1]?.replace(/^#+\s*/, '') || directionDescription)
+
+          // 更稳健地解析 creativeContent
+          const match = target.creativeContent.match(/^##\s*(.+?)\n+([\s\S]*?)\n+关键词[：:]\s*(.+)$/)
+          if (match) {
+            setCreativeTitle(match[1].trim())
+            setCreativeDesc(match[2].trim())
+            setCreativeKeywords(match[3].split(/[、,，]\s*/).filter(Boolean))
+          } else {
+            // 兜底：按行解析
+            const lines = target.creativeContent.split('\n').filter((l) => l.trim())
+            setCreativeTitle(lines[0]?.replace(/^#+\s*/, '') || directionTitle)
+            setCreativeDesc(lines.slice(1).join('\n').replace(/^关键词[：:].*$/, '').trim() || directionDescription)
+          }
+
+          // 清除评估，触发重新评估
           setEvaluation(null)
+          await runEvaluation(target.creativeContent)
         }
       }
     } catch (e) {
@@ -293,19 +326,6 @@ export default function IdeationDeepenPanel({
                 ✓ {qualityHint}
               </div>
             )}
-
-            {/* AI 顾虑 */}
-            {evaluation.concerns && evaluation.concerns !== '暂无顾虑' && (
-              <div className="rounded-md border border-amber-200 bg-amber-50/50 p-3">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                  <div>
-                    <span className="text-xs font-medium text-amber-700">核心顾虑</span>
-                    <p className="mt-1 text-sm text-stone-700">{evaluation.concerns}</p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         ) : (
           <button
@@ -317,9 +337,17 @@ export default function IdeationDeepenPanel({
         )}
       </div>
 
-      {/* 改进选项 */}
+      {/* 改进方向 + 顾虑 */}
       {evaluation && allOptions.length > 0 && (
         <div className="space-y-3 rounded-lg border border-stone-200 bg-white p-4">
+          {/* 核心顾虑 — 纯文本加粗，不独立成框 */}
+          {evaluation.concerns && evaluation.concerns !== '暂无顾虑' && (
+            <p className="text-sm font-semibold text-stone-800">
+              <AlertTriangle className="mr-1.5 inline-block h-4 w-4 text-amber-500" />
+              当前主要问题：{evaluation.concerns}
+            </p>
+          )}
+
           <h4 className="text-sm font-semibold text-stone-700">选择改进方向</h4>
           <div className="space-y-2">
             {allOptions.map((opt, idx) => (
@@ -335,7 +363,7 @@ export default function IdeationDeepenPanel({
                   type="radio"
                   name="improvement"
                   checked={selectedOption === idx}
-                  onChange={() => setSelectedOption(idx)}
+                  onChange={() => { setSelectedOption(idx); setShowCustomInput(false); }}
                   className="mt-0.5 h-4 w-4 text-amber-600"
                 />
                 <span className="text-sm text-stone-700">{opt}</span>
@@ -354,7 +382,7 @@ export default function IdeationDeepenPanel({
                 type="radio"
                 name="improvement"
                 checked={showCustomInput}
-                onChange={() => { setShowCustomInput(true); setSelectedOption(null) }}
+                onChange={() => { setShowCustomInput(true); setSelectedOption(null); }}
                 className="mt-0.5 h-4 w-4 text-amber-600"
               />
               <div className="flex-1">
