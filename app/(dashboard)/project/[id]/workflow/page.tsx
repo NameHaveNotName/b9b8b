@@ -22,6 +22,7 @@ import {
   FileJson,
   FileSpreadsheet,
   Square,
+  Upload,
 } from 'lucide-react'
 // @ts-ignore — xlsx 包类型定义不完整，运行时可用
 import * as XLSX from 'xlsx'
@@ -36,6 +37,8 @@ import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 import { getStepDisplayState, prismaTypeToStepId } from '@/lib/workflow-state'
+import FrameworkImportModal from '@/components/framework/FrameworkImportModal'
+import IdeationDeepenPanel from '@/components/workflow/IdeationDeepenPanel'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -78,6 +81,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   const [executing, setExecuting] = useState<string | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
   const [toast, setToast] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
   // [WORKFLOW-FIX] 分镜模式选择（工作流看板层级）
   const [storyboardMode, setStoryboardMode] = useState<'reference' | 'keyframe'>('keyframe')
   // 工作指令.txt（2026-06-02 卡死修复）：跟踪 PROCESSING 步骤的超时检测
@@ -340,6 +344,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             onRetry={() => executeStep(currentStep.stepType)}
             onCancel={() => handleCancel(currentStep.stepType)}
             onNext={goToNextStep}
+            onImport={currentStep.stepType === 'FRAMEWORK' ? () => setShowImportModal(true) : undefined}
           />
 
           {lastError && (
@@ -391,6 +396,18 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
 
       {/* 队列监控（固定右下角） */}
       <QueueMonitor projectId={params.id} steps={steps} />
+
+      {/* 框架导入弹窗 */}
+      {showImportModal && (
+        <FrameworkImportModal
+          projectId={params.id}
+          onClose={() => setShowImportModal(false)}
+          onImported={() => {
+            mutate()
+            setShowImportModal(false)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -446,6 +463,7 @@ function StepHeader({
   onRetry,
   onCancel,
   onNext,
+  onImport,
 }: {
   step: any
   project: any
@@ -454,6 +472,7 @@ function StepHeader({
   onRetry: () => void
   onCancel: () => void
   onNext: () => void
+  onImport?: () => void
 }) {
   const isExecuting = executing === step.stepType
   const isCancelled = step.status === 'FAILED' && step.errorMessage?.startsWith('[CANCELLED]')
@@ -505,25 +524,36 @@ function StepHeader({
 
         {/* 可执行且未完成：显示开始执行按钮 */}
         {!isHidden && isAvailable && step.status === 'PENDING' && (
-          <div className="relative inline-block">
-            <button
-              onClick={onExecute}
-              disabled={isExecuting}
-              className="flex items-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-            >
-              {isExecuting ? (
-                <>
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  生成中...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4" />
-                  开始执行
-                </>
-              )}
-            </button>
-            <CostBadge cost={DEFAULT_GENERATE_COST} />
+          <div className="flex items-center gap-2">
+            {step.stepType === 'FRAMEWORK' && onImport && (
+              <button
+                onClick={onImport}
+                className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
+              >
+                <Upload className="h-4 w-4" />
+                导入框架
+              </button>
+            )}
+            <div className="relative inline-block">
+              <button
+                onClick={onExecute}
+                disabled={isExecuting}
+                className="flex items-center gap-2 rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+              >
+                {isExecuting ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4" />
+                    开始执行
+                  </>
+                )}
+              </button>
+              <CostBadge cost={DEFAULT_GENERATE_COST} />
+            </div>
           </div>
         )}
 
@@ -560,6 +590,15 @@ function StepHeader({
         {/* 已完成：显示重新生成 + 下一步 */}
         {isDone && (
           <>
+            {step.stepType === 'FRAMEWORK' && onImport && (
+              <button
+                onClick={onImport}
+                className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
+              >
+                <Upload className="h-4 w-4" />
+                重新导入
+              </button>
+            )}
             <button
               onClick={onRetry}
               disabled={isExecuting}
@@ -797,6 +836,7 @@ function IdeationPanel({
   // 工作指令.txt（2026-06-02）：创意输入区域
   const [creativeInput, setCreativeInput] = useState<string>(project.rawIdea || '')
   const [savingInput, setSavingInput] = useState(false)
+  const [deepenMode, setDeepenMode] = useState(false)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
@@ -905,6 +945,7 @@ function IdeationPanel({
 
   if (step.status === 'PENDING') {
     const canGenerate = creativeInput.trim().length >= 10
+    const isImportedFramework = project.frameworkSource === 'imported' || project.frameworkSource === 'mixed'
     return (
       <div className="space-y-6">
         {/* 项目标题锚点 */}
@@ -915,16 +956,33 @@ function IdeationPanel({
           </div>
         </div>
 
+        {/* 框架导入兼容：显示导入来源 */}
+        {isImportedFramework && (
+          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Check className="h-4 w-4 text-green-600" />
+              <span className="text-sm text-green-700">
+                已从文件导入框架：{project.importedFileName || '未知文件'}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-green-600">
+              框架搭建步骤已完成。你可以直接开始后续步骤，或重新进行创意扩散以更换方向。
+            </p>
+          </div>
+        )}
+
         {/* 创意输入区域 */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-stone-700">
-            输入你的创意方向
+            {isImportedFramework ? '更换创意方向（可选）' : '输入你的创意方向'}
           </label>
           <div className="relative">
             <textarea
               value={creativeInput}
               onChange={(e) => handleCreativeInputChange(e.target.value)}
-              placeholder="描述你的故事核心、世界观或情绪基调，例如：一个被遗弃的机器人在雨夜城市中收集人类情感残影..."
+              placeholder={isImportedFramework
+                ? '如需更换方向，请输入新的创意描述...'
+                : '描述你的故事核心、世界观或情绪基调，例如：一个被遗弃的机器人在雨夜城市中收集人类情感残影...'}
               maxLength={1000}
               className="min-h-[160px] w-full resize-y rounded-lg border border-stone-200 bg-white p-4 text-sm leading-relaxed text-stone-800 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
             />
@@ -953,7 +1011,7 @@ function IdeationPanel({
               ) : (
                 <>
                   <Play className="h-4 w-4" />
-                  生成创意方向
+                  {isImportedFramework ? '重新创意扩散' : '生成创意方向'}
                 </>
               )}
             </button>
@@ -969,6 +1027,24 @@ function IdeationPanel({
   }
 
   if (step.status === 'COMPLETED' && directions.length > 0) {
+    const selectedDirection = selectedIdx !== null ? displayDirections[selectedIdx] : null
+
+    // 深化模式
+    if (deepenMode && selectedDirection) {
+      return (
+        <IdeationDeepenPanel
+          projectId={projectId}
+          originalInput={project.rawIdea || creativeInput}
+          currentCreative={selectedDirection.description || ''}
+          directionTitle={selectedDirection.title || ''}
+          directionDescription={selectedDirection.description || ''}
+          keywords={selectedDirection.keywords || []}
+          onGoToFramework={() => onExecute('FRAMEWORK', { directionIndex: selectedIdx })}
+          onBack={() => setDeepenMode(false)}
+        />
+      )
+    }
+
     return (
       <div className="space-y-6">
         <StoryLengthSelector value={localStoryLength} onChange={handleStoryLengthChange} />
@@ -1015,6 +1091,13 @@ function IdeationPanel({
         </div>
         {selectedIdx !== null && (
           <div className="flex justify-center gap-3">
+            <button
+              onClick={() => setDeepenMode(true)}
+              className="flex items-center gap-2 rounded-lg border border-stone-200 px-5 py-2.5 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
+            >
+              <Sparkles className="h-4 w-4" />
+              创意深化
+            </button>
             <div className="relative inline-block">
               <button
                 onClick={() => onExecute('FRAMEWORK', { directionIndex: selectedIdx })}
@@ -1028,7 +1111,7 @@ function IdeationPanel({
                   </>
                 ) : (
                   <>
-                    进入框架搭建
+                    用此创意进入下一步
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -1043,6 +1126,7 @@ function IdeationPanel({
 
   if (step.status === 'FAILED') {
     const canGenerate = creativeInput.trim().length >= 10
+    const isImportedFramework = project.frameworkSource === 'imported' || project.frameworkSource === 'mixed'
     return (
       <div className="space-y-6">
         {/* 项目标题锚点 */}
@@ -1053,16 +1137,33 @@ function IdeationPanel({
           </div>
         </div>
 
+        {/* 框架导入兼容：显示导入来源 */}
+        {isImportedFramework && (
+          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Check className="h-4 w-4 text-green-600" />
+              <span className="text-sm text-green-700">
+                已从文件导入框架：{project.importedFileName || '未知文件'}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-green-600">
+              框架搭建步骤已完成。你可以直接开始后续步骤，或重新进行创意扩散以更换方向。
+            </p>
+          </div>
+        )}
+
         {/* 创意输入区域 */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-stone-700">
-            输入你的创意方向
+            {isImportedFramework ? '更换创意方向（可选）' : '输入你的创意方向'}
           </label>
           <div className="relative">
             <textarea
               value={creativeInput}
               onChange={(e) => handleCreativeInputChange(e.target.value)}
-              placeholder="描述你的故事核心、世界观或情绪基调，例如：一个被遗弃的机器人在雨夜城市中收集人类情感残影..."
+              placeholder={isImportedFramework
+                ? '如需更换方向，请输入新的创意描述...'
+                : '描述你的故事核心、世界观或情绪基调，例如：一个被遗弃的机器人在雨夜城市中收集人类情感残影...'}
               maxLength={1000}
               className="min-h-[160px] w-full resize-y rounded-lg border border-stone-200 bg-white p-4 text-sm leading-relaxed text-stone-800 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
             />
@@ -1093,7 +1194,7 @@ function IdeationPanel({
               </>
             ) : (
               <>
-                重试
+                {isImportedFramework ? '重新创意扩散' : '重试'}
               </>
             )}
           </button>

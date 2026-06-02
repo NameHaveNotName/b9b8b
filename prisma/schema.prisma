@@ -101,13 +101,14 @@ model User {
   points        Int            @default(0)
   isAdmin       Boolean        @default(false)
   adminNote     String?
-  accounts      Account[]
-  sessions      Session[]
-  projects      Project[]
-  auditLogs     AuditLog[]
-  operationLogs OperationLog[]
-  rechargeOrders RechargeOrder[]
-  createdAt     DateTime       @default(now())
+  accounts         Account[]
+  sessions         Session[]
+  projects         Project[]
+  auditLogs        AuditLog[]
+  operationLogs    OperationLog[]
+  rechargeOrders   RechargeOrder[]
+  creativeIterations CreativeIteration[]
+  createdAt        DateTime       @default(now())
 }
 
 model Project {
@@ -120,6 +121,12 @@ model Project {
   framework         Json?          // 框架搭建结果（背景/风格/角色/梗概/幕结构）
   selectedStyleId   String?        // 关联 Asset.id
   status            ProjectStatus  @default(ACTIVE)
+
+  // 框架导入相关字段
+  frameworkSource   String?        @default("generated") @map("framework_source") // 'generated' | 'imported' | 'mixed'
+  importedFileUrl   String?        @map("imported_file_url")
+  importedFileName  String?        @map("imported_file_name")
+  importedRawText   String?        @db.Text @map("imported_raw_text")
 
   // 9步工作流完成状态（条件解锁 DAG 状态机）
   stepIdeaDone                 Boolean @default(false) @map("step_idea_done")
@@ -136,6 +143,7 @@ model Project {
   steps             WorkflowStep[]
   assets            Asset[]
   comparisons       Comparison[]
+  creativeIterations CreativeIteration[]
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -256,4 +264,28 @@ model OperationLog {
 
   @@index([userId, createdAt])
   @@index([type, createdAt])
+}
+
+// 创意扩散深化迭代历史版本
+model CreativeIteration {
+  id                  String   @id @default(cuid())
+  projectId           String   @map("project_id")
+  project             Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId              String   @map("user_id")
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versionNumber       Int      @map("version_number")
+  originalInput       String   @db.Text @map("original_input")
+  creativeContent     String   @db.Text @map("creative_content")
+  retentionScore      Int?     @map("retention_score")      // 原内容保留度 0-100
+  qualityScore        Int?     @map("quality_score")        // 优秀程度 0-100
+  concerns            String?  @db.Text                     // AI 指出的核心顾虑
+  improvementOptions  Json?    @map("improvement_options")  // 改进选项数组
+  selectedImprovement String?  @map("selected_improvement") // 用户选中的选项
+  customFeedback      String?  @db.Text @map("custom_feedback")
+  isCurrent           Boolean  @default(false) @map("is_current")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  // 注意：isCurrent 的唯一性由应用层保证（updateMany + create 的原子操作）
+  @@index([projectId, versionNumber])
+  @@map("creative_iterations")
 }

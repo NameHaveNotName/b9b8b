@@ -54,6 +54,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     project.rawIdea = creativeInput.trim()
   }
 
+  // 框架导入兼容：如果重新执行创意扩散，重置 framework_source 为 generated
+  if (project.frameworkSource === 'imported' || project.frameworkSource === 'mixed') {
+    await prisma.project.update({
+      where: { id: params.id },
+      data: { frameworkSource: 'generated' },
+    })
+  }
+
   await startStep(step.id)
 
   try {
