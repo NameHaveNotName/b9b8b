@@ -120,6 +120,19 @@ model Project {
   framework         Json?          // 框架搭建结果（背景/风格/角色/梗概/幕结构）
   selectedStyleId   String?        // 关联 Asset.id
   status            ProjectStatus  @default(ACTIVE)
+
+  // 9步工作流完成状态（条件解锁 DAG 状态机）
+  stepIdeaDone                 Boolean @default(false) @map("step_idea_done")
+  stepFrameworkDone            Boolean @default(false) @map("step_framework_done")
+  stepStyleDone                Boolean @default(false) @map("step_style_done")
+  stepCharacterDone            Boolean @default(false) @map("step_character_done")
+  stepConceptDone              Boolean @default(false) @map("step_concept_done")
+  stepStoryboardDone           Boolean @default(false) @map("step_storyboard_done")
+  stepStoryboardFirstframeDone Boolean @default(false) @map("step_storyboard_firstframe_done")
+  stepTrailerDone              Boolean @default(false) @map("step_trailer_done")
+  stepEndingDone               Boolean @default(false) @map("step_ending_done")     // KEYFRAMES
+  stepDirectDone               Boolean @default(false) @map("step_direct_done")     // VIDEO_DIRECT
+
   steps             WorkflowStep[]
   assets            Asset[]
   comparisons       Comparison[]
