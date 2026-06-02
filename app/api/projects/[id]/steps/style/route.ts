@@ -201,9 +201,33 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           try {
             await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel)
           } catch (e: any) {
-            console.error('[STYLE-IMAGE] Background processing failed:', e)
+            // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
+            const errMessage = e?.message || 'background style generation failed'
+            const errDetail = (e?.stack || '').toString().slice(0, 500)
+            console.error('[STYLE-IMAGE] Background processing failed:', errMessage, errDetail)
             try {
-              await failStep(step.id, e.message)
+              await failStep(step.id, `${errMessage} | detail: ${errDetail}`)
+            } catch (failErr: any) {
+              console.error('[STYLE-IMAGE] failStep also failed:', failErr?.message)
+              // 兜底：直接更新数据库
+              try {
+                await prisma.workflowStep.update({
+                  where: { id: step.id },
+                  data: { status: 'FAILED' as any, errorMessage: errMessage.slice(0, 200) },
+                })
+              } catch {}
+            }
+            // 记录失败日志
+            try {
+              await logOperation({
+                userId,
+                projectId: params.id,
+                workflowStepId: step.id,
+                actionType: 'error',
+                cost: 0,
+                status: 'failed',
+                metadata: { error: errMessage, detail: errDetail, phase: 'background-generation' },
+              })
             } catch {}
           }
         })
@@ -330,10 +354,31 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         try {
           await processStyleGeneration(step.id, params.id, styleOptions)
         } catch (e: any) {
-          console.error('[STYLE] Background processing failed:', e)
-          // processStyleGeneration 已调用 failStep，这里仅兜底
+          // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
+          const errMessage = e?.message || 'background style generation failed'
+          const errDetail = (e?.stack || '').toString().slice(0, 500)
+          console.error('[STYLE] Background processing failed:', errMessage, errDetail)
           try {
-            await failStep(step.id, e.message)
+            await failStep(step.id, `${errMessage} | detail: ${errDetail}`)
+          } catch (failErr: any) {
+            console.error('[STYLE] failStep also failed:', failErr?.message)
+            try {
+              await prisma.workflowStep.update({
+                where: { id: step.id },
+                data: { status: 'FAILED' as any, errorMessage: errMessage.slice(0, 200) },
+              })
+            } catch {}
+          }
+          try {
+            await logOperation({
+              userId,
+              projectId: params.id,
+              workflowStepId: step.id,
+              actionType: 'error',
+              cost: 0,
+              status: 'failed',
+              metadata: { error: errMessage, detail: errDetail, phase: 'background-generation-compat' },
+            })
           } catch {}
         }
       })

@@ -113,6 +113,11 @@ export async function processStyleGeneration(
       throw new Error('全部 3 张风格图生成失败（含 Mock 兜底）')
     }
 
+      // 工作指令.txt（2026-06-02 卡死修复）：如果所有真实模型都失败了（即使 Mock 兜底），
+    // 记录 lastError 到 outputData，让前端能显示具体失败原因。
+    const allFailed = results.every((r) => !r.success)
+    const anyRealFailure = results.some((r) => r.lastError || r.mockReason)
+
     // 创建 Asset 记录（metadata 包含 model 信息）
     const assets = []
     for (const r of results) {
@@ -188,8 +193,22 @@ export async function processStyleGeneration(
       `[StyleProcessor] Completed step ${stepId}, assets: ${assets.length}/${results.length}, mockCount=${mockCount}`
     )
   } catch (e: any) {
+    // 工作指令.txt（2026-06-02 卡死修复）：即使 failStep 也失败，也要记录到日志并再次尝试
     console.error(`[StyleProcessor] Failed step ${stepId}:`, e)
-    await failStep(stepId, e.message)
+    const errMessage = e?.message || 'style generation failed'
+    const errDetail = (e?.stack || '').toString().slice(0, 500)
+    try {
+      await failStep(stepId, `${errMessage} | detail: ${errDetail}`)
+    } catch (failErr: any) {
+      console.error(`[StyleProcessor] failStep 也失败了:`, failErr?.message)
+      // 再试一次，用最简方式更新状态
+      try {
+        await prisma.workflowStep.update({
+          where: { id: stepId },
+          data: { status: 'FAILED' as any, errorMessage: errMessage.slice(0, 200) },
+        })
+      } catch {}
+    }
     throw e
   }
 }

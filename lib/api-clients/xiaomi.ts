@@ -530,6 +530,11 @@ async function callXiaomiImageOnce(p: GenerateImageParams): Promise<XiaomiImageR
   console.log('Body length:', bodyString.length)
   console.log('=======================================')
 
+  // 工作指令.txt（2026-06-02 卡死修复）：AbortSignal.timeout 在某些 Node.js 补丁版本下可能失效，
+  // 使用 AbortController + setTimeout 作为兜底，确保 fetch 永远不会无限挂起。
+  const controller = new AbortController()
+  const abortTimer = setTimeout(() => controller.abort(), 180000)
+
   const res = await fetch(`${BASE_URL}/v1/images/generations`, {
     method: 'POST',
     headers: {
@@ -538,9 +543,9 @@ async function callXiaomiImageOnce(p: GenerateImageParams): Promise<XiaomiImageR
       'Accept': 'application/json',
     },
     body: bodyString,
-    // 工作指令.txt（Phase 2 修复）：生图慢请求可达 140s+，60s 超时太短会导致 AbortError 重试，产生重复申请
-    signal: AbortSignal.timeout ? AbortSignal.timeout(180000) : undefined,
+    signal: controller.signal,
   })
+  clearTimeout(abortTimer)
 
   // ========= [XIAOMI-IMG-RESPONSE] =========
   // 防御版：先用 text() 拿到原始响应，避免 JSON 解析失败时看不到内容

@@ -79,6 +79,9 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   const [toast, setToast] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   // [WORKFLOW-FIX] 分镜模式选择（工作流看板层级）
   const [storyboardMode, setStoryboardMode] = useState<'reference' | 'keyframe'>('keyframe')
+  // 工作指令.txt（2026-06-02 卡死修复）：跟踪 PROCESSING 步骤的超时检测
+  const processingStartRef = useRef<Record<string, number>>({})
+  const [timeoutError, setTimeoutError] = useState<string | null>(null)
 
   const project = data?.project
   const steps = project?.steps || []
@@ -250,6 +253,47 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
     return () => clearTimeout(timer)
   }, [toast])
 
+  // 工作指令.txt（2026-06-02 卡死修复）：检测 PROCESSING 步骤是否超时（超过10分钟）
+  useEffect(() => {
+    const processingSteps = steps.filter((s: any) => s.status === 'PROCESSING')
+    const now = Date.now()
+    const TIMEOUT_MS = 10 * 60 * 1000 // 10分钟
+
+    for (const step of processingSteps) {
+      const stepId = step.id
+      const startedAt = step.startedAt ? new Date(step.startedAt).getTime() : null
+
+      // 记录开始时间（如果还没记录）
+      if (startedAt && !processingStartRef.current[stepId]) {
+        processingStartRef.current[stepId] = startedAt
+      }
+
+      const startTime = processingStartRef.current[stepId] || startedAt || now
+      const elapsed = now - startTime
+
+      if (elapsed > TIMEOUT_MS) {
+        setTimeoutError(
+          `步骤「${STEP_LABELS[step.stepType] || step.stepType}」生成超时（已超过 ${Math.round(elapsed / 1000)} 秒），请检查网络或稍后重试`
+        )
+      }
+    }
+
+    // 清理已完成的步骤记录
+    const completedIds = new Set(
+      steps.filter((s: any) => s.status !== 'PROCESSING').map((s: any) => s.id)
+    )
+    for (const id of Object.keys(processingStartRef.current)) {
+      if (completedIds.has(id)) {
+        delete processingStartRef.current[id]
+      }
+    }
+
+    // 如果有非 PROCESSING 的步骤且当前有超时错误，清除超时错误
+    if (timeoutError && steps.every((s: any) => s.status !== 'PROCESSING')) {
+      setTimeoutError(null)
+    }
+  }, [steps, timeoutError])
+
   function goToNextStep() {
     if (!currentStep) return
     const next = steps.find((s: any) => s.order === currentStep.order + 1)
@@ -314,6 +358,9 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
 
           {lastError && (
             <ErrorBanner message={lastError} onDismiss={() => setLastError(null)} />
+          )}
+          {timeoutError && (
+            <ErrorBanner message={timeoutError} onDismiss={() => setTimeoutError(null)} />
           )}
 
           <div className="mt-6">

@@ -1,134 +1,128 @@
-这是执行代码里**完全没有调用** `logOperation` 的问题。之前建的表和工具函数只是基础设施，现在需要在每个工作流步骤的**执行成功回调**中显式插入写入逻辑。
+这是典型的**后端错误未向前端传播** + **前端轮询无超时/错误检测**导致的任务挂死。flux 模型请求失败（图17）但前端仍显示"进行中 90%"，说明错误被吞掉了。
 
 ---
 
 ## Kimi Code 执行提示词
 
-**任务：在工作流全步骤执行成功后注入操作日志写入**
+**任务：修复风格统一生图任务卡死问题 —— 后端错误传播 + 前端超时检测**
 
 ---
 
-### Phase 1: 定位所有执行函数的注入点
+### Phase 1: 后端 — 生图 API 错误捕获与状态回传
 
-在项目中全局搜索以下关键词，找到用户点击"开始执行"、"确认执行"、"生成创意方向"后**实际触发业务逻辑**的函数：
+**问题**：flux.1-kontext-pro 请求失败（图17），但任务状态未更新为 `failed`，前端永远读到 `processing`。
 
-```
-搜索关键词（按优先级）：
-- "开始执行"
-- "确认执行"  
-- "生成创意方向"
-- "重新生成"
-- handleGenerate
-- handleExecute
-- onExecute
-- onConfirm
-- generateStyle / generateFramework / generateIdea 等
-```
+**修复逻辑**：
 
-**注入位置**：在这些函数**成功返回结果后**（`try` 块末尾、`return` 之前），插入 `logOperation` 调用。
-
----
-
-### Phase 2: 注入代码模板
-
-**如果执行逻辑在 API Route（`app/api/.../route.ts`）中**：
-
-```ts
-import { logOperation } from '@/lib/operations';
-
-// 在 POST handler 中，业务逻辑成功后
-await logOperation({
-  userId: user.id,           // 从 auth session 获取
-  projectId: body.projectId,   // 从请求 body 获取
-  stepName: 'style_unify',   // 见下方映射表
-  actionType: 'generate',    // generate | regenerate | skip | confirm
-  cost: 20,                  // 从 lib/points-config.ts 读取
-  status: 'success',
-});
-```
-
-**如果执行逻辑在 Server Action 中**：
-
-```ts
-'use server';
-import { logOperation } from '@/lib/operations';
-
-export async function generateFramework(projectId: string, ...) {
-  // ... 业务逻辑 ...
-  
-  await logOperation({
-    userId: session.user.id,
-    projectId,
-    stepName: 'framework',
-    actionType: 'generate',
-    cost: 10,
-    status: 'success',
-  });
-  
-  return result;
-}
-```
-
-**如果执行逻辑在 Client Component 中直接 fetch 外部 API**（如直接调用即梦/海螺 API）：
-- **方案 A（推荐）**：在后端新增一个 `/api/log-operation` 的 POST 路由，前端执行成功后先调用它。
-- **方案 B**：将执行逻辑改为走 Server Action，在 Action 内部统一处理业务 + 日志。
-
----
-
-### Phase 3: 各步骤 stepName 映射表（严格统一）
-
-| 界面步骤 | stepName | 成本常量（从 points-config.ts 读取） |
-|---------|----------|----------------------------------|
-| 创意扩散 | `idea_diffusion` | `STEP_COSTS.idea` |
-| 框架搭建 | `framework` | `STEP_COSTS.framework` |
-| 风格统一 | `style_unify` | `STEP_COSTS.style` |
-| 人物设计 | `character_design` | `STEP_COSTS.character` |
-| 概念图 | `concept_art` | `STEP_COSTS.concept` |
-| 宣传片 | `trailer` | `STEP_COSTS.trailer` |
-| 分镜设计 | `storyboard` | `STEP_COSTS.storyboard` |
-| 生成尾帧 | `ending_frame` | `STEP_COSTS.ending` |
-| 直出视频 | `direct_video` | `STEP_COSTS.direct` |
-
-**actionType 规则**：
-- 用户点击"开始执行" / "生成创意方向" / "确认执行" → `'generate'`
-- 用户点击"重新生成" → `'regenerate'`
-- 用户点击"跳过" → `'skip'`
-
----
-
-### Phase 4: 失败时也要记录
-
-在每个执行函数的 `catch` 块中补充失败日志：
-
-```ts
-} catch (error) {
-  await logOperation({
-    userId: user.id,
-    projectId,
-    stepName: 'style_unify',
-    actionType: 'generate',
-    cost: 0,
-    status: 'failed',
-    metadata: { error: error instanceof Error ? error.message : String(error) },
-  });
-  throw error;
-}
-```
-
----
-
-### Phase 5: 验证写入
-
-1. 完成至少一个步骤的注入后，本地执行一次该步骤（如创意扩散或风格统一）。
-2. 立即在 Supabase SQL Editor 执行：
-   ```sql
-   SELECT * FROM "OperationLog" ORDER BY created_at DESC LIMIT 5;
+1. 打开风格统一步骤的生图 API（通常是 `app/api/style/generate/route.ts` 或类似路径）。
+2. 找到调用外部生图 API（即梦/海螺/flux 等）的代码块。
+3. **确保 `try-catch` 覆盖整个外部 API 调用链路**，包括：
+   - 请求发送
+   - 响应等待
+   - 结果解析
+4. **catch 块中必须执行**：
+   ```ts
+   // 1. 记录失败日志
+   await logOperation({ ... status: 'failed', metadata: { error: error.message, model: selectedModel } });
+   
+   // 2. 更新任务/项目状态为失败
+   await supabase.from('Project').update({ 
+     styleStatus: 'failed',
+     styleError: error.message 
+   }).eq('id', projectId);
+   
+   // 3. 返回明确的错误响应给前端
+   return NextResponse.json({ error: '生成失败', details: error.message }, { status: 500 });
    ```
-3. 确认返回非空记录后，再批量处理其他步骤。
-4. 全部完成后，刷新 Admin 后台，确认"总操作数"和图表不再为 0。
+5. **特别注意**：如果使用了队列系统（如 `generateQueue`），确保队列中的 `job` 在失败时标记为 `failed`，而不是永远 `active` 或 `processing`。
 
 ---
 
-**执行顺序**：Phase 1（搜索定位）→ Phase 2（选一个步骤注入并验证）→ Phase 3（按映射表批量注入所有步骤）→ Phase 4（补 catch 块）→ Phase 5（全量验证）。
+### Phase 2: 前端 — 轮询/长连接增加超时与错误检测
 
-**先选一个最简单的步骤（如创意扩散或框架搭建）做试点，验证 OperationLog 能写入后，再批量处理其余步骤。**
+**问题**：前端显示"已 44690s"仍 90%，说明轮询逻辑没有识别后端错误。
+
+**修复逻辑**：
+
+1. 打开风格统一步骤的前端组件（`workflow/page.tsx` 或 `style-unify.tsx`）。
+2. 找到轮询任务状态的 `useEffect` 或 `setInterval`。
+3. **增加以下检测**：
+
+```ts
+// 在轮询逻辑中
+const pollTask = async () => {
+  const res = await fetch(`/api/project/${projectId}/status`);
+  const data = await res.json();
+  
+  // 状态为成功或失败都停止轮询
+  if (data.status === 'completed') {
+    setGenerating(false);
+    setProgress(100);
+    return;
+  }
+  
+  if (data.status === 'failed') {
+    setGenerating(false);
+    setError(data.error || '生成失败，请重试');
+    return; // 停止轮询
+  }
+  
+  // 超时检测：如果单个步骤超过 10 分钟（600s）仍在 processing
+  const elapsed = Date.now() - startTime;
+  if (elapsed > 600_000) {
+    setGenerating(false);
+    setError('生成超时，请检查网络或稍后重试');
+    return; // 停止轮询
+  }
+  
+  // 继续轮询
+  setTimeout(pollTask, 3000);
+};
+```
+
+4. **UI 层**：当检测到 `failed` 或 `timeout` 时：
+   - 停止 loading/进度条动画
+   - 显示错误提示（红色文字或 Alert 组件）
+   - 提供"重试"按钮
+   - 隐藏"中断"按钮或将其改为"清除错误"
+
+---
+
+### Phase 3: 生成队列 — 失败任务清理
+
+**问题**：图16右下角"生成队列"显示"1 进行中"，说明队列中有死任务。
+
+**修复逻辑**：
+
+1. 打开生成队列相关组件（`GenerationQueue` 或 `TaskQueue`）。
+2. 在队列状态同步逻辑中，增加对 `failed` 状态的识别：
+   - 如果后端返回任务状态为 `failed`，将该任务从"进行中"移到"失败"列表，或标记为失败并允许用户删除/重试。
+3. 增加队列级超时：
+   - 如果某任务在队列中超过 15 分钟仍无进展，自动标记为超时失败。
+
+---
+
+### Phase 4: 模型降级或重试（可选但建议）
+
+**问题**：flux.1-kontext-pro 连续失败（图17），可能是该模型当前不可用。
+
+**修复逻辑**：
+
+1. 在后端生图逻辑中，增加**一次重试**：
+   - 如果 flux.1-kontext-pro 失败，自动切换到备用模型（如 gpt-image-2 或即梦 4.5），或至少告知用户。
+2. 或在前端模型选择中，如果某模型连续失败，临时禁用该选项并提示"当前不可用"。
+
+---
+
+### Phase 5: 验证修复
+
+1. 本地模拟一次外部 API 失败（如临时改错 API key 或 URL）。
+2. 确认前端在 1-2 个轮询周期内（6-10 秒）显示"生成失败"而非永远 loading。
+3. 确认 Supabase 中 `Project` 表的 `styleStatus` 字段正确变为 `failed`。
+4. 确认生成队列中该任务不再显示"进行中"。
+
+---
+
+**执行顺序**：Phase 1（后端错误回传）→ Phase 2（前端轮询检测）→ Phase 3（队列清理）→ Phase 4（模型降级）→ Phase 5（验证）。
+
+**最优先**：Phase 1 + Phase 2，这两项解决"卡死"的核心问题。Phase 3 解决队列脏数据。

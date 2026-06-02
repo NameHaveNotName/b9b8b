@@ -166,9 +166,10 @@ export default function QueueMonitor({ projectId, steps: externalSteps }: QueueM
 
   const steps: WorkflowStep[] = externalSteps || data?.project?.steps || []
   const processingSteps = steps.filter((s) => s.status === 'PROCESSING')
+  const failedSteps = steps.filter((s) => s.status === 'FAILED')
   const recentCompleted = useRecentCompletions(steps)
 
-  const totalTasks = processingSteps.length + recentCompleted.length
+  const totalTasks = processingSteps.length + recentCompleted.length + failedSteps.length
 
   if (totalTasks === 0) return null
 
@@ -205,6 +206,11 @@ export default function QueueMonitor({ projectId, steps: externalSteps }: QueueM
               {processingSteps.length > 0 && (
                 <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
                   {processingSteps.length} 进行中
+                </span>
+              )}
+              {failedSteps.length > 0 && (
+                <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-600">
+                  {failedSteps.length} 失败
                 </span>
               )}
             </div>
@@ -293,6 +299,35 @@ export default function QueueMonitor({ projectId, steps: externalSteps }: QueueM
                       查看结果
                       <ArrowRight className="h-3 w-3" />
                     </Link>
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* 失败任务 */}
+            {failedSteps.map((step) => {
+              const Icon = STEP_ICONS[step.stepType] || X
+              const isCancelled = step.errorMessage?.startsWith('[CANCELLED]')
+              return (
+                <div
+                  key={`fail-${step.id}`}
+                  className="flex items-start gap-3 border-b border-stone-50 px-4 py-3 last:border-0"
+                >
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600">
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-stone-700">
+                        {STEP_LABELS[step.stepType] || step.stepType}
+                      </span>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${isCancelled ? 'bg-stone-100 text-stone-500' : 'bg-red-50 text-red-600'}`}>
+                        {isCancelled ? '已中断' : '失败'}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[11px] text-red-500 line-clamp-2">
+                      {step.errorMessage || '生成失败'}
+                    </div>
                   </div>
                 </div>
               )
