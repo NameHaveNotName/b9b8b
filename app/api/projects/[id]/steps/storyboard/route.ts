@@ -393,6 +393,15 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     data: { outputData: nextOutputData }
   })
 
+  // 如果任意 shot 已有 firstFrameUrl，标记首帧生成完成
+  const hasFirstFrame = body.shots.some((s: any) => s.firstFrameUrl)
+  if (hasFirstFrame) {
+    await prisma.project.update({
+      where: { id: params.id },
+      data: { stepStoryboardFirstframeDone: true }
+    })
+  }
+
   console.log('[STORYBOARD-PATCH] 保存 shots 成功, 数量:', body.shots.length)
   return NextResponse.json({ success: true })
 }

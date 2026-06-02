@@ -35,6 +35,7 @@ import HoverImageBadge from '@/components/generation/HoverImageBadge'
 import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
+import { getStepDisplayState, prismaTypeToStepId } from '@/lib/workflow-state'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -333,6 +334,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
           <StepHeader
             step={currentStep}
+            project={project}
             executing={executing}
             onExecute={() => executeStep(currentStep.stepType)}
             onRetry={() => executeStep(currentStep.stepType)}
@@ -438,6 +440,7 @@ function ErrorBanner({
 
 function StepHeader({
   step,
+  project,
   executing,
   onExecute,
   onRetry,
@@ -445,6 +448,7 @@ function StepHeader({
   onNext,
 }: {
   step: any
+  project: any
   executing: string | null
   onExecute: () => void
   onRetry: () => void
@@ -454,11 +458,18 @@ function StepHeader({
   const isExecuting = executing === step.stepType
   const isCancelled = step.status === 'FAILED' && step.errorMessage?.startsWith('[CANCELLED]')
 
+  // DAG 状态机计算
+  const stepId = prismaTypeToStepId(step.stepType)
+  const displayState = stepId ? getStepDisplayState(stepId, project) : null
+  const isHidden = displayState?.isHidden ?? false
+  const isDone = displayState?.isDone ?? step.status === 'COMPLETED'
+  const isAvailable = displayState?.isAvailable ?? true
+
   const statusConfig: Record<
     string,
     { label: string; className: string }
   > = {
-    PENDING: { label: '待开始', className: 'bg-stone-100 text-stone-500' },
+    PENDING: { label: isAvailable ? '待开始' : '未解锁', className: 'bg-stone-100 text-stone-500' },
     PROCESSING: { label: '进行中', className: 'bg-blue-50 text-blue-600' },
     COMPLETED: { label: '已完成', className: 'bg-green-50 text-green-600' },
     FAILED: { label: isCancelled ? '已中断' : '失败', className: isCancelled ? 'bg-stone-100 text-stone-500' : 'bg-red-50 text-red-600' },
@@ -480,7 +491,20 @@ function StepHeader({
       </div>
 
       <div className="flex items-center gap-2">
-        {step.status === 'PENDING' && (
+        {/* 隐藏步骤：只展示状态标签，无操作按钮 */}
+        {isHidden && isDone && (
+          <span className="text-xs text-stone-400">此步骤已归档，内容仍可查看</span>
+        )}
+
+        {/* 未解锁步骤 */}
+        {!isHidden && !isAvailable && (
+          <span className="rounded-lg border border-stone-200 px-4 py-2 text-xs text-stone-400">
+            请先完成前置步骤
+          </span>
+        )}
+
+        {/* 可执行且未完成：显示开始执行按钮 */}
+        {!isHidden && isAvailable && step.status === 'PENDING' && (
           <div className="relative inline-block">
             <button
               onClick={onExecute}
@@ -503,6 +527,7 @@ function StepHeader({
           </div>
         )}
 
+        {/* 处理中：显示中断按钮 */}
         {step.status === 'PROCESSING' && (
           <button
             onClick={onCancel}
@@ -514,6 +539,7 @@ function StepHeader({
           </button>
         )}
 
+        {/* 失败：显示重试按钮 */}
         {step.status === 'FAILED' && (
           <button
             onClick={onRetry}
@@ -531,14 +557,27 @@ function StepHeader({
           </button>
         )}
 
-        {step.status === 'COMPLETED' && (
-          <button
-            onClick={onNext}
-            className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
-          >
-            下一步
-            <ArrowRight className="h-4 w-4" />
-          </button>
+        {/* 已完成：显示重新生成 + 下一步 */}
+        {isDone && (
+          <>
+            <button
+              onClick={onRetry}
+              disabled={isExecuting}
+              className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50 disabled:opacity-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              重新生成
+            </button>
+            {!isHidden && (
+              <button
+                onClick={onNext}
+                className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
+              >
+                下一步
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

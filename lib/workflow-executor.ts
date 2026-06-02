@@ -25,8 +25,29 @@ export async function tryStartStep(stepId: string): Promise<boolean> {
   return result.count === 1;
 }
 
+/**
+ * 步骤完成后，同步更新 Project 对应的 step_*_done 字段
+ */
+export async function markProjectStepDone(projectId: string, stepType: WorkflowStepType) {
+  const fieldMap: Record<string, any> = {
+    IDEATION: { stepIdeaDone: true },
+    FRAMEWORK: { stepFrameworkDone: true },
+    STYLE: { stepStyleDone: true },
+    CHARACTER: { stepCharacterDone: true },
+    CONCEPT: { stepConceptDone: true },
+    STORYBOARD: { stepStoryboardDone: true },
+    TRAILER: { stepTrailerDone: true },
+    KEYFRAMES: { stepEndingDone: true },
+    VIDEO_DIRECT: { stepDirectDone: true },
+  }
+  const data = fieldMap[stepType]
+  if (!data) return
+  await prisma.project.update({ where: { id: projectId }, data })
+}
+
 export async function completeStep(stepId: string, outputData: any) {
-  return prisma.workflowStep.update({
+  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  const updated = await prisma.workflowStep.update({
     where: { id: stepId },
     data: {
       status: 'COMPLETED' as StepStatus,
@@ -34,6 +55,10 @@ export async function completeStep(stepId: string, outputData: any) {
       outputData,
     },
   });
+  if (step) {
+    await markProjectStepDone(step.projectId, step.stepType as WorkflowStepType)
+  }
+  return updated
 }
 
 export async function failStep(stepId: string, errorMessage: string) {
