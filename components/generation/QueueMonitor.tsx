@@ -29,7 +29,7 @@ import {
 interface WorkflowStep {
   id: string
   stepType: string
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
   order: number
   startedAt?: string | null
   completedAt?: string | null

@@ -37,7 +37,7 @@ const STEP_ICONS: Record<StepId, React.ComponentType<{ className?: string }>> = 
 
 interface Step {
   stepType: string
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 }
 
 interface TopStepperProps {
