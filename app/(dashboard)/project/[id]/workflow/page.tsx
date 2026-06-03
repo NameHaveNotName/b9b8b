@@ -363,8 +363,28 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             step={currentStep}
             project={project}
             executing={executing}
-            onExecute={() => executeStep(currentStep.stepType)}
-            onRetry={() => executeStep(currentStep.stepType)}
+            onExecute={() => {
+              if (currentStep.stepType === 'FRAMEWORK') {
+                if (selectedIdx === null) {
+                  setLastError('请先选择一个创意方向')
+                  return
+                }
+                executeStep('FRAMEWORK', { directionIndex: selectedIdx })
+              } else {
+                executeStep(currentStep.stepType)
+              }
+            }}
+            onRetry={() => {
+              if (currentStep.stepType === 'FRAMEWORK') {
+                if (selectedIdx === null) {
+                  setLastError('请先选择一个创意方向')
+                  return
+                }
+                executeStep('FRAMEWORK', { directionIndex: selectedIdx })
+              } else {
+                executeStep(currentStep.stepType)
+              }
+            }}
             onCancel={() => handleCancel(currentStep.stepType)}
             onNext={goToNextStep}
             onImport={currentStep.stepType === 'FRAMEWORK' ? () => setShowImportModal(true) : undefined}
