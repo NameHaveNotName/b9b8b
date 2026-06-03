@@ -2,5 +2,10 @@
   "buildCommand": "next build",
   "outputDirectory": ".next",
   "installCommand": "npm install",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "functions": {
+    "app/api/projects/[id]/steps/framework/route.ts": {
+      "maxDuration": 300
+    }
+  }
 }

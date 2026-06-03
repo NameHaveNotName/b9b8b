@@ -132,7 +132,20 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         // 调试日志：响应状态
         console.log(`[executeStep] ${stepType} response status:`, res.status)
 
-        const result = await res.json()
+        // 防御：超时或服务器崩溃可能导致响应为空/非 JSON
+        let result: any
+        try {
+          result = await res.json()
+        } catch (parseErr) {
+          const text = await res.text().catch(() => '')
+          console.error(`[executeStep] ${stepType} non-JSON response:`, text.slice(0, 500))
+          const isTimeout = res.status === 504 || res.status === 502 || /timeout|timed out/gi.test(text)
+          throw new Error(
+            isTimeout
+              ? '服务器响应超时，请稍后重试（框架生成可能需要 30–120 秒）'
+              : `服务器返回无效响应 (HTTP ${res.status})`
+          )
+        }
         console.log(`[executeStep] ${stepType} response:`, JSON.stringify(result).slice(0, 500))
 
         if (!result.success) {

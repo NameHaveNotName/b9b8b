@@ -510,9 +510,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  await startStep(step.id)
-
   try {
+    await startStep(step.id)
     // 优先使用 CreativeIteration 中当前版本的创意内容
   const currentIteration = await prisma.creativeIteration.findFirst({
     where: { projectId: params.id, isCurrent: true },
@@ -648,18 +647,26 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     ...(selectedStyleImage !== undefined && { selectedStyleImage }),
   }
 
-  // 同步更新 project.framework（后续步骤读取的单一数据源）
-  await prisma.$transaction([
-    prisma.workflowStep.update({
-      where: { id: step.id },
-      data: { outputData: nextOutput }
-    }),
-    prisma.project.update({
-      where: { id: params.id },
-      data: { framework: nextOutput }
-    })
-  ])
+  try {
+    // 同步更新 project.framework（后续步骤读取的单一数据源）
+    await prisma.$transaction([
+      prisma.workflowStep.update({
+        where: { id: step.id },
+        data: { outputData: nextOutput }
+      }),
+      prisma.project.update({
+        where: { id: params.id },
+        data: { framework: nextOutput }
+      })
+    ])
 
-  console.log('[TEXT-EDIT-FRAMEWORK] 保存 framework 字段成功')
-  return NextResponse.json({ success: true })
+    console.log('[TEXT-EDIT-FRAMEWORK] 保存 framework 字段成功')
+    return NextResponse.json({ success: true })
+  } catch (e: any) {
+    console.error('[TEXT-EDIT-FRAMEWORK] 保存失败:', e.message)
+    return NextResponse.json(
+      { error: 'DB_001', message: '保存失败: ' + e.message },
+      { status: 500 }
+    )
+  }
 }
