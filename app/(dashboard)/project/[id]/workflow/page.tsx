@@ -88,6 +88,8 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   // 工作指令.txt（2026-06-02 卡死修复）：跟踪 PROCESSING 步骤的超时检测
   const processingStartRef = useRef<Record<string, number>>({})
   const [timeoutError, setTimeoutError] = useState<string | null>(null)
+  // 提升到 WorkflowPage 级别，供 executeStep 和 StepContent 共享
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
 
   const project = data?.project
   const steps = project?.steps || []
@@ -396,6 +398,8 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
                 const displayState = stepId ? getStepDisplayState(stepId, project) : null
                 return displayState?.isHidden ?? false
               })()}
+              selectedIdx={selectedIdx}
+              setSelectedIdx={setSelectedIdx}
             />
           </div>
 
@@ -666,6 +670,8 @@ function StepContent({
   storyboardMode,
   setStoryboardMode,
   readOnly,
+  selectedIdx,
+  setSelectedIdx,
 }: {
   step: any
   project: any
@@ -678,6 +684,8 @@ function StepContent({
   storyboardMode?: 'reference' | 'keyframe'
   setStoryboardMode?: (mode: 'reference' | 'keyframe') => void
   readOnly?: boolean
+  selectedIdx?: number | null
+  setSelectedIdx?: (idx: number | null) => void
 }) {
   switch (step.stepType) {
     case 'IDEATION':
@@ -690,7 +698,9 @@ function StepContent({
           onError={onError}
           projectId={project.id}
           mutate={mutate}
-  readOnly={readOnly}
+          readOnly={readOnly}
+          selectedIdx={selectedIdx}
+          setSelectedIdx={setSelectedIdx}
         />
       )
     case 'FRAMEWORK':
@@ -861,6 +871,8 @@ function IdeationPanel({
   projectId,
   mutate,
   readOnly,
+  selectedIdx,
+  setSelectedIdx,
 }: {
   step: any
   project: any
@@ -870,8 +882,9 @@ function IdeationPanel({
   projectId: string
   mutate: () => Promise<any>
   readOnly?: boolean
+  selectedIdx?: number | null
+  setSelectedIdx?: (idx: number | null) => void
 }) {
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [localDirections, setLocalDirections] = useState<any[]>(step.outputData?.directions || [])
   const [localStoryLength, setLocalStoryLength] = useState<string>(
     step.outputData?.storyLength || 'short'
