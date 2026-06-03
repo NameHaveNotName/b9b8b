@@ -121,11 +121,13 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
 
       // 防御：FRAMEWORK 必须有有效的 directionIndex
       if (stepType === 'FRAMEWORK') {
-        if (body?.directionIndex === undefined || body?.directionIndex === null) {
+        const idx = body?.directionIndex ?? selectedIdx
+        if (idx === undefined || idx === null) {
           setLastError('请先选择一个创意方向')
           setExecuting(null)
           return
         }
+        body = { directionIndex: idx }
       }
 
       // 调试日志
@@ -177,7 +179,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         setExecuting(null)
       }
     },
-    [params.id, mutate, executing]
+    [params.id, mutate, executing, selectedIdx]
   )
 
   // 中断步骤
@@ -363,28 +365,8 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             step={currentStep}
             project={project}
             executing={executing}
-            onExecute={() => {
-              if (currentStep.stepType === 'FRAMEWORK') {
-                if (selectedIdx === null) {
-                  setLastError('请先选择一个创意方向')
-                  return
-                }
-                executeStep('FRAMEWORK', { directionIndex: selectedIdx })
-              } else {
-                executeStep(currentStep.stepType)
-              }
-            }}
-            onRetry={() => {
-              if (currentStep.stepType === 'FRAMEWORK') {
-                if (selectedIdx === null) {
-                  setLastError('请先选择一个创意方向')
-                  return
-                }
-                executeStep('FRAMEWORK', { directionIndex: selectedIdx })
-              } else {
-                executeStep(currentStep.stepType)
-              }
-            }}
+            onExecute={() => executeStep(currentStep.stepType)}
+            onRetry={() => executeStep(currentStep.stepType)}
             onCancel={() => handleCancel(currentStep.stepType)}
             onNext={goToNextStep}
             onImport={currentStep.stepType === 'FRAMEWORK' ? () => setShowImportModal(true) : undefined}
