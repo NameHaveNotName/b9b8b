@@ -119,8 +119,17 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
       setExecuting(stepType)
       setLastError(null)
 
+      // 防御：FRAMEWORK 必须有有效的 directionIndex
+      if (stepType === 'FRAMEWORK') {
+        if (body?.directionIndex === undefined || body?.directionIndex === null) {
+          setLastError('请先选择一个创意方向')
+          setExecuting(null)
+          return
+        }
+      }
+
       // 调试日志
-      console.log(`[executeStep] starting ${stepType}`, { body, isExecuting: executing })
+      console.log(`[executeStep] starting ${stepType}`, { body, bodyJson: JSON.stringify(body), isExecuting: executing })
 
       try {
         const res = await fetch(`/api/projects/${params.id}/steps/${apiPath}`, {

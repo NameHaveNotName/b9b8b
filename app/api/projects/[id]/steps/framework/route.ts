@@ -471,15 +471,20 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
-  let directionIndex: number
+  // 防御：某些情况下 req.json() 会抛异常，先用 text() 读取原始内容
+  const rawBody = await req.text()
+  console.log('[FRAMEWORK] raw body length:', rawBody.length, 'content:', rawBody.slice(0, 200))
+  let body: any = {}
   try {
-    const body = await req.json()
-    directionIndex = body.directionIndex
-  } catch {
-    return NextResponse.json({ error: 'VALID_002', message: '请求体解析失败' }, { status: 400 })
+    body = rawBody ? JSON.parse(rawBody) : {}
+  } catch (parseErr: any) {
+    console.error('[FRAMEWORK] body parse error:', parseErr.message, 'raw:', rawBody.slice(0, 200))
+    return NextResponse.json({ error: 'VALID_002', message: '请求体不是有效 JSON' }, { status: 400 })
   }
+  const directionIndex = body.directionIndex
   if (typeof directionIndex !== 'number') {
-    return NextResponse.json({ error: 'VALID_002' }, { status: 400 })
+    console.error('[FRAMEWORK] directionIndex invalid:', directionIndex, 'body:', JSON.stringify(body).slice(0, 200))
+    return NextResponse.json({ error: 'VALID_002', message: `directionIndex 必须是数字，收到: ${typeof directionIndex}` }, { status: 400 })
   }
 
   const ideationStep = await prisma.workflowStep.findUnique({
