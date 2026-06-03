@@ -471,7 +471,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
-  const { directionIndex } = await req.json()
+  let directionIndex: number
+  try {
+    const body = await req.json()
+    directionIndex = body.directionIndex
+  } catch {
+    return NextResponse.json({ error: 'VALID_002', message: '请求体解析失败' }, { status: 400 })
+  }
   if (typeof directionIndex !== 'number') {
     return NextResponse.json({ error: 'VALID_002' }, { status: 400 })
   }
@@ -601,9 +607,19 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     return NextResponse.json({ success: true, data: framework })
   } catch (e: any) {
-    await failStep(step.id, e.message)
-    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
-    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+    const errMessage = e?.message || String(e) || '未知错误'
+    console.error('[FRAMEWORK] 生成失败:', errMessage)
+    try {
+      await failStep(step.id, errMessage)
+    } catch (failErr: any) {
+      console.error('[FRAMEWORK] failStep 失败:', failErr?.message)
+    }
+    try {
+      await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: errMessage })
+    } catch (logErr: any) {
+      console.error('[FRAMEWORK] deductPointsAndLog 失败:', logErr?.message)
+    }
+    return NextResponse.json({ error: 'API_001', message: errMessage }, { status: 500 })
   }
 }
 

@@ -148,7 +148,15 @@ async function xiaomiFetch(path: string, body: any, timeoutMs = 120000) {
       const err = await res.text()
       throw new XiaomiHttpError(res.status, err)
     }
-    return res.json()
+    const responseText = await res.text()
+    if (!responseText || responseText.trim().length === 0) {
+      throw new Error('XiaomiAPI returned empty response body')
+    }
+    try {
+      return JSON.parse(responseText)
+    } catch {
+      throw new Error(`XiaomiAPI returned non-JSON: ${responseText.slice(0, 200)}`)
+    }
   } catch (e) {
     clearTimeout(id)
     throw e
