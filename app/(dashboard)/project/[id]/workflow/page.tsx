@@ -121,8 +121,9 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
       setExecuting(stepType)
       setLastError(null)
 
-      // 防御：FRAMEWORK 必须有有效的 directionIndex
-      if (stepType === 'FRAMEWORK') {
+      // 防御：FRAMEWORK 必须有有效的 directionIndex（首次生成时）
+      const isRegenerate = body?.regenerate === true
+      if (stepType === 'FRAMEWORK' && !isRegenerate) {
         const idx = body?.directionIndex ?? selectedIdx
         if (idx === undefined || idx === null) {
           setLastError('请先选择一个创意方向')
@@ -136,7 +137,10 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
       console.log(`[executeStep] starting ${stepType}`, { body, bodyJson: JSON.stringify(body), isExecuting: executing })
 
       try {
-        const res = await fetch(`/api/projects/${params.id}/steps/${apiPath}`, {
+        const url = isRegenerate
+          ? `/api/projects/${params.id}/steps/${apiPath}/regenerate`
+          : `/api/projects/${params.id}/steps/${apiPath}`
+        const res = await fetch(url, {
           method: 'POST',
           headers: body ? { 'Content-Type': 'application/json' } : undefined,
           body: body ? JSON.stringify(body) : undefined,
@@ -368,7 +372,13 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             project={project}
             executing={executing}
             onExecute={() => executeStep(currentStep.stepType)}
-            onRetry={() => executeStep(currentStep.stepType)}
+            onRetry={() => {
+              if (currentStep.stepType === 'FRAMEWORK') {
+                executeStep('FRAMEWORK', { regenerate: true })
+              } else {
+                executeStep(currentStep.stepType)
+              }
+            }}
             onCancel={() => handleCancel(currentStep.stepType)}
             onNext={goToNextStep}
             onImport={currentStep.stepType === 'FRAMEWORK' ? () => setShowImportModal(true) : undefined}
@@ -1450,6 +1460,7 @@ function FrameworkPanel({
   const [localOutput, setLocalOutput] = useState(output)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef(output)
+  const [deepeningType, setDeepeningType] = useState<string | null>(null)
 
   useEffect(() => {
     const outJson = JSON.stringify(output)
@@ -1459,6 +1470,26 @@ function FrameworkPanel({
       lastSavedRef.current = output
     }
   }, [output])
+
+  async function handleDeepen(type: string) {
+    setDeepeningType(type)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/framework/deepen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type }),
+      })
+      const data = await res.json()
+      if (!data.success) {
+        console.error('[DEEPEN] 失败:', data.message)
+      }
+    } catch (e: any) {
+      console.error('[DEEPEN] 请求失败:', e.message)
+    } finally {
+      setDeepeningType(null)
+      await mutate()
+    }
+  }
 
   function updateField(field: string, value: any) {
     const next = { ...localOutput, [field]: value }
@@ -1499,7 +1530,44 @@ function FrameworkPanel({
   }
 
   const deepening = localOutput.deepening
-  const isDeepening = deepening?.status && deepening.status !== 'completed' && deepening.status !== 'idle'
+  const isDeepening = deepening?.status && !['completed', 'idle', 'error'].includes(deepening.status)
+  const hasDeepened = deepening?.status === 'completed'
+
+  function renderDeepenButton(type: string, label: string) {
+    const isThisDeepening = deepeningType === type || (isDeepening && !deepeningType)
+    const hasThisDeepened = hasDeepened
+    if (isThisDeepening) {
+      return (
+        <button
+          disabled
+          className="flex items-center gap-1 rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700 disabled:opacity-60"
+        >
+          <LoaderCircle className="h-3 w-3 animate-spin" />
+          深化中...
+        </button>
+      )
+    }
+    if (hasThisDeepened) {
+      return (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleDeepen(type) }}
+          className="flex items-center gap-1 rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700 transition hover:bg-green-100"
+        >
+          <Check className="h-3 w-3" />
+          已深化
+        </button>
+      )
+    }
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); handleDeepen(type) }}
+        className="flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+      >
+        <Sparkles className="h-3 w-3" />
+        开始深化
+      </button>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -1571,7 +1639,7 @@ function FrameworkPanel({
         )}
       </CollapsibleSection>
 
-      <CollapsibleSection title={`角色设定 (${localOutput.characters?.length || 0})`}>
+      <CollapsibleSection title={`角色设定 (${localOutput.characters?.length || 0})`} headerAction={renderDeepenButton('characters', '角色')}>
         <div className="space-y-3">
           {localOutput.characters?.map((c: any, ci: number) => (
             <div
@@ -1653,7 +1721,7 @@ function FrameworkPanel({
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection title="故事梗概">
+      <CollapsibleSection title="故事梗概" headerAction={renderDeepenButton('story', '故事')}>
         {localOutput.deepenedSynopsis ? (
           <FormattedText
             text={localOutput.deepenedSynopsis}
@@ -1743,7 +1811,7 @@ function FrameworkPanel({
       </CollapsibleSection>
 
       {/* Phase 3: 环境设定卡片化 */}
-      <CollapsibleSection title={`环境设定 (${Array.isArray(localOutput.environments) ? localOutput.environments.length : 0})`}>
+      <CollapsibleSection title={`环境设定 (${Array.isArray(localOutput.environments) ? localOutput.environments.length : 0})`} headerAction={renderDeepenButton('environments', '环境')}>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {Array.isArray(localOutput.environments) && localOutput.environments.map((env: any, ei: number) => {
             const isObject = typeof env === 'object' && env !== null
@@ -4154,10 +4222,12 @@ function CollapsibleSection({
   title,
   children,
   defaultOpen = false,
+  headerAction,
 }: {
   title: string
   children: React.ReactNode
   defaultOpen?: boolean
+  headerAction?: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
 
@@ -4168,11 +4238,14 @@ function CollapsibleSection({
         className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-stone-50"
       >
         <span className="text-sm font-semibold text-stone-800">{title}</span>
-        {open ? (
-          <ChevronUp className="h-4 w-4 text-stone-400" />
-        ) : (
-          <ChevronDown className="h-4 w-4 text-stone-400" />
-        )}
+        <div className="flex items-center gap-2">
+          {headerAction}
+          {open ? (
+            <ChevronUp className="h-4 w-4 text-stone-400" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-stone-400" />
+          )}
+        </div>
       </button>
       {open && <div className="border-t border-stone-100 px-4 py-3">{children}</div>}
     </div>
