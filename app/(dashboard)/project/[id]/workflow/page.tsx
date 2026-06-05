@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -778,7 +778,7 @@ function StepContent({
         />
       )
     case 'FRAMEWORK':
-      return <FrameworkPanel step={step} projectId={project.id} mutate={mutate} readOnly={readOnly} />
+      return <FrameworkPanel step={step} project={project} projectId={project.id} mutate={mutate} readOnly={readOnly} />
     case 'STYLE':
       return (
         <StylePanel
@@ -1509,11 +1509,13 @@ function ReadOrEdit({
 
 function FrameworkPanel({
   step,
+  project,
   projectId,
   mutate,
   readOnly,
 }: {
   step: any
+  project: any
   projectId: string
   mutate: () => Promise<any>
   readOnly?: boolean
@@ -1534,6 +1536,20 @@ function FrameworkPanel({
       lastSavedRef.current = output
     }
   }, [output])
+
+  // 从人物设计步骤获取角色生图，按 characterId 映射
+  const characterImageMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    const characterStep = project?.steps?.find((s: any) => s.stepType === 'CHARACTER')
+    const assets = characterStep?.resultAssets || []
+    for (const asset of assets) {
+      const cid = asset.metadata?.characterId
+      if (cid && asset.url) {
+        map[cid] = asset.url
+      }
+    }
+    return map
+  }, [project])
 
   async function handleDeepen(type: string) {
     setDeepeningType(type)
@@ -1705,83 +1721,116 @@ function FrameworkPanel({
 
       <CollapsibleSection title={`角色设定 (${localOutput.characters?.length || 0})`} headerAction={renderDeepenButton('characters', '角色')}>
         <div className="space-y-3">
-          {localOutput.characters?.map((c: any, ci: number) => (
-            <div
-              key={c.id}
-              className="rounded-lg border border-stone-200 bg-stone-50/50 p-4"
-            >
-              <div className="flex items-center gap-2">
-                <span className="rounded bg-stone-800 px-2 py-0.5 text-xs font-medium text-white">
-                  {c.id}
-                </span>
-                <span className="font-medium text-stone-800">{c.name}</span>
-                <span className="text-xs text-stone-500">{c.role}</span>
-              </div>
-              {/* 基础描述 */}
-              <div className="mt-2">
-                <span className="text-xs text-stone-400">基础设定</span>
-                <ReadOrEdit
-                  readOnly={readOnly}
-                  value={c.description || ''}
-                  onSave={(newVal) => {
-                    const newChars = [...localOutput.characters]
-                    newChars[ci] = { ...newChars[ci], description: newVal }
-                    updateField('characters', newChars)
-                  }}
-                  className="text-sm text-stone-600"
-                  placeholder="角色描述..."
-                />
-              </div>
-              {/* 深化内容 */}
-              {c.deepened && (
-                <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
-                  {c.deepened.appearance && (
+          {localOutput.characters?.map((c: any, ci: number) => {
+            const charImageUrl = characterImageMap[c.id]
+            return (
+              <div
+                key={c.id}
+                className="rounded-lg border border-stone-200 bg-stone-50/50 p-4"
+              >
+                {/* 顶部标签栏 */}
+                <div className="flex items-center gap-2">
+                  <span className="rounded bg-stone-800 px-2 py-0.5 text-xs font-medium text-white">
+                    {c.id}
+                  </span>
+                  <span className="font-medium text-stone-800">{c.name}</span>
+                  <span className="text-xs text-stone-500">{c.role}</span>
+                </div>
+
+                {/* 左右分栏：文字 | 图片 */}
+                <div className="mt-3 flex flex-col gap-4 md:flex-row">
+                  {/* 左侧文字 */}
+                  <div className="min-w-0 flex-1">
+                    {/* 基础描述 */}
                     <div>
-                      <span className="text-xs text-stone-400">形象外貌</span>
-                      <p className="text-sm text-stone-600">{c.deepened.appearance}</p>
+                      <span className="text-xs text-stone-400">基础设定</span>
+                      <ReadOrEdit
+                        readOnly={readOnly}
+                        value={c.description || ''}
+                        onSave={(newVal) => {
+                          const newChars = [...localOutput.characters]
+                          newChars[ci] = { ...newChars[ci], description: newVal }
+                          updateField('characters', newChars)
+                        }}
+                        className="text-sm text-stone-600"
+                        placeholder="角色描述..."
+                      />
                     </div>
-                  )}
-                  {c.deepened.personality && (
-                    <div>
-                      <span className="text-xs text-stone-400">性格深度</span>
-                      <p className="text-sm text-stone-600">{c.deepened.personality}</p>
-                    </div>
-                  )}
-                  {c.deepened.catchphrase && (
-                    <div>
-                      <span className="text-xs text-stone-400">口头禅</span>
-                      <p className="text-sm font-medium text-amber-700">「{c.deepened.catchphrase}」</p>
-                    </div>
-                  )}
-                  {c.deepened.attitudes && Object.keys(c.deepened.attitudes).length > 0 && (
-                    <div>
-                      <span className="text-xs text-stone-400">人际态度</span>
-                      <div className="mt-1 space-y-1">
-                        {Object.entries(c.deepened.attitudes).map(([target, attitude]: [string, any]) => (
-                          <div key={target} className="flex items-start gap-2 text-sm">
-                            <span className="shrink-0 rounded bg-stone-200 px-1.5 py-0.5 text-xs text-stone-600">{target}</span>
-                            <span className="text-stone-600">{attitude}</span>
+                    {/* 深化内容 */}
+                    {c.deepened && (
+                      <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
+                        {c.deepened.appearance && (
+                          <div>
+                            <span className="text-xs text-stone-400">形象外貌</span>
+                            <p className="text-sm text-stone-600">{c.deepened.appearance}</p>
                           </div>
-                        ))}
+                        )}
+                        {c.deepened.personality && (
+                          <div>
+                            <span className="text-xs text-stone-400">性格深度</span>
+                            <p className="text-sm text-stone-600">{c.deepened.personality}</p>
+                          </div>
+                        )}
+                        {c.deepened.catchphrase && (
+                          <div>
+                            <span className="text-xs text-stone-400">口头禅</span>
+                            <p className="text-sm font-medium text-amber-700">「{c.deepened.catchphrase}」</p>
+                          </div>
+                        )}
+                        {c.deepened.attitudes && Object.keys(c.deepened.attitudes).length > 0 && (
+                          <div>
+                            <span className="text-xs text-stone-400">人际态度</span>
+                            <div className="mt-1 space-y-1">
+                              {Object.entries(c.deepened.attitudes).map(([target, attitude]: [string, any]) => (
+                                <div key={target} className="flex items-start gap-2 text-sm">
+                                  <span className="shrink-0 rounded bg-stone-200 px-1.5 py-0.5 text-xs text-stone-600">{target}</span>
+                                  <span className="text-stone-600">{attitude}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {c.deepened.memoryPoints && (
+                          <div>
+                            <span className="text-xs text-stone-400">记忆点</span>
+                            <p className="text-sm font-medium text-stone-700">{c.deepened.memoryPoints}</p>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
-                  {c.deepened.memoryPoints && (
-                    <div>
-                      <span className="text-xs text-stone-400">记忆点</span>
-                      <p className="text-sm font-medium text-stone-700">{c.deepened.memoryPoints}</p>
-                    </div>
-                  )}
+                    )}
+                    {isDeepening && !c.deepened && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-stone-400">
+                        <LoaderCircle className="h-3 w-3 animate-spin" />
+                        等待深化...
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 右侧图片 */}
+                  <div className="shrink-0 md:w-48">
+                    {charImageUrl ? (
+                      <div className="flex flex-col items-center">
+                        <div className="relative w-full overflow-hidden rounded-lg shadow-md">
+                          <img
+                            src={charImageUrl}
+                            alt={c.name}
+                            className="h-auto w-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+                        <span className="mt-1.5 text-[11px] text-stone-400">已选定的角色形象</span>
+                      </div>
+                    ) : (
+                      <div className="flex h-32 w-full flex-col items-center justify-center rounded-lg border border-dashed border-stone-200 bg-stone-100/50">
+                        <ImageIcon className="h-6 w-6 text-stone-300" />
+                        <span className="mt-1 text-[11px] text-stone-400">尚未生成角色形象</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-              {isDeepening && !c.deepened && (
-                <div className="mt-2 flex items-center gap-2 text-xs text-stone-400">
-                  <LoaderCircle className="h-3 w-3 animate-spin" />
-                  等待深化...
-                </div>
-              )}
-            </div>
-          ))}
+              </div>
+            )
+          })}
         </div>
       </CollapsibleSection>
 
