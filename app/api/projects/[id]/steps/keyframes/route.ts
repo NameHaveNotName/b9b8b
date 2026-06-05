@@ -121,8 +121,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       console.log(`[KEYFRAMES-PROMPT] 生成 ${prompts.length} 条提示词，等待用户确认`)
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
-      await failStep(step.id, e.message)
-      return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+      const isAbort = e?.name === 'AbortError' || /aborted|timeout|timed out/i.test(e?.message || '')
+      const errorMessage = isAbort
+        ? '提示词生成超时（模型响应较慢），请稍后重试'
+        : e.message
+      console.error(`[KEYFRAMES-PROMPT] 失败: ${errorMessage}`, e?.stack?.slice(0, 300))
+      await failStep(step.id, errorMessage)
+      return NextResponse.json({ error: 'API_001', message: errorMessage }, { status: 500 })
     }
   }
 
@@ -140,7 +145,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     const existingOutput = (step.outputData as any) || {}
     const prompts = existingOutput.prompts || []
+    console.log('[KEYFRAMES-IMAGE] existingOutput keys:', Object.keys(existingOutput))
+    console.log('[KEYFRAMES-IMAGE] prompts count:', prompts.length)
     if (prompts.length === 0) {
+      console.error('[KEYFRAMES-IMAGE] No prompts found. existingOutput:', JSON.stringify(existingOutput).slice(0, 500))
       return NextResponse.json({ error: 'No prompts found. Please call generate-prompts first.' }, { status: 400 })
     }
 

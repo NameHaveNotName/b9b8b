@@ -375,6 +375,16 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             onRetry={() => {
               if (currentStep.stepType === 'FRAMEWORK') {
                 executeStep('FRAMEWORK', { regenerate: true })
+              } else if (['STYLE', 'CHARACTER', 'CONCEPT', 'STORYBOARD', 'KEYFRAMES'].includes(currentStep.stepType)) {
+                // 工作指令.txt（2026-06-04）：有 prompts 时只重新生图，保留用户编辑的提示词
+                const hasPrompts = currentStep.outputData?.prompts?.length > 0
+                if (hasPrompts) {
+                  const defaultRatio = currentStep.outputData?.aspectRatio || '16:9'
+                  const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
+                  executeStep(currentStep.stepType, { action: 'generate-images', aspectRatio: defaultRatio, imageModel: defaultModel })
+                } else {
+                  executeStep(currentStep.stepType)
+                }
               } else {
                 executeStep(currentStep.stepType)
               }
@@ -2059,7 +2069,17 @@ function StylePanel({
           onDismiss={() => {}}
         />
         <button
-          onClick={() => onExecute('STYLE')}
+          onClick={() => {
+            // 工作指令.txt（2026-06-04）：有 prompts 时只重新生图，保留用户编辑的提示词
+            const hasPrompts = step.outputData?.prompts?.length > 0
+            if (hasPrompts) {
+              const defaultRatio = step.outputData?.aspectRatio || '16:9'
+              const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
+              onExecute('STYLE', { action: 'generate-images', aspectRatio: defaultRatio, imageModel: defaultModel })
+            } else {
+              onExecute('STYLE')
+            }
+          }}
           disabled={isExecuting}
           className="flex items-center gap-2 rounded-lg bg-red-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
         >

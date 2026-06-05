@@ -110,13 +110,18 @@ export async function processStyleGeneration(
     const successCount = results.filter((r) => r.success).length
     if (successCount === 0) {
       // generateImage 内部已 Mock 兜底，理论上不应到这里；若发生说明连 Sharp 都坏了
-      throw new Error('全部 3 张风格图生成失败（含 Mock 兜底）')
+      const abortErrors = results.filter((r) => /aborted|abort/i.test((r as any).mockReason || (r as any).error || ''))
+      const otherErrors = results.map((r) => (r as any).mockReason || (r as any).error).filter(Boolean)
+      if (abortErrors.length > 0) {
+        throw new Error(`风格图生成被中断（${abortErrors.length}/3）：请求超时或网络中断，请稍后重试`)
+      }
+      throw new Error(`全部 3 张风格图生成失败（含 Mock 兜底）。错误详情：${otherErrors.join('；').slice(0, 300)}`)
     }
 
       // 工作指令.txt（2026-06-02 卡死修复）：如果所有真实模型都失败了（即使 Mock 兜底），
     // 记录 lastError 到 outputData，让前端能显示具体失败原因。
     const allFailed = results.every((r) => !r.success)
-    const anyRealFailure = results.some((r) => r.lastError || r.mockReason)
+    const anyRealFailure = results.some((r) => (r as any).mockReason)
 
     // 创建 Asset 记录（metadata 包含 model 信息）
     const assets = []

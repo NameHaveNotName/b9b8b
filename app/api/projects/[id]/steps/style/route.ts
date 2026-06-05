@@ -126,8 +126,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         prompts,
       })
     } catch (e: any) {
-      await failStep(step.id, e.message)
-      return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+      // 工作指令.txt（2026-06-04）：区分 AbortError（超时）与其他错误，给用户更友好的提示
+      const isAbort = e?.name === 'AbortError' || /aborted|timeout|timed out/i.test(e?.message || '')
+      const errorMessage = isAbort
+        ? '提示词生成超时（模型响应较慢），请稍后重试'
+        : e.message
+      console.error(`[STYLE-PROMPT] 失败: ${errorMessage}`, e?.stack?.slice(0, 300))
+      await failStep(step.id, errorMessage)
+      return NextResponse.json({ error: 'API_001', message: errorMessage }, { status: 500 })
     }
   }
 
@@ -145,7 +151,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const existingOutput = (step.outputData as any) || {}
     const prompts = existingOutput.prompts || []
+    // 工作指令.txt（2026-06-04）：增加详细日志，帮助排查 prompts 数据流断裂
+    console.log('[STYLE-IMAGE] existingOutput keys:', Object.keys(existingOutput))
+    console.log('[STYLE-IMAGE] prompts count:', prompts.length)
+    console.log('[STYLE-IMAGE] step.status:', step.status, 'step.id:', step.id)
     if (prompts.length === 0) {
+      console.error('[STYLE-IMAGE] No prompts found. existingOutput:', JSON.stringify(existingOutput).slice(0, 500))
       return NextResponse.json({ error: 'No prompts found. Please call generate-prompts first.' }, { status: 400 })
     }
 
@@ -258,13 +269,28 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   if (force) {
-    console.log('[STYLE] force=true, resetting step and clearing old assets')
+    console.log('[STYLE] force=true, clearing old assets')
     await prisma.asset.deleteMany({
       where: { projectId: params.id, step: { stepType: 'STYLE' } }
     })
+    // 工作指令.txt（2026-06-04）：force=true 时不应清空 prompts，避免用户编辑的提示词丢失。
+    // 仅清空图片相关字段，保留 prompts、styleOptions 的文本数据。
+    const existingOutput = (step.outputData as any) || {}
+    const preservedOutput = {
+      prompts: existingOutput.prompts,
+      styleOptions: existingOutput.styleOptions?.map((s: any) => ({
+        ...s,
+        imageUrl: null,
+        assetId: undefined,
+      })),
+      selectedStyleId: null,
+      styleRefUrl: null,
+      generatedCount: 0,
+    }
+    console.log('[STYLE] force=true, preserved prompts count:', existingOutput.prompts?.length || 0)
     await prisma.workflowStep.update({
       where: { id: step.id },
-      data: { status: 'PENDING' as any, outputData: {}, errorMessage: null },
+      data: { status: 'PENDING' as any, outputData: preservedOutput, errorMessage: null },
     })
   }
 

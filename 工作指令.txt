@@ -1,98 +1,123 @@
+风格统一报错的核心是**提示词数据流断裂**：系统在尝试生图时找不到已生成的提示词，或者提示词生成后没有正确存储/传递到生图步骤。
+
 ---
 
 ## Kimi Code 执行提示词
 
-**任务：重构新建项目输入 + 创意扩散步骤独立输入 + 修复生成后错误跳转**
+**任务：排查风格统一"No prompts found" + "This operation was aborted" 错误**
 
 ---
 
-### Phase 1: 新建项目页面 — 输入内容改为"标题"
+### Phase 1: 排查提示词生成与生图的数据流
 
-**改动范围**：`app/project/new/page.tsx`（或对应新建项目路由）
+**错误信息分析**：
+- `No prompts found. Please call generate-prompts first.` → 生图步骤尝试读取提示词数据时，数据库/缓存中没有找到对应记录
+- `This operation was aborted` → 可能是前端超时取消、API 请求被中断、或后端抛错后前端捕获了 abort
 
-**具体修改**：
-1. 页面主标题从"输入一段灵感，AI 将帮你扩散为完整的影视创意"改为"输入项目标题，开始你的 AI 影视创作"。
-2. 输入框 `placeholder` 从灵感示例（如"赛博朋克风格的剑客在雨夜霓虹中复仇..."）改为标题示例（如"雨夜回收站"、"记忆修复师"）。
-3. 输入框右下角字数统计保持 `0 / 1000` 不变。
-4. 底部提示文案从"系统将始终保留你的原始灵感，所有扩展都基于此锚点"改为"项目标题将作为创作锚点，后续所有内容基于此展开"。
-5. 按钮文案从"开始创意扩散"改为"创建项目"。
-6. **数据存储**：确认 `Project` 表是否有 `title` 字段。如果有，直接存入 `title`；如果没有，先执行 migration 添加 `title TEXT` 字段，然后将用户输入存入 `title`。同时，`Project` 表应保留一个 `idea` 或 `inspiration` 字段（用于后续创意扩散步骤填写），但新建时可为空或默认值。
-7. **创建后跳转**：创建项目成功后，跳转到该项目的工作流页面（`/project/[id]/workflow`），并停留在"创意扩散"步骤。
+**排查方向**：
 
----
+1. **检查风格统一的执行顺序**：
+   - 用户进入风格统一步骤后，是否先点击了"生成提示词"（或类似按钮）？
+   - 提示词生成成功后，是否存储到了数据库？存储在哪个表/字段？
+   - 用户点击"确认执行"或"生图"时，系统是从哪里读取提示词的？
 
-### Phase 2: 创意扩散步骤 — 新增创意输入区域
+2. **检查数据库表结构**：
+   - 是否有 `StylePrompt` 或 `StyleUnify` 或 `Project` 表中的 `style_prompts` 字段？
+   - 提示词生成 API 是否将结果写入了正确的字段？
+   - 生图 API 是否从正确的字段读取？
 
-**改动范围**：`app/(dashboard)/project/[id]/workflow/page.tsx` 中创意扩散步骤对应的子组件/渲染逻辑
+3. **检查前后端数据传递**：
+   - 提示词生成 API 返回的数据结构，与生图 API 期望读取的数据结构是否一致？
+   - 如果提示词存在 `Project` 表的 `style_prompts` JSONB 字段中，确认生图 API 读取时字段名拼写正确（如 `style_prompts` vs `stylePrompts` vs `prompts`）
 
-**具体修改**：
-1. 在创意扩散步骤卡片内，"原始灵感锚点"下方（或上方，根据布局美观判断），**新增一个输入区域**：
-   - 标签："输入你的创意方向"
-   - 占位符："描述你的故事核心、世界观或情绪基调，例如：一个被遗弃的机器人在雨夜城市中收集人类情感残影..."
-   - 多行文本框，字数限制 1000 字
-   - 这是一个**可编辑的输入框**，不是只读展示
-2. **数据绑定**：
-   - 用户输入的内容保存到 `Project` 表的 `idea` / `inspiration` / `creative_input` 字段（确认实际字段名）。
-   - 点击"生成创意方向"时，将**这个输入框的内容**作为参数发送给后端 API，而不是发送项目标题。
-3. **按钮状态**：输入框为空时，"生成创意方向"按钮 disabled；有内容后启用。
+4. **检查"重新生成"后的数据清理**：
+   - 如果用户点击了风格统一的"重新生成"，是否意外清除了 `style_prompts` 字段，但没有重新生成？
+   - 或者重新生成后，新提示词写入了不同字段，而生图 API 仍在读旧字段？
 
 ---
 
-### Phase 3: 修复"生成创意方向"后错误跳转到框架搭建
+### Phase 2: 检查 API 路由与调用链路
 
-**问题**：点击"生成创意方向"后，界面直接跳到框架搭建，而不是留在创意扩散展示结果。
-
-**根因排查**：
-1. 找到创意扩散步骤中"生成创意方向"按钮的 `onClick` 处理函数。
-2. 检查该函数成功后的逻辑：
-   - 是否调用了 `router.push()` 或 `setCurrentStep('framework')`？
-   - 是否在后端 API 返回后，前端错误地更新了全局步骤状态？
-3. 检查工作流进度条的步骤高亮逻辑，确认它是根据 `project.currentStep` 还是前端本地状态渲染。
-
-**修复逻辑**：
-1. **前端**：生成创意方向成功后，**只更新当前步骤的数据**（如将生成的创意方向列表存入 `project.ideaDirections` 或类似字段），**绝不修改 `currentStep` 或 `activeStep`**。
-2. 生成完成后，创意扩散步骤的 UI 应切换为"展示模式"：
-   - 显示生成的多个创意方向卡片/列表
-   - 提供"选择此方向"或"重新生成"按钮
-   - 用户**手动选择**某个方向后，再提供"进入框架搭建"的按钮，此时才推进到下一步。
-3. **后端**：确认 `POST /api/idea/generate`（或对应 API）不会返回 `nextStep: 'framework'` 或类似误导前端的字段。如果有，删除该字段。
-4. **数据库**：确认生成创意方向后，`Project` 表的 `currentStep` 字段不会被后端更新为 `framework`。它应保持为 `idea_diffusion` 或 `creative_diffusion`，直到用户手动确认进入下一步。
+1. 打开风格统一步骤对应的 API 文件（如 `app/api/style/generate-prompts/route.ts` 和 `app/api/style/generate-images/route.ts`）。
+2. 确认：
+   - `generate-prompts` 成功后的返回体，是否包含 `prompts` 数组？
+   - 前端收到 `prompts` 后，是否将其保存到数据库（如 `update Project set style_prompts = ...`）？
+   - `generate-images` 是否从 `Project.style_prompts` 读取，而不是从请求 body 读取？
+3. 如果生图 API 从请求 body 读取 prompts，检查前端是否在请求时正确携带了 prompts。
 
 ---
 
-### Phase 4: 数据流与状态机梳理
+### Phase 3: 检查前端状态与请求时序
 
-**确保以下流程成立**：
+1. 打开风格统一前端组件，检查：
+   - 用户点击"生图"时，前端是否先检查了本地 state 中是否有 prompts？
+   - 如果本地 state 为空，是否阻止了请求并提示"请先生成提示词"？
+   - 如果用户刷新页面后 prompts 丢失，说明 prompts 只存在了前端 state 中，没有持久化到数据库。
 
-```
-新建项目
-  ↓ 输入标题 → 创建项目 → 跳转工作流（创意扩散步骤）
-创意扩散步骤
-  ↓ 显示项目标题（只读锚点）
-  ↓ 用户输入创意描述（可编辑）
-  ↓ 点击"生成创意方向" → 调用 API → 返回创意方向列表
-  ↓ 前端展示创意方向（留在本步骤）
-  ↓ 用户选择方向 / 重新生成
-  ↓ 用户点击"进入框架搭建" → 推进到框架搭建步骤
-```
-
-**状态字段建议**：
-- `Project.title`：新建时填入
-- `Project.ideaInput`：创意扩散步骤中用户输入的创意
-- `Project.ideaDirections`：AI 生成的创意方向数组（JSONB）
-- `Project.selectedDirection`：用户选定的方向索引/ID
-- `Project.currentStep`：当前进行到的步骤（枚举值）
+2. 检查"生成中 (1)"的队列状态：
+   - 右下角显示"生成中 (1)"，但主界面显示"失败"，说明队列状态与实际任务状态不一致。
+   - 检查生成队列的清理逻辑：任务失败后，是否从队列中移除或标记为失败？
 
 ---
 
-### Phase 5: 边界检查
+### Phase 4: 修复方案
 
-1. **旧数据兼容**：如果已有项目的 `title` 字段为空，在仪表盘/项目列表中显示时，fallback 到 `idea` 字段或显示"未命名项目"。
-2. **输入校验**：新建项目时标题不能为空；创意扩散时创意输入不能为空（至少 10 字）。
-3. **URL 参数**：确认从新建项目跳转到工作流时，URL 正确携带项目 ID，不需要额外 query 参数来指定步骤。
+**情况 A：提示词未持久化到数据库**
+- 在 `generate-prompts` API 中，确保将 prompts 写入 `Project` 表的 `style_prompts` 字段。
+- 在 `generate-images` API 中，从 `Project` 表读取 `style_prompts`。
+
+**情况 B：字段名不匹配**
+- 统一前后端字段名（如都用 `style_prompts`）。
+
+**情况 C：重新生成后数据丢失**
+- 重新生成时，先清空旧 prompts，生成新 prompts 后立即写入，确保生图 API 读取的是最新数据。
+
+**情况 D：API 配置错误（This operation was aborted）**
+- 检查外部生图 API（即梦/Flux 等）的 API key、base URL 是否正确配置在环境变量中。
+- 检查 API 请求是否超时，如果超时增加超时时间或改为异步队列。
 
 ---
 
-**执行顺序**：Phase 1（新建项目）→ Phase 2（创意扩散输入）→ Phase 3（修复跳转）→ Phase 4（状态机梳理）→ Phase 5（边界检查）。
+### Phase 5: 验证
 
-**先执行 Phase 1 + Phase 3，这两项是用户最直观的需求。Phase 2 在确认数据库字段后执行。**
+1. 新建项目，完成创意扩散和框架搭建。
+2. 进入风格统一步骤，点击"生成提示词"，确认提示词卡片正常显示。
+3. 点击"确认执行"生图，确认不再出现 "No prompts found" 错误。
+4. 如果生图 API 配置正确，确认图片正常生成；如果 API 配置有误，确认报错信息变为具体的 API 错误（而非 "No prompts found"）。
+
+---
+
+**执行顺序**：Phase 1（数据流检查）→ Phase 2（API 链路）→ Phase 3（前端状态）→ Phase 4（修复）→ Phase 5（验证）。
+
+**先执行 Phase 1，确认提示词生成后存储到了哪个字段，以及生图 API 从哪个字段读取。**
+
+---
+
+## 修复记录（2026-06-04）
+
+### 已修复问题
+
+1. **默认兼容分支 `force=true` 清空 prompts**：
+   - `style/route.ts`、`character/route.ts`、`concept/route.ts`、`storyboard/route.ts` 的默认兼容分支中，`force=true` 时不再清空整个 `outputData`，而是保留 `prompts` 等文本数据，仅清空图片相关字段和 assets。
+   - 避免用户点击"重新生成全部"或"重试"时丢失已编辑的提示词。
+
+2. **前端 FAILED 状态重试按钮智能路由**：
+   - `workflow/page.tsx` 中 `StepHeader` 的 `onRetry` 逻辑：对有 `prompts` 的步骤（STYLE/CHARACTER/CONCEPT/STORYBOARD/KEYFRAMES），优先走 `action: 'generate-images'` 只重新生图，保留用户编辑的提示词。
+   - `StylePanel` 的 FAILED 状态重试按钮同样区分是否已有 prompts。
+
+3. **`generate-prompts` AbortError 友好处理**：
+   - `style/route.ts`、`character/route.ts`、`concept/route.ts`、`storyboard/route.ts`、`keyframes/route.ts` 的 `generate-prompts` action 中，捕获 `AbortError`（超时/请求被中断），返回友好提示"提示词生成超时（模型响应较慢），请稍后重试"，不再暴露原始 "This operation was aborted" 错误。
+
+4. **`generate-images` 详细日志**：
+   - 所有步骤的 `generate-images` action 增加日志：输出 `existingOutput` 的 keys、`prompts` 数量。当 `prompts.length === 0` 时，记录完整的 `existingOutput` 内容到 error 日志，帮助排查数据流断裂。
+
+5. **`style-processor.ts` 错误信息优化**：
+   - 当全部 3 张风格图生成失败时，区分 `AbortError` 和其他错误，给出更具体的错误消息。
+
+### 验证步骤
+
+1. 进入风格统一步骤，先生成提示词。
+2. 编辑提示词（可选）。
+3. 点击"确认执行"生图。
+4. 如果生图失败，点击"重试"——应保留已编辑的提示词，只重新生图。
+5. 点击"重新生成全部"——应保留提示词，只清空图片重新生图。
