@@ -670,10 +670,10 @@ function StepHeader({
           </button>
         )}
 
-        {/* 已完成：显示重新生成 + 下一步 */}
-        {isDone && !isHidden && (
+        {/* 已完成：显示操作按钮 */}
+        {isDone && (
           <>
-            {step.stepType === 'FRAMEWORK' && onImport && (
+            {step.stepType === 'FRAMEWORK' && onImport && !isHidden && (
               <button
                 onClick={onImport}
                 className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
@@ -682,14 +682,16 @@ function StepHeader({
                 重新导入
               </button>
             )}
-            <button
-              onClick={onRetry}
-              disabled={isExecuting}
-              className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50 disabled:opacity-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-              重新生成
-            </button>
+            {!isHidden && (
+              <button
+                onClick={onRetry}
+                disabled={isExecuting}
+                className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50 disabled:opacity-50"
+              >
+                <RefreshCw className="h-4 w-4" />
+                重新生成
+              </button>
+            )}
             {step.stepType === 'FRAMEWORK' && onExportDoc && (
               <button
                 onClick={onExportDoc}
@@ -699,13 +701,15 @@ function StepHeader({
                 导出文档
               </button>
             )}
-            <button
-              onClick={onNext}
-              className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
-            >
-              下一步
-              <ArrowRight className="h-4 w-4" />
-            </button>
+            {!isHidden && (
+              <button
+                onClick={onNext}
+                className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
+              >
+                下一步
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            )}
           </>
         )}
       </div>
