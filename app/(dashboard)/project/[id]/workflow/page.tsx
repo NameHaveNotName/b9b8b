@@ -1540,11 +1540,21 @@ function FrameworkPanel({
   // 从人物设计步骤获取角色生图，按 characterId 映射
   const characterImageMap = useMemo(() => {
     const map: Record<string, string> = {}
+    // 优先从 project.assets 中筛选（更可靠，不依赖嵌套关系）
+    const allAssets = project?.assets || []
+    for (const asset of allAssets) {
+      const meta = asset.metadata as any
+      const cid = meta?.characterId
+      if (cid && asset.url && !map[cid]) {
+        map[cid] = asset.url
+      }
+    }
+    // 兜底：从 steps.resultAssets 中补充
     const characterStep = project?.steps?.find((s: any) => s.stepType === 'CHARACTER')
-    const assets = characterStep?.resultAssets || []
-    for (const asset of assets) {
+    const stepAssets = characterStep?.resultAssets || []
+    for (const asset of stepAssets) {
       const cid = asset.metadata?.characterId
-      if (cid && asset.url) {
+      if (cid && asset.url && !map[cid]) {
         map[cid] = asset.url
       }
     }
