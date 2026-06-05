@@ -6,6 +6,21 @@
   "functions": {
     "app/api/projects/[id]/steps/framework/route.ts": {
       "maxDuration": 300
+    },
+    "app/api/projects/[id]/steps/character/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/projects/[id]/steps/style/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/projects/[id]/steps/concept/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/projects/[id]/steps/storyboard/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/projects/[id]/steps/keyframes/route.ts": {
+      "maxDuration": 300
     }
   }
 }

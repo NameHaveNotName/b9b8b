@@ -279,23 +279,43 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
     const now = Date.now()
     const TIMEOUT_MS = 10 * 60 * 1000 // 10分钟
 
+    let anyTimeout = false
+
     for (const step of processingSteps) {
       const stepId = step.id
       const startedAt = step.startedAt ? new Date(step.startedAt).getTime() : null
 
-      // 记录开始时间（如果还没记录）
-      if (startedAt && !processingStartRef.current[stepId]) {
-        processingStartRef.current[stepId] = startedAt
+      if (startedAt) {
+        const stored = processingStartRef.current[stepId]
+        // 如果还没记录，或数据库的 startedAt 明显更新（超过1秒差异），说明重新生成了，更新记录
+        if (!stored || Math.abs(startedAt - stored) > 1000) {
+          processingStartRef.current[stepId] = startedAt
+        }
       }
 
       const startTime = processingStartRef.current[stepId] || startedAt || now
       const elapsed = now - startTime
 
       if (elapsed > TIMEOUT_MS) {
+        anyTimeout = true
+      }
+    }
+
+    // 设置或清除超时错误
+    if (anyTimeout && !timeoutError) {
+      const firstTimeoutStep = processingSteps.find((step: any) => {
+        const stepId = step.id
+        const startedAt = step.startedAt ? new Date(step.startedAt).getTime() : null
+        const startTime = processingStartRef.current[stepId] || startedAt || now
+        return (now - startTime) > TIMEOUT_MS
+      })
+      if (firstTimeoutStep) {
         setTimeoutError(
-          `步骤「${STEP_LABELS[step.stepType] || step.stepType}」生成超时（已超过 ${Math.round(elapsed / 1000)} 秒），请检查网络或稍后重试`
+          `步骤「${STEP_LABELS[firstTimeoutStep.stepType] || firstTimeoutStep.stepType}」生成超时（已超过10分钟），请检查网络或稍后重试`
         )
       }
+    } else if (!anyTimeout && timeoutError) {
+      setTimeoutError(null)
     }
 
     // 清理已完成的步骤记录
@@ -306,11 +326,6 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
       if (completedIds.has(id)) {
         delete processingStartRef.current[id]
       }
-    }
-
-    // 如果有非 PROCESSING 的步骤且当前有超时错误，清除超时错误
-    if (timeoutError && steps.every((s: any) => s.status !== 'PROCESSING')) {
-      setTimeoutError(null)
     }
   }, [steps, timeoutError])
 
@@ -2871,7 +2886,35 @@ function CharacterPanel({
   }
 
   if (step.status === 'PROCESSING' || isExecuting) {
-    return <ProcessingBlock message="正在生成角色设计..." />
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <LoaderCircle className="h-8 w-8 animate-spin text-stone-400" />
+        <p className="text-sm text-stone-500">正在生成角色设计...</p>
+        <button
+          onClick={async () => {
+            try {
+              const res = await fetch(`/api/projects/${projectId}/steps/character/sync-status`, { method: 'POST' })
+              const data = await res.json()
+              if (data.synced) {
+                await mutate()
+                setToast?.({ kind: 'success', message: '状态已同步' })
+              } else if (data.actualCount < data.expectedCount) {
+                setToast?.({ kind: 'error', message: `生成中（${data.actualCount}/${data.expectedCount}），请稍后再试` })
+              } else {
+                await mutate()
+              }
+            } catch (e: any) {
+              setToast?.({ kind: 'error', message: '刷新失败：' + e.message })
+            }
+          }}
+          disabled={isExecuting}
+          className="flex items-center gap-1.5 rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition hover:bg-stone-50 disabled:opacity-50"
+        >
+          <RefreshCw className="h-3 w-3" />
+          刷新状态
+        </button>
+      </div>
+    )
   }
 
   if (step.status === 'PENDING') {
