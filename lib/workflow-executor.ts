@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { WorkflowStepType, StepStatus } from '@prisma/client';
 import { getStepOrder } from './workflow';
+import { STEP_CONFIG, TYPE_TO_STEP_ID, ProjectState } from './workflow-state';
 
 export async function createStep(projectId: string, stepType: WorkflowStepType, order: number) {
   return prisma.workflowStep.create({
@@ -47,12 +48,14 @@ export async function markProjectStepDone(projectId: string, stepType: WorkflowS
 
 export async function completeStep(stepId: string, outputData: any) {
   const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  // 合并而非覆盖，保留原有的 prompts 等字段（避免重做时丢失提示词）
+  const mergedOutput = { ...(step?.outputData as any || {}), ...outputData }
   const updated = await prisma.workflowStep.update({
     where: { id: stepId },
     data: {
       status: 'COMPLETED' as StepStatus,
       completedAt: new Date(),
-      outputData,
+      outputData: mergedOutput,
     },
   });
   if (step) {
@@ -88,7 +91,44 @@ export async function canExecuteStep(projectId: string, targetStep: WorkflowStep
 
   const steps = await getProjectSteps(projectId);
   const prevStep = steps.find((s) => s.order === targetOrder - 1);
-  return prevStep?.status === 'COMPLETED' || prevStep?.status === 'SKIPPED';
+  const linearOk = prevStep?.status === 'COMPLETED' || prevStep?.status === 'SKIPPED';
+
+  // 非线性 DAG 检查：对某些步骤（如 STORYBOARD），使用 STEP_CONFIG 的 unlockCondition
+  const stepId = TYPE_TO_STEP_ID[targetStep];
+  if (stepId && STEP_CONFIG[stepId]) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        stepIdeaDone: true,
+        stepFrameworkDone: true,
+        stepStyleDone: true,
+        stepCharacterDone: true,
+        stepConceptDone: true,
+        stepStoryboardDone: true,
+        stepTrailerDone: true,
+        stepEndingDone: true,
+        stepDirectDone: true,
+      },
+    });
+    if (project) {
+      const state: ProjectState = {
+        stepIdeaDone: project.stepIdeaDone ?? false,
+        stepFrameworkDone: project.stepFrameworkDone ?? false,
+        stepStyleDone: project.stepStyleDone ?? false,
+        stepCharacterDone: project.stepCharacterDone ?? false,
+        stepConceptDone: project.stepConceptDone ?? false,
+        stepStoryboardDone: project.stepStoryboardDone ?? false,
+        stepStoryboardFirstframeDone: project.stepStoryboardDone ?? false,
+        stepTrailerDone: project.stepTrailerDone ?? false,
+        stepEndingDone: project.stepEndingDone ?? false,
+        stepDirectDone: project.stepDirectDone ?? false,
+      };
+      const dagOk = STEP_CONFIG[stepId].unlockCondition(state);
+      return linearOk || dagOk;
+    }
+  }
+
+  return linearOk;
 }
 
 export async function getStep(projectId: string, stepType: WorkflowStepType) {

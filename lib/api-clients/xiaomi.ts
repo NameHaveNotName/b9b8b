@@ -382,6 +382,9 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
 
   // 工作指令.txt（防御版）：软截断 prompt 到 PROMPT_MAX_LEN，避免网关 invalid request body
   const promptRaw = p.prompt || ''
+  if (!promptRaw || promptRaw.trim().length === 0) {
+    console.error(`[XIAOMI-IMG] buildPayload 收到空 prompt，model=${p.model}`)
+  }
   const prompt =
     promptRaw.length > PROMPT_MAX_LEN
       ? (() => {
@@ -521,6 +524,12 @@ async function callXiaomiImageOnce(p: GenerateImageParams): Promise<XiaomiImageR
   }
 
   _xiaomiImageRequestCount++
+
+  // 防御：空 prompt 直接拒绝，避免供应商侧用时 0s 的无效请求
+  if (!params.prompt || params.prompt.trim().length === 0) {
+    throw new Error(`XIAOMI_IMG_EMPTY_PROMPT: model=${params.model}，prompt 为空或仅含空白字符`)
+  }
+
   const rawPayload = buildPayload(params)
   const payload = cleanUndefined(rawPayload)
   const bodyString = JSON.stringify(payload)
@@ -612,11 +621,23 @@ function isRetryableError(e: any): boolean {
 }
 
 // 工作指令.txt（Phase 2 修复）：图像生成请求去重，相同 model+prompt+size+参考图 的并发调用合并
-const _imageDedup = new Map<string, Promise<GenerateImageResult>>()
+// 2026-06-05 修复：添加过期时间，防止 Vercel 函数超时 kill 后遗留 stale promise 导致后续请求永远挂起
+const DEDUP_MAX_AGE_MS = 3 * 60 * 1000 // 3 分钟，与 AbortController 180s 超时对齐
+const _imageDedup = new Map<string, { promise: Promise<GenerateImageResult>; createdAt: number }>()
 function makeImageDedupKey(p: GenerateImageParams): string {
   const ref = p.referenceImageUrl || ''
   const refs = Array.isArray(p.referenceImages) ? p.referenceImages.join(',') : ''
   return `${p.model}|${(p.prompt || '').slice(0, 200)}|${p.size || ''}|${ref.slice(0, 80)}|${refs.slice(0, 80)}`
+}
+function getDedupEntry(key: string): Promise<GenerateImageResult> | undefined {
+  const entry = _imageDedup.get(key)
+  if (!entry) return undefined
+  if (Date.now() - entry.createdAt > DEDUP_MAX_AGE_MS) {
+    console.warn(`[IMAGE-DEDUP] 清理过期 stale entry: ${key.slice(0, 100)}`)
+    _imageDedup.delete(key)
+    return undefined
+  }
+  return entry.promise
 }
 
 /**
@@ -646,16 +667,22 @@ export async function generateImage(
         }
       : paramsOrPrompt
 
-  // 工作指令.txt（Phase 2 修复）：请求去重
+  // 防御：空 prompt 直接拒绝，避免生成无效请求体
+  if (!params.prompt || params.prompt.trim().length === 0) {
+    console.error(`[generateImage] 收到空 prompt，model=${params.model}，调用栈前3帧：${new Error().stack?.split('\n').slice(2, 5).join(' | ')}`)
+    throw new Error(`IMAGE_EMPTY_PROMPT: model=${params.model}，prompt 为空`)
+  }
+
+  // 工作指令.txt（Phase 2 修复）：请求去重（带过期检查，防止 stale promise 导致永久挂起）
   const dedupKey = makeImageDedupKey(params)
-  const existing = _imageDedup.get(dedupKey)
+  const existing = getDedupEntry(dedupKey)
   if (existing) {
     console.log(`[IMAGE-DEDUP] 合并重复请求: ${dedupKey.slice(0, 100)}`)
     return existing
   }
 
   const promise = _generateImageInner(params)
-  _imageDedup.set(dedupKey, promise)
+  _imageDedup.set(dedupKey, { promise, createdAt: Date.now() })
   promise.finally(() => {
     _imageDedup.delete(dedupKey)
   })

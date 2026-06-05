@@ -169,52 +169,66 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
       const imageClient = await getImageClient()
       const scenes = []
+      const failedScenes: string[] = []
 
       for (const promptItem of prompts) {
-        const result = await imageClient.generateConceptScene(
-          params.id,
-          promptItem.englishPrompt,
-          styleRefUrl,
-          stylePrompt,
-          characterImageUrls,
-          undefined, // size
-          aspectRatio,
-          imageModel
-        )
-        const asset = await prisma.asset.create({
-          data: {
-            projectId: params.id,
-            stepId: step.id,
-            type: 'IMAGE',
-            mimeType: 'image/png',
-            storageKey: result.storageKey,
-            url: result.url,
-            metadata: {
-              ...result.metadata,
-              actNumber: promptItem.actNumber,
-              sceneIndex: promptItem.sceneIndex,
-              llmPrompt: promptItem.englishPrompt,
-              prompt: promptItem.englishPrompt,
-              aspectRatio,
-              imageModel: imageModel || IMAGE_MODELS.primary,
+        try {
+          const result = await imageClient.generateConceptScene(
+            params.id,
+            promptItem.englishPrompt,
+            styleRefUrl,
+            stylePrompt,
+            characterImageUrls,
+            undefined, // size
+            aspectRatio,
+            imageModel
+          )
+          const asset = await prisma.asset.create({
+            data: {
+              projectId: params.id,
+              stepId: step.id,
+              type: 'IMAGE',
+              mimeType: 'image/png',
+              storageKey: result.storageKey,
+              url: result.url,
+              metadata: {
+                ...result.metadata,
+                actNumber: promptItem.actNumber,
+                sceneIndex: promptItem.sceneIndex,
+                llmPrompt: promptItem.englishPrompt,
+                prompt: promptItem.englishPrompt,
+                aspectRatio,
+                imageModel: imageModel || IMAGE_MODELS.primary,
+              },
             },
-          },
-        })
-        scenes.push({
-          actNumber: promptItem.actNumber,
-          sceneIndex: promptItem.sceneIndex,
-          assetId: asset.id,
-          url: result.url,
-          prompt: promptItem.englishPrompt,
-          aspectRatio,
-          isMock: !!result.metadata?.isMock,
-          mockReason: result.metadata?.mockReason || null,
-        })
+          })
+          scenes.push({
+            actNumber: promptItem.actNumber,
+            sceneIndex: promptItem.sceneIndex,
+            assetId: asset.id,
+            url: result.url,
+            prompt: promptItem.englishPrompt,
+            aspectRatio,
+            isMock: !!result.metadata?.isMock,
+            mockReason: result.metadata?.mockReason || null,
+          })
+        } catch (imgErr: any) {
+          const sceneLabel = `幕${promptItem.actNumber}-场景${promptItem.sceneIndex + 1}`
+          console.error(`[CONCEPT-IMAGE] ${sceneLabel} 生图失败:`, imgErr?.message)
+          failedScenes.push(sceneLabel)
+        }
+      }
+
+      if (scenes.length === 0) {
+        const errMsg = `所有概念图生图均失败${failedScenes.length > 0 ? '（' + failedScenes.join(', ') + '）' : ''}`
+        await failStep(step.id, errMsg)
+        await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: errMsg })
+        return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
       }
 
       await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      console.log(`[CONCEPT-IMAGE] 用户确认，开始生图，共 ${prompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
+      console.log(`[CONCEPT-IMAGE] 完成: 成功 ${scenes.length}/${prompts.length} 条，失败: ${failedScenes.join(', ') || '无'}`)
       return NextResponse.json({ success: true, data: { scenes, totalScenes: scenes.length } })
     } catch (e: any) {
       await failStep(step.id, e.message)
@@ -300,8 +314,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // 2. 用图像 API 生成概念图
     const imageClient = await getImageClient()
     const scenes = []
-    // 工作指令.txt（Phase 2 修复）：请求计数器，终端搜索 [CONCEPT-IMG-COUNT] 可查看统计
-    let _conceptImgAttemptCount = 0
+    const failedScenes: string[] = []
 
     for (const act of acts) {
       const actNo = act.actNo || act.actNumber || 1
@@ -310,52 +323,73 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       const sceneCount = Math.max(1, Math.min(keyScenes.length || 1, 3))
 
       for (let i = 0; i < sceneCount; i++) {
-        const sceneDesc = keyScenes[i] || `幕${actNo}场景${i + 1}`
-        // 优先使用 LLM 生成的 imagePrompt
-        const llmScene = parsedScenes.find(
-          (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
-        )
-        const finalPrompt = llmScene?.imagePrompt || sceneDesc
+        try {
+          const sceneDesc = keyScenes[i] || `幕${actNo}场景${i + 1}`
+          // 优先使用 LLM 生成的 imagePrompt
+          const llmScene = parsedScenes.find(
+            (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
+          )
+          const finalPrompt = llmScene?.imagePrompt || sceneDesc
 
-        // 工作指令.txt（Round 6 任务一）：多图参考 — 风格图 + 全部角色图
-        const result = await imageClient.generateConceptScene(
-          params.id,
-          finalPrompt,
-          styleRefUrl,
-          stylePrompt,
-          characterImageUrls
-        )
-        const asset = await prisma.asset.create({
-          data: {
-            projectId: params.id,
-            stepId: step.id,
-            type: 'IMAGE',
-            mimeType: 'image/png',
-            storageKey: result.storageKey,
-            url: result.url,
-            metadata: {
-              ...result.metadata,
-              actNumber: actNo,
-              sceneIndex: i,
-              llmPrompt: llmScene?.imagePrompt,
-              prompt: finalPrompt,
-              size: '1024x576',
-              aspectRatio: '16:9',
-              imageModel: IMAGE_MODELS.primary,
+          // 工作指令.txt（Round 6 任务一）：多图参考 — 风格图 + 全部角色图
+          const result = await imageClient.generateConceptScene(
+            params.id,
+            finalPrompt,
+            styleRefUrl,
+            stylePrompt,
+            characterImageUrls
+          )
+          const asset = await prisma.asset.create({
+            data: {
+              projectId: params.id,
+              stepId: step.id,
+              type: 'IMAGE',
+              mimeType: 'image/png',
+              storageKey: result.storageKey,
+              url: result.url,
+              metadata: {
+                ...result.metadata,
+                actNumber: actNo,
+                sceneIndex: i,
+                llmPrompt: llmScene?.imagePrompt,
+                prompt: finalPrompt,
+                size: '1024x576',
+                aspectRatio: '16:9',
+                imageModel: IMAGE_MODELS.primary,
+              },
             },
-          },
-        })
-        scenes.push({
-          actNumber: actNo,
-          sceneIndex: i,
-          assetId: asset.id,
-          url: result.url,
-          prompt: finalPrompt,
-          size: '1024x576',
-          isMock: !!result.metadata?.isMock,
-          mockReason: result.metadata?.mockReason || null,
-        })
+          })
+          scenes.push({
+            actNumber: actNo,
+            sceneIndex: i,
+            assetId: asset.id,
+            url: result.url,
+            prompt: finalPrompt,
+            size: '1024x576',
+            isMock: !!result.metadata?.isMock,
+            mockReason: result.metadata?.mockReason || null,
+          })
+        } catch (imgErr: any) {
+          const sceneLabel = `幕${actNo}-场景${i + 1}`
+          console.error(`[CONCEPT] ${sceneLabel} 生图失败:`, imgErr?.message)
+          failedScenes.push(sceneLabel)
+        }
       }
+    }
+
+    if (scenes.length === 0) {
+      const errMsg = `所有概念图生图均失败${failedScenes.length > 0 ? '（' + failedScenes.join(', ') + '）' : ''}`
+      await failStep(step.id, errMsg)
+      await logOperation({
+        userId,
+        projectId: params.id,
+        workflowStepId: step.id,
+        actionType: 'generate',
+        cost: 0,
+        status: 'failed',
+        metadata: { error: errMsg },
+      })
+      return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
     }
 
     await completeStep(step.id, { scenes, totalScenes: scenes.length })

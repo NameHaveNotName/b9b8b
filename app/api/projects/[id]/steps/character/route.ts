@@ -159,50 +159,63 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
       const imageClient = await getImageClient()
       const portraits = []
+      const failedCharacters: string[] = []
 
       for (const promptItem of prompts) {
-        const enrichedCharacter = {
-          id: promptItem.characterId,
-          name: promptItem.characterName,
-          role: promptItem.role || '',
-          description: promptItem.englishPrompt || promptItem.chineseDesc,
-        }
+        try {
+          const enrichedCharacter = {
+            id: promptItem.characterId,
+            name: promptItem.characterName,
+            role: promptItem.role || '',
+            description: promptItem.englishPrompt || promptItem.chineseDesc,
+          }
 
-        const result = await imageClient.generateCharacterPortrait(
-          params.id,
-          enrichedCharacter,
-          styleRefUrl,
-          stylePrompt,
-          aspectRatio,
-          imageModel
-        )
-        const asset = await prisma.asset.create({
-          data: {
-            projectId: params.id,
-            stepId: step.id,
-            type: 'IMAGE',
-            mimeType: 'image/png',
-            storageKey: result.storageKey,
-            url: result.url,
-            metadata: {
-              characterId: promptItem.characterId,
-              characterName: promptItem.characterName,
-              styleRefUrl: styleRefUrl || null,
-              llmPrompt: promptItem.englishPrompt,
-              aspectRatio,
-              imageModel: imageModel || IMAGE_MODELS.primary,
-              isMock: !!result.isMock,
-              ...(result.lastError ? { mockReason: result.lastError } : {}),
+          const result = await imageClient.generateCharacterPortrait(
+            params.id,
+            enrichedCharacter,
+            styleRefUrl,
+            stylePrompt,
+            aspectRatio,
+            imageModel
+          )
+          const asset = await prisma.asset.create({
+            data: {
+              projectId: params.id,
+              stepId: step.id,
+              type: 'IMAGE',
+              mimeType: 'image/png',
+              storageKey: result.storageKey,
+              url: result.url,
+              metadata: {
+                characterId: promptItem.characterId,
+                characterName: promptItem.characterName,
+                styleRefUrl: styleRefUrl || null,
+                llmPrompt: promptItem.englishPrompt,
+                aspectRatio,
+                imageModel: imageModel || IMAGE_MODELS.primary,
+                isMock: !!result.isMock,
+                ...(result.lastError ? { mockReason: result.lastError } : {}),
+              },
             },
-          },
-        })
-        portraits.push({ character: enrichedCharacter, assetId: asset.id, url: result.url, llmPrompt: promptItem.englishPrompt })
+          })
+          portraits.push({ character: enrichedCharacter, assetId: asset.id, url: result.url, llmPrompt: promptItem.englishPrompt })
+        } catch (imgErr: any) {
+          console.error(`[CHARACTER-IMAGE] 角色 ${promptItem.characterName} 生图失败:`, imgErr?.message)
+          failedCharacters.push(promptItem.characterName)
+        }
       }
 
-      await completeStep(step.id, { portraits, characterCount: prompts.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
+      if (portraits.length === 0) {
+        const errMsg = `所有角色生图均失败${failedCharacters.length > 0 ? '（' + failedCharacters.join(', ') + '）' : ''}`
+        await failStep(step.id, errMsg)
+        await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: errMsg })
+        return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
+      }
+
+      await completeStep(step.id, { portraits, characterCount: portraits.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      console.log(`[CHARACTER-IMAGE] 用户确认，开始生图，共 ${prompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
-      return NextResponse.json({ success: true, data: { portraits, characterCount: prompts.length } })
+      console.log(`[CHARACTER-IMAGE] 完成: 成功 ${portraits.length}/${prompts.length} 条，失败: ${failedCharacters.join(', ') || '无'}`)
+      return NextResponse.json({ success: true, data: { portraits, characterCount: portraits.length } })
     } catch (e: any) {
       await failStep(step.id, e.message)
       await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
@@ -280,46 +293,67 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     // 2. 用图像 API 生成角色概念图
     const imageClient = await getImageClient()
     const portraits = []
+    const failedCharacters: string[] = []
 
     for (const character of characters) {
-      // 优先使用 LLM 生成的 imagePrompt，否则 fallback 到基础描述
-      const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
-      const charPrompt = charData?.imagePrompt || ''
-      const enrichedCharacter = charPrompt
-        ? { ...character, description: `${character.description} ${charPrompt}` }
-        : character
+      try {
+        // 优先使用 LLM 生成的 imagePrompt，否则 fallback 到基础描述
+        const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
+        const charPrompt = charData?.imagePrompt || ''
+        const enrichedCharacter = charPrompt
+          ? { ...character, description: `${character.description} ${charPrompt}` }
+          : character
 
-      // Phase 6: 有风格图时注入，无风格图时直接文生图
-      const result = await imageClient.generateCharacterPortrait(
-        params.id,
-        enrichedCharacter,
-        styleRefUrl,
-        stylePrompt
-      )
-      const asset = await prisma.asset.create({
-        data: {
-          projectId: params.id,
-          stepId: step.id,
-          type: 'IMAGE',
-          mimeType: 'image/png',
-          storageKey: result.storageKey,
-          url: result.url,
-          metadata: {
-            characterId: character.id,
-            characterName: character.name,
-            styleRefUrl: styleRefUrl || null,
-            llmPrompt: charPrompt,
-            aspectRatio: '16:9',
-            imageModel: IMAGE_MODELS.primary,
-            isMock: !!result.isMock,
-            ...(result.lastError ? { mockReason: result.lastError } : {}),
+        // Phase 6: 有风格图时注入，无风格图时直接文生图
+        const result = await imageClient.generateCharacterPortrait(
+          params.id,
+          enrichedCharacter,
+          styleRefUrl,
+          stylePrompt
+        )
+        const asset = await prisma.asset.create({
+          data: {
+            projectId: params.id,
+            stepId: step.id,
+            type: 'IMAGE',
+            mimeType: 'image/png',
+            storageKey: result.storageKey,
+            url: result.url,
+            metadata: {
+              characterId: character.id,
+              characterName: character.name,
+              styleRefUrl: styleRefUrl || null,
+              llmPrompt: charPrompt,
+              aspectRatio: '16:9',
+              imageModel: IMAGE_MODELS.primary,
+              isMock: !!result.isMock,
+              ...(result.lastError ? { mockReason: result.lastError } : {}),
+            },
           },
-        },
-      })
-      portraits.push({ character, assetId: asset.id, url: result.url, llmPrompt: charPrompt })
+        })
+        portraits.push({ character, assetId: asset.id, url: result.url, llmPrompt: charPrompt })
+      } catch (imgErr: any) {
+        console.error(`[CHARACTER] 角色 ${character.name} 生图失败:`, imgErr?.message)
+        failedCharacters.push(character.name)
+      }
     }
 
-    await completeStep(step.id, { portraits, characterCount: characters.length })
+    if (portraits.length === 0) {
+      const errMsg = `所有角色生图均失败${failedCharacters.length > 0 ? '（' + failedCharacters.join(', ') + '）' : ''}`
+      await failStep(step.id, errMsg)
+      await logOperation({
+        userId,
+        projectId: params.id,
+        workflowStepId: step.id,
+        actionType: 'generate',
+        cost: 0,
+        status: 'failed',
+        metadata: { error: errMsg },
+      })
+      return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
+    }
+
+    await completeStep(step.id, { portraits, characterCount: portraits.length })
     await logOperation({
       userId,
       projectId: params.id,
@@ -328,7 +362,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       cost: STEP_COSTS.character,
       status: 'success',
     })
-    return NextResponse.json({ success: true, data: { portraits, characterCount: characters.length } })
+    return NextResponse.json({ success: true, data: { portraits, characterCount: portraits.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)
     await logOperation({
