@@ -38,6 +38,7 @@ import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 import { getStepDisplayState, prismaTypeToStepId } from '@/lib/workflow-state'
+import { exportFrameworkToWord } from '@/lib/framework-export'
 import FrameworkImportModal from '@/components/framework/FrameworkImportModal'
 import IdeationDeepenPanel from '@/components/workflow/IdeationDeepenPanel'
 
@@ -392,6 +393,29 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             onCancel={() => handleCancel(currentStep.stepType)}
             onNext={goToNextStep}
             onImport={currentStep.stepType === 'FRAMEWORK' ? () => setShowImportModal(true) : undefined}
+            onExportDoc={
+              currentStep.stepType === 'FRAMEWORK'
+                ? () => {
+                    const fw = currentStep.outputData || project?.framework || {}
+                    exportFrameworkToWord({
+                      projectTitle: project?.title || '未命名项目',
+                      inspiration: fw.inspiration,
+                      inspirationSource: fw.inspirationSource,
+                      background: fw.background,
+                      visualStyle: fw.visualStyle || fw.styleGuide,
+                      selectedStyleImage: fw.selectedStyleImage,
+                      characters: fw.characters,
+                      synopsis: fw.synopsis,
+                      deepenedSynopsis: fw.deepenedSynopsis,
+                      acts: fw.acts,
+                      environments: fw.environments,
+                      overallPacing: fw.overallPacing,
+                      storyLength: fw.storyLength,
+                      totalDuration: fw.totalDuration,
+                    })
+                  }
+                : undefined
+            }
           />
 
           {lastError && (
@@ -526,6 +550,7 @@ function StepHeader({
   onCancel,
   onNext,
   onImport,
+  onExportDoc,
 }: {
   step: any
   project: any
@@ -535,6 +560,7 @@ function StepHeader({
   onCancel: () => void
   onNext: () => void
   onImport?: () => void
+  onExportDoc?: () => void
 }) {
   const isExecuting = executing === step.stepType
   const isCancelled = step.status === 'FAILED' && step.errorMessage?.startsWith('[CANCELLED]')
@@ -664,6 +690,15 @@ function StepHeader({
               <RefreshCw className="h-4 w-4" />
               重新生成
             </button>
+            {step.stepType === 'FRAMEWORK' && onExportDoc && (
+              <button
+                onClick={onExportDoc}
+                className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
+              >
+                <Download className="h-4 w-4" />
+                导出文档
+              </button>
+            )}
             <button
               onClick={onNext}
               className="flex items-center gap-2 rounded-lg bg-stone-800 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-stone-700"
