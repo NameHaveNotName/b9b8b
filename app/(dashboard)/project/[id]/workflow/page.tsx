@@ -3643,13 +3643,50 @@ function StoryboardPanel({
   const savedMode = step.outputData?.mode as 'reference' | 'keyframe' | undefined
   const currentMode = savedMode || storyboardMode || 'keyframe'
 
-  // [WORKFLOW-FIX] 模式选择按钮（PENDING 状态时显示）
+  // [ACT-GENERATE] 每幕的生图设置（比例 + 模型）
+  const [actSettings, setActSettings] = useState<Record<number, { ratio: string; model: string }>>({})
+
+  // 初始化每幕的默认设置
+  useEffect(() => {
+    const defaultRatio = step.outputData?.aspectRatio || '16:9'
+    const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
+    const settings: Record<number, { ratio: string; model: string }> = {}
+    for (const shot of shots) {
+      const act = shot.actNumber || 0
+      if (!settings[act]) {
+        settings[act] = { ratio: defaultRatio, model: defaultModel }
+      }
+    }
+    setActSettings(settings)
+  }, [shots.length, step.outputData?.aspectRatio, step.outputData?.imageModel])
+
+  // 按幕分组 shots
+  const shotsByAct = useMemo(() => {
+    const grouped = new Map<number, any[]>()
+    for (const shot of shots) {
+      const act = shot.actNumber || 0
+      if (!grouped.has(act)) grouped.set(act, [])
+      grouped.get(act)!.push(shot)
+    }
+    return Array.from(grouped.entries()).sort((a, b) => a[0] - b[0])
+  }, [shots])
+
+  function getActSettings(act: number) {
+    return actSettings[act] || { ratio: '16:9', model: IMAGE_MODELS.primary }
+  }
+
   function handleModeSelect(mode: 'reference' | 'keyframe') {
     setStoryboardMode?.(mode)
   }
 
-  if (step.status === 'PROCESSING' || isExecuting) {
-    return <ProcessingBlock message="正在生成分镜设计..." />
+  function handleGenerateAct(actNumber: number) {
+    const { ratio, model } = getActSettings(actNumber)
+    onExecute('STORYBOARD', {
+      action: 'generate-act-images',
+      actNumber,
+      aspectRatio: ratio,
+      imageModel: model,
+    })
   }
 
   async function handleRegenerate(shotId: string, aspectRatio?: string, imageModel?: string) {
@@ -3671,87 +3708,227 @@ function StoryboardPanel({
     }
   }
 
-  if (step.status === 'COMPLETED') {
+  if (step.status === 'PROCESSING' || isExecuting) {
+    return <ProcessingBlock message="正在生成分镜设计..." />
+  }
+
+  // PENDING 且没有 prompts → 模式选择
+  if (step.status === 'PENDING' && !step.outputData?.prompts?.length) {
     return (
       <div className="space-y-4">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-stone-200 text-left text-stone-500">
-                <th className="pb-2 pr-4">缩略图</th>
-                <th className="pb-2 pr-4">镜头ID</th>
-                <th className="pb-2 pr-4">描述</th>
-                <th className="pb-2 pr-4">运镜</th>
-                <th className="pb-2 pr-4">时长</th>
-                <th className="pb-2">角色</th>
-                <th className="pb-2"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100">
-              {shots.slice(0, 6).map((shot: any) => {
-                const asset = shotAssets.find(
-                  (a: any) => a.metadata?.shotId === shot.shotId
-                )
-                const isRegenerating = regeneratingId === shot.shotId
-                const cardRatio = asset?.metadata?.aspectRatio || '16:9'
-                const cardModel = asset?.metadata?.imageModel || IMAGE_MODELS.primary
-                return (
-                  <tr key={shot.shotId} className="group">
-                    <td className="py-3 pr-4">
-                      {asset ? (
-                        <div className="group/thumb relative h-16 w-24">
-                          <img
-                            src={asset.url}
-                            alt=""
-                            className="h-16 w-24 rounded-md object-cover"
-                          />
-                          <HoverImageBadge
-                            src={asset.url}
-                            aspectRatio={cardRatio}
-                            imageModel={cardModel}
-                            onRegenerate={(ar, model) => handleRegenerate(shot.shotId, ar, model)}
-                            isRegenerating={isRegenerating}
-                            anyRegenerating={!!regeneratingId}
-                            wrapperClassName="absolute inset-0"
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex h-16 w-24 items-center justify-center rounded-md bg-stone-100">
-                          <ImageIcon className="h-5 w-5 text-stone-300" />
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 pr-4 font-mono text-xs text-stone-600">
-                      {shot.shotId}
-                    </td>
-                    <td className="py-3 pr-4 text-stone-600">{shot.description}</td>
-                    <td className="py-3 pr-4 text-stone-500">{shot.cameraMove}</td>
-                    <td className="py-3 pr-4 text-stone-500">{shot.duration}s</td>
-                    <td className="py-3 pr-4 text-xs text-stone-400">
-                      {shot.characters?.join(', ')}
-                    </td>
-                    <td className="py-3">
-                      <button
-                        onClick={() => handleRegenerate(shot.shotId, cardRatio, cardModel)}
-                        disabled={isRegenerating || !!regeneratingId}
-                        className="rounded p-1 text-stone-400 opacity-0 transition hover:bg-stone-100 hover:text-stone-600 group-hover:opacity-100 disabled:opacity-50"
-                        title="重新生成分镜草图"
-                      >
-                        {isRegenerating ? (
-                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div className="flex justify-center py-8">
+          <div className="space-y-6 text-center">
+            <p className="text-sm text-stone-500">选择分镜设计模式：</p>
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={() => { handleModeSelect('reference'); onExecute('STORYBOARD', { action: 'generate-prompts', mode: 'reference' }) }}
+                disabled={isExecuting}
+                className={`flex flex-col items-center gap-2 rounded-xl border-2 p-6 w-48 transition ${
+                  currentMode === 'reference'
+                    ? 'border-amber-500 bg-amber-50'
+                    : 'border-stone-200 bg-white hover:border-stone-400'
+                } disabled:opacity-50`}
+              >
+                <Film className="h-6 w-6 text-amber-600" />
+                <span className="text-sm font-medium text-stone-800">实拍参考模式</span>
+                <span className="text-xs text-stone-500">生成代表画面，用于实拍参考</span>
+              </button>
+              <button
+                onClick={() => { handleModeSelect('keyframe'); onExecute('STORYBOARD', { action: 'generate-prompts', mode: 'keyframe' }) }}
+                disabled={isExecuting}
+                className={`flex flex-col items-center gap-2 rounded-xl border-2 p-6 w-48 transition ${
+                  currentMode === 'keyframe'
+                    ? 'border-amber-500 bg-amber-50'
+                    : 'border-stone-200 bg-white hover:border-stone-400'
+                } disabled:opacity-50`}
+              >
+                <Play className="h-6 w-6 text-amber-600" />
+                <span className="text-sm font-medium text-stone-800">视频生成模式</span>
+                <span className="text-xs text-stone-500">生成起始帧，用于后续视频生成</span>
+              </button>
+            </div>
+          </div>
         </div>
+      </div>
+    )
+  }
 
-        <div className="flex flex-wrap items-center gap-3">
+  // PENDING 有 prompts / COMPLETED → 纵向分镜表
+  const hasPrompts = step.outputData?.prompts?.length > 0
+  const showStoryboardTable = hasPrompts || step.status === 'COMPLETED'
+
+  if (showStoryboardTable) {
+    return (
+      <div className="space-y-6">
+        {shotsByAct.map(([actNumber, actShots]) => {
+          const actAssetsMap = new Map<string, any>()
+          for (const shot of actShots) {
+            const asset = shotAssets.find((a: any) => a.metadata?.shotId === shot.shotId)
+            if (asset) actAssetsMap.set(shot.shotId, asset)
+          }
+          const generatedCount = actAssetsMap.size
+          const totalCount = actShots.length
+          const allGenerated = generatedCount === totalCount && totalCount > 0
+          const someGenerated = generatedCount > 0 && generatedCount < totalCount
+          const { ratio, model } = getActSettings(actNumber)
+
+          return (
+            <div key={actNumber} className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+              {/* 头部 */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 bg-stone-50">
+                <div>
+                  <h3 className="text-sm font-semibold text-stone-800">第 {actNumber} 幕</h3>
+                  <span className="text-xs text-stone-500">{totalCount} 个镜头</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {allGenerated && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                      <Check className="h-3 w-3" /> 已生成
+                    </span>
+                  )}
+                  {someGenerated && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                      部分生成 {generatedCount}/{totalCount}
+                    </span>
+                  )}
+                  {!generatedCount && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-500">
+                      未生成
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 分镜表 */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-stone-100 text-left text-stone-500">
+                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">镜头ID</th>
+                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">场景</th>
+                      <th className="px-4 py-2 text-xs font-medium">描述</th>
+                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">运镜</th>
+                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">时长</th>
+                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">角色</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-50">
+                    {actShots.map((shot: any) => (
+                      <tr key={shot.shotId}>
+                        <td className="px-4 py-2 font-mono text-xs text-stone-600 whitespace-nowrap">{shot.shotId}</td>
+                        <td className="px-4 py-2 text-stone-600 whitespace-nowrap">{shot.sceneName}</td>
+                        <td className="px-4 py-2 text-stone-600">{shot.description}</td>
+                        <td className="px-4 py-2 text-stone-500 whitespace-nowrap">{shot.cameraMove}</td>
+                        <td className="px-4 py-2 text-stone-500 whitespace-nowrap">{shot.duration}s</td>
+                        <td className="px-4 py-2 text-xs text-stone-400 whitespace-nowrap">
+                          {shot.characters?.join(', ')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 已生成缩略图 */}
+              {generatedCount > 0 && (
+                <div className="flex flex-wrap gap-2 px-4 py-3 border-t border-stone-100">
+                  {actShots.map((shot: any) => {
+                    const asset = actAssetsMap.get(shot.shotId)
+                    if (!asset) return null
+                    const isRegenerating = regeneratingId === shot.shotId
+                    const cardRatio = asset.metadata?.aspectRatio || '16:9'
+                    const cardModel = asset.metadata?.imageModel || IMAGE_MODELS.primary
+                    return (
+                      <div key={shot.shotId} className="group/thumb relative h-16 w-24">
+                        <img
+                          src={asset.url}
+                          alt=""
+                          className="h-16 w-24 rounded object-cover"
+                        />
+                        <HoverImageBadge
+                          src={asset.url}
+                          aspectRatio={cardRatio}
+                          imageModel={cardModel}
+                          onRegenerate={(ar, m) => handleRegenerate(shot.shotId, ar, m)}
+                          isRegenerating={isRegenerating}
+                          anyRegenerating={!!regeneratingId}
+                          wrapperClassName="absolute inset-0"
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* 生图控制 */}
+              {!readOnly && (
+                <div className="flex items-center gap-3 px-4 py-3 border-t border-stone-100 bg-stone-50">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-stone-600">比例</span>
+                    <select
+                      value={ratio}
+                      onChange={(e) => {
+                        setActSettings(prev => ({
+                          ...prev,
+                          [actNumber]: { ...prev[actNumber], ratio: e.target.value }
+                        }))
+                      }}
+                      className="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs text-stone-700 focus:border-amber-500 focus:outline-none"
+                    >
+                      {ASPECT_RATIO_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-stone-600">模型</span>
+                    <select
+                      value={model}
+                      onChange={(e) => {
+                        setActSettings(prev => ({
+                          ...prev,
+                          [actNumber]: { ...prev[actNumber], model: e.target.value }
+                        }))
+                      }}
+                      className="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs text-stone-700 focus:border-amber-500 focus:outline-none"
+                    >
+                      {IMAGE_MODEL_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="relative inline-block ml-auto">
+                    <button
+                      onClick={() => handleGenerateAct(actNumber)}
+                      disabled={isExecuting}
+                      className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium transition disabled:opacity-50 ${
+                        allGenerated
+                          ? 'border border-stone-300 bg-white text-stone-700 hover:bg-stone-100'
+                          : 'bg-stone-900 text-white hover:bg-stone-800'
+                      }`}
+                    >
+                      {isExecuting ? (
+                        <><LoaderCircle className="h-3 w-3 animate-spin" /> 生成中...</>
+                      ) : allGenerated ? (
+                        <><RefreshCw className="h-3 w-3" /> 重新生图</>
+                      ) : (
+                        <><ImageIcon className="h-3 w-3" /> 生图</>
+                      )}
+                    </button>
+                    {!allGenerated && <CostBadge cost={DEFAULT_GENERATE_COST} />}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {/* 底部操作 */}
+        <div className="flex flex-wrap items-center gap-3 pt-2">
           <Link
             href={`/project/${projectId}/storyboard`}
             className="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
@@ -3797,76 +3974,24 @@ function StoryboardPanel({
     )
   }
 
+  // 兜底：没有 shots 数据时的默认按钮
   return (
     <div className="space-y-4">
       <div className="flex justify-center py-8">
-        {step.status === 'PENDING' && !step.outputData?.prompts?.length ? (
-          <div className="space-y-6 text-center">
-            <p className="text-sm text-stone-500">选择分镜设计模式：</p>
-            <div className="flex gap-4 justify-center">
-              <button
-                onClick={() => { handleModeSelect('reference'); onExecute('STORYBOARD', { action: 'generate-prompts', mode: 'reference' }) }}
-                disabled={isExecuting}
-                className={`flex flex-col items-center gap-2 rounded-xl border-2 p-6 w-48 transition ${
-                  currentMode === 'reference'
-                    ? 'border-amber-500 bg-amber-50'
-                    : 'border-stone-200 bg-white hover:border-stone-400'
-                } disabled:opacity-50`}
-              >
-                <Film className="h-6 w-6 text-amber-600" />
-                <span className="text-sm font-medium text-stone-800">实拍参考模式</span>
-                <span className="text-xs text-stone-500">生成代表画面，用于实拍参考</span>
-              </button>
-              <button
-                onClick={() => { handleModeSelect('keyframe'); onExecute('STORYBOARD', { action: 'generate-prompts', mode: 'keyframe' }) }}
-                disabled={isExecuting}
-                className={`flex flex-col items-center gap-2 rounded-xl border-2 p-6 w-48 transition ${
-                  currentMode === 'keyframe'
-                    ? 'border-amber-500 bg-amber-50'
-                    : 'border-stone-200 bg-white hover:border-stone-400'
-                } disabled:opacity-50`}
-              >
-                <Play className="h-6 w-6 text-amber-600" />
-                <span className="text-sm font-medium text-stone-800">视频生成模式</span>
-                <span className="text-xs text-stone-500">生成起始帧，用于后续视频生成</span>
-              </button>
-            </div>
-          </div>
-        ) : step.status === 'PENDING' && step.outputData?.prompts?.length > 0 ? (
-          <div className="w-full max-w-4xl">
-            <PromptPreviewWithRatio
-              prompts={step.outputData.prompts}
-              title="分镜设计提示词预览"
-              stepLabel="STORYBOARD"
-              defaultRatio={step.outputData?.aspectRatio || '16:9'}
-              defaultModel={step.outputData?.imageModel || IMAGE_MODELS.primary}
-              onConfirm={(ratio, model) => onExecute('STORYBOARD', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
-              onRegeneratePrompts={() => onExecute('STORYBOARD', { action: 'generate-prompts', mode: step.outputData.mode || 'keyframe' })}
-              isExecuting={isExecuting}
-            />
-          </div>
-        ) : (
-          <div className="relative inline-block">
-            <button
-              onClick={() => onExecute('STORYBOARD', { action: 'generate-prompts' })}
-              disabled={isExecuting}
-              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-            >
-              {isExecuting ? (
-                <>
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  生成中...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4" />
-                  生成分镜设计
-                </>
-              )}
-            </button>
-            <CostBadge cost={DEFAULT_GENERATE_COST} />
-          </div>
-        )}
+        <div className="relative inline-block">
+          <button
+            onClick={() => onExecute('STORYBOARD', { action: 'generate-prompts' })}
+            disabled={isExecuting}
+            className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+          >
+            {isExecuting ? (
+              <><LoaderCircle className="h-4 w-4 animate-spin" /> 生成中...</>
+            ) : (
+              <><Play className="h-4 w-4" /> 生成分镜设计</>
+            )}
+          </button>
+          <CostBadge cost={DEFAULT_GENERATE_COST} />
+        </div>
       </div>
     </div>
   )

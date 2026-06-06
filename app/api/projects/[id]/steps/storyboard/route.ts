@@ -237,6 +237,132 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
   }
 
+  // === generate-act-images: 按幕增量生成草图 ===
+  if (action === 'generate-act-images') {
+    const actNumber = body?.actNumber
+    if (typeof actNumber !== 'number') {
+      return NextResponse.json({ error: 'VALIDATION_001', message: 'actNumber 必填且为数字' }, { status: 400 })
+    }
+
+    const aspectRatio = body?.aspectRatio || '16:9'
+    const imageModel = body?.imageModel
+    console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕草图，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
+
+    const existingOutput = (step.outputData as any) || {}
+    const prompts = existingOutput.prompts || []
+    const allShots = existingOutput.shots || []
+
+    const actPrompts = prompts.filter((p: any) => p.actNumber === actNumber)
+    if (actPrompts.length === 0) {
+      return NextResponse.json({ error: 'VALIDATION_002', message: `幕 ${actNumber} 没有待生成的镜头` }, { status: 400 })
+    }
+
+    try {
+      const sizeMap: Record<string, { w: number; h: number }> = {
+        '16:9': { w: 1024, h: 576 },
+        '9:16': { w: 576, h: 1024 },
+        '1:1': { w: 1024, h: 1024 },
+        '4:3': { w: 1024, h: 768 },
+        '3:4': { w: 768, h: 1024 },
+        '21:9': { w: 1344, h: 576 },
+      }
+      const { w: svgW, h: svgH } = sizeMap[aspectRatio] || sizeMap['16:9']
+
+      // 删除该幕已有的 assets（重新生成）
+      const allAssets = await prisma.asset.findMany({
+        where: { projectId: params.id, stepId: step.id }
+      })
+      const actAssets = allAssets.filter((a: any) => a.metadata?.actNumber === actNumber)
+      for (const asset of actAssets) {
+        await prisma.asset.delete({ where: { id: asset.id } }).catch(() => {})
+      }
+
+      const existingShotAssets = existingOutput.shotAssets || []
+      const actShotIds = new Set(actPrompts.map((p: any) => p.shotId))
+
+      const newShotAssets = []
+      for (const promptItem of actPrompts) {
+        const shot = allShots.find((s: any) => s.shotId === promptItem.shotId) || {}
+        const charColors = (promptItem.characters || []).map((cid: string, idx: number) => {
+          const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6']
+          return { id: cid, color: colors[idx % colors.length] }
+        })
+
+        const safeDesc = (promptItem.chineseDesc || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+
+        const svg = `
+          <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
+            <rect width="100%" height="100%" fill="#f8f9fa"/>
+            <text x="50%" y="10%" font-family="system-ui, sans-serif" font-size="24" fill="#333" text-anchor="middle">分镜 ${promptItem.shotId}</text>
+            <text x="50%" y="20%" font-family="system-ui, sans-serif" font-size="16" fill="#666" text-anchor="middle">${promptItem.cameraMove || '固定'} | 第${promptItem.actNumber}幕 | ${promptItem.duration || 5}秒</text>
+            ${charColors.map((c: any, i: number) =>
+              `<circle cx="${200 + i * 300}" cy="300" r="80" fill="${c.color}" opacity="0.3" stroke="${c.color}" stroke-width="4"/>
+               <text x="${200 + i * 300}" y="300" font-family="system-ui, sans-serif" font-size="20" fill="${c.color}" text-anchor="middle" dy=".3em">角色${i + 1}</text>`
+            ).join('')}
+            <rect x="50" y="${svgH - 126}" width="${svgW - 100}" height="80" fill="none" stroke="#333" stroke-width="2" stroke-dasharray="8,4"/>
+            <text x="50%" y="${svgH - 86}" font-family="system-ui, sans-serif" font-size="14" fill="#333" text-anchor="middle">${safeDesc}</text>
+          </svg>
+        `
+        const buffer = await sharp(Buffer.from(svg)).png().toBuffer()
+        const storageKey = `projects/${params.id}/storyboard/${promptItem.shotId}.png`
+        await uploadFile(storageKey, buffer, 'image/png')
+        const url = await getSignedFileUrl(storageKey, 3600)
+
+        const asset = await prisma.asset.create({
+          data: {
+            projectId: params.id,
+            stepId: step.id,
+            type: 'IMAGE',
+            mimeType: 'image/png',
+            storageKey,
+            url,
+            metadata: {
+              shotId: promptItem.shotId,
+              type: 'storyboard',
+              characters: promptItem.characters,
+              duration: promptItem.duration,
+              actNumber: promptItem.actNumber,
+              aspectRatio,
+              imageModel: imageModel || IMAGE_MODELS.primary,
+            },
+          }
+        })
+        newShotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url })
+      }
+
+      // 合并 shotAssets：保留非该幕的已有数据，添加新生成的
+      const mergedShotAssets = [
+        ...existingShotAssets.filter((s: any) => !actShotIds.has(s.shotId)),
+        ...newShotAssets,
+      ]
+
+      const nextOutput = {
+        ...existingOutput,
+        shotAssets: mergedShotAssets,
+        aspectRatio,
+        imageModel: imageModel || IMAGE_MODELS.primary,
+      }
+
+      await prisma.workflowStep.update({
+        where: { id: step.id },
+        data: {
+          status: step.status === 'PENDING' ? 'COMPLETED' as any : step.status,
+          outputData: nextOutput,
+        },
+      })
+
+      console.log(`[STORYBOARD-ACT] 第 ${actNumber} 幕生成完成: ${newShotAssets.length} 张草图`)
+      return NextResponse.json({ success: true, data: { generatedCount: newShotAssets.length, actNumber } })
+    } catch (e: any) {
+      console.error(`[STORYBOARD-ACT] 第 ${actNumber} 幕生成失败:`, e.message)
+      return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+    }
+  }
+
   // === 默认兼容：无 action 时走原有完整流程 ===
   if (!force && step.status === 'COMPLETED' && step.outputData) {
     console.log('[STORYBOARD] step already completed, returning cached result')
