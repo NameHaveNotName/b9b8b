@@ -3612,61 +3612,21 @@ function TrailerPanel({
 }
 
 /* ============================================================
-   分镜 Mock 占位图（前端 Canvas 生成，避免后端 SVG 中文乱码）
+   分镜 Mock 占位图（纯 HTML/CSS，避免 Canvas 字体方块问题）
    ============================================================ */
 function StoryboardMockImage({ shot }: { shot: any }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const w = 320
-    const h = 180
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
-    canvas.width = w * dpr
-    canvas.height = h * dpr
-    ctx.scale(dpr, dpr)
-    ctx.clearRect(0, 0, w, h)
-
-    // 背景
-    ctx.fillStyle = '#f5f5f4'
-    ctx.fillRect(0, 0, w, h)
-
-    // 虚线边框
-    ctx.strokeStyle = '#d6d3d1'
-    ctx.lineWidth = 2
-    ctx.setLineDash([8, 4])
-    ctx.strokeRect(8, 8, w - 16, h - 16)
-
-    // 镜头编号
-    ctx.fillStyle = '#57534e'
-    ctx.font = 'bold 18px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(shot.shotId || '', w / 2, h * 0.38)
-
-    // 场景名
-    ctx.fillStyle = '#a8a29e'
-    ctx.font = '14px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif'
-    const sceneName = (shot.sceneName || '').slice(0, 14)
-    ctx.fillText(sceneName, w / 2, h * 0.58)
-
-    // 待生成标签
-    ctx.fillStyle = '#d6d3d1'
-    ctx.font = '12px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif'
-    ctx.fillText('待生成', w / 2, h * 0.76)
-  }, [shot])
-
   return (
-    <div className="relative w-full overflow-hidden rounded bg-stone-100" style={{ aspectRatio: '16/9' }}>
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 h-full w-full"
-        style={{ width: '100%', height: '100%' }}
-      />
+    <div
+      className="relative flex w-full flex-col items-center justify-center overflow-hidden rounded border-2 border-dashed border-stone-300 bg-stone-100"
+      style={{ aspectRatio: '16/9' }}
+    >
+      <span className="font-mono text-sm font-bold text-stone-600">{shot.shotId || ''}</span>
+      <span className="mt-1 max-w-[90%] truncate px-2 text-xs text-stone-400">
+        {(shot.sceneName || '').slice(0, 14)}
+      </span>
+      <span className="mt-2 rounded bg-stone-200 px-2 py-0.5 text-[10px] text-stone-400">
+        待生成
+      </span>
     </div>
   )
 }
