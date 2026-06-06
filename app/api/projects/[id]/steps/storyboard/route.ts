@@ -54,7 +54,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   const body = await _req.json().catch(() => ({}))
   const force = body?.force === true
-  const action: 'generate-prompts' | 'generate-images' = body?.action || 'generate-images'
+  const action: 'generate-prompts' | 'generate-images' | 'generate-act-images' = body?.action || 'generate-images'
 
   // === generate-prompts: 只生成分镜提示词，不生成草图 ===
   if (action === 'generate-prompts') {
@@ -239,16 +239,17 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
   }
 
-  // === generate-act-images: 按幕增量生成真实 AI 图片（两阶段：提示词→生图） ===
+  // === generate-act-images: 按幕增量生成真实 AI 图片（异步队列：每次只生成1个shot）===
   if (action === 'generate-act-images') {
     const actNumber = body?.actNumber
     if (typeof actNumber !== 'number') {
       return NextResponse.json({ error: 'VALIDATION_001', message: 'actNumber 必填且为数字' }, { status: 400 })
     }
 
+    const shotId = body?.shotId as string | undefined
     const aspectRatio = body?.aspectRatio || '16:9'
     const imageModel = body?.imageModel
-    console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
+    console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，shotId: ${shotId || 'auto'}，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
 
     const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
     if (!pointsCheck.ok) {
@@ -258,42 +259,56 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const existingOutput = (step.outputData as any) || {}
     const prompts = existingOutput.prompts || []
     const allShots = existingOutput.shots || []
+    const existingShotAssets: Array<{ shotId: string; assetId: string; url: string }> = existingOutput.shotAssets || []
+    const existingShotPrompts: Array<{ shotId: string; prompt: string; caption: string }> = existingOutput.shotPrompts || []
 
     const actPrompts = prompts.filter((p: any) => p.actNumber === actNumber)
     if (actPrompts.length === 0) {
       return NextResponse.json({ error: 'VALIDATION_002', message: `幕 ${actNumber} 没有待生成的镜头` }, { status: 400 })
     }
 
-    // 删除该幕已有的 assets（重新生成）
-    const allAssets = await prisma.asset.findMany({
-      where: { projectId: params.id, stepId: step.id }
-    })
-    const actAssets = allAssets.filter((a: any) => a.metadata?.actNumber === actNumber)
-    for (const asset of actAssets) {
-      await prisma.asset.delete({ where: { id: asset.id } }).catch(() => {})
-    }
-
-    const existingShotAssets = existingOutput.shotAssets || []
     const actShotIds = new Set(actPrompts.map((p: any) => p.shotId))
+
+    // force=true 时清除该幕所有旧 assets（重新生图）
+    let cleanedShotAssets = existingShotAssets
+    if (body?.force === true) {
+      console.log(`[STORYBOARD-ACT] force=true, 清除第 ${actNumber} 幕旧 assets`)
+      const allAssets = await prisma.asset.findMany({
+        where: { projectId: params.id, stepId: step.id }
+      })
+      const actAssets = allAssets.filter((a: any) => a.metadata?.actNumber === actNumber)
+      for (const asset of actAssets) {
+        await prisma.asset.delete({ where: { id: asset.id } }).catch(() => {})
+      }
+      cleanedShotAssets = existingShotAssets.filter((s: any) => !actShotIds.has(s.shotId))
+    }
 
     try {
       const framework = project.framework as any
       const textClient = await getTextClient()
 
-      // ===== 阶段 A：为每个 shot 并行生成专业生图提示词 =====
-      console.log(`[STORYBOARD-ACT] 阶段A: 为 ${actPrompts.length} 个镜头生成提示词`)
-      const shotPromptResults = await Promise.all(
-        actPrompts.map(async (promptItem: any) => {
-          const shot = allShots.find((s: any) => s.shotId === promptItem.shotId) || {}
+      // ===== 阶段 A：确保该幕所有 shot 都有生图提示词 =====
+      const missingShotIds = actPrompts
+        .map((p: any) => p.shotId)
+        .filter((sid: string) => !existingShotPrompts.some((sp: any) => sp.shotId === sid))
 
-          const characterNames = (promptItem.characters || [])
-            .map((cid: string) => {
-              const char = framework?.characters?.find((c: any) => c.id === cid)
-              return char ? `${char.name}(${cid})` : cid
-            })
-            .join('、')
+      let currentShotPrompts = [...existingShotPrompts]
 
-          const llmPrompt = `基于以下分镜信息，生成一段适合 AI 图像生成模型的英文提示词（prompt）：
+      if (missingShotIds.length > 0) {
+        console.log(`[STORYBOARD-ACT] 阶段A: 为 ${missingShotIds.length} 个缺失镜头生成提示词`)
+        const newPrompts = await Promise.all(
+          missingShotIds.map(async (sid: string) => {
+            const promptItem = actPrompts.find((p: any) => p.shotId === sid)!
+            const shot = allShots.find((s: any) => s.shotId === sid) || {}
+
+            const characterNames = (promptItem.characters || [])
+              .map((cid: string) => {
+                const char = framework?.characters?.find((c: any) => c.id === cid)
+                return char ? `${char.name}(${cid})` : cid
+              })
+              .join('、')
+
+            const llmPrompt = `基于以下分镜信息，生成一段适合 AI 图像生成模型的英文提示词（prompt）：
 
 分镜描述：${shot.description || promptItem.chineseDesc || ''}
 运镜方式：${shot.cameraMove || promptItem.cameraMove || '固定'}
@@ -309,41 +324,88 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 5. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
 {"prompt": "英文生图提示词...", "caption": "中文画面描述..."}`
 
-          try {
-            const resultText = await textClient.generate(llmPrompt, { temperature: 0.7, maxTokens: 2048 })
-            const parsed = extractJsonFromMarkdown(resultText) || {}
-            return {
-              shotId: promptItem.shotId,
-              prompt: parsed.prompt || promptItem.englishPrompt || '',
-              caption: parsed.caption || promptItem.chineseDesc || '',
+            try {
+              const resultText = await textClient.generate(llmPrompt, { temperature: 0.7, maxTokens: 2048 })
+              const parsed = extractJsonFromMarkdown(resultText) || {}
+              return {
+                shotId: sid,
+                prompt: parsed.prompt || promptItem.englishPrompt || '',
+                caption: parsed.caption || promptItem.chineseDesc || '',
+              }
+            } catch (err: any) {
+              console.error(`[STORYBOARD-ACT] 镜头 ${sid} 提示词生成失败:`, err.message)
+              return {
+                shotId: sid,
+                prompt: promptItem.englishPrompt || '',
+                caption: promptItem.chineseDesc || '',
+              }
             }
-          } catch (err: any) {
-            console.error(`[STORYBOARD-ACT] 镜头 ${promptItem.shotId} 提示词生成失败:`, err.message)
-            return {
-              shotId: promptItem.shotId,
-              prompt: promptItem.englishPrompt || '',
-              caption: promptItem.chineseDesc || '',
-            }
+          })
+        )
+        currentShotPrompts = [
+          ...existingShotPrompts.filter((p: any) => !actShotIds.has(p.shotId)),
+          ...newPrompts,
+        ]
+
+        // 立即保存 shotPrompts，避免重复生成
+        await prisma.workflowStep.update({
+          where: { id: step.id },
+          data: {
+            outputData: {
+              ...existingOutput,
+              shotPrompts: currentShotPrompts,
+            },
+          },
+        })
+        console.log(`[STORYBOARD-ACT] 阶段A完成: 已保存 ${currentShotPrompts.length} 条 shotPrompts`)
+      }
+
+      // ===== 阶段 B：每次只生成 1 个 shot 的图片 =====
+      // 确定目标 shot（指定或自动找下一个未生成的）
+      let targetShotId = shotId
+      if (!targetShotId) {
+        for (const promptItem of actPrompts) {
+          const hasAsset = cleanedShotAssets.some((s: any) => s.shotId === promptItem.shotId)
+          if (!hasAsset) {
+            targetShotId = promptItem.shotId
+            break
+          }
+        }
+      }
+
+      if (!targetShotId) {
+        // 全部已生成
+        const processedCount = actPrompts.length
+        return NextResponse.json({
+          success: true,
+          data: {
+            status: 'completed',
+            actNumber,
+            processedCount,
+            totalCount: actPrompts.length,
+            remainingCount: 0,
           }
         })
-      )
+      }
 
-      // 保存 shotPrompts 到 outputData
-      const existingShotPrompts = existingOutput.shotPrompts || []
-      const mergedShotPrompts = [
-        ...existingShotPrompts.filter((p: any) => !actShotIds.has(p.shotId)),
-        ...shotPromptResults,
-      ]
+      const shotPrompt = currentShotPrompts.find((p: any) => p.shotId === targetShotId)
+      if (!shotPrompt) {
+        return NextResponse.json({ error: 'VALIDATION_003', message: `镜头 ${targetShotId} 没有对应的提示词` }, { status: 400 })
+      }
 
-      // ===== 阶段 B：基于提示词生成真实 AI 图片 =====
-      console.log(`[STORYBOARD-ACT] 阶段B: 开始为 ${shotPromptResults.length} 个镜头生图`)
+      // 删除该 shot 已有的 asset（覆盖生成）
+      const allAssets = await prisma.asset.findMany({
+        where: { projectId: params.id, stepId: step.id }
+      })
+      const oldAsset = allAssets.find((a: any) => a.metadata?.shotId === targetShotId)
+      if (oldAsset) {
+        await prisma.asset.delete({ where: { id: oldAsset.id } }).catch(() => {})
+      }
 
       let styleRefUrl = ''
-      let stylePrompt = ''
       try {
         const ref = await getStyleRefUrl(params.id)
         styleRefUrl = ref.styleRefUrl
-        stylePrompt = ref.stylePrompt
         console.log('[STORYBOARD-ACT] 风格参考图:', styleRefUrl.slice(0, 80))
       } catch (refErr: any) {
         console.warn('[STORYBOARD-ACT] 风格参考图获取失败:', refErr.message)
@@ -356,70 +418,62 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         .map((a) => a.url)
         .filter((u): u is string => typeof u === 'string' && u.length > 0)
 
-      const newShotAssets = []
-      const failedShots: string[] = []
+      const refImages: string[] = []
+      if (styleRefUrl) refImages.push(styleRefUrl)
+      if (characterImageUrls.length > 0) refImages.push(...characterImageUrls)
 
-      for (const shotPrompt of shotPromptResults) {
-        try {
-          console.log(`[STORYBOARD-ACT] 生图: ${shotPrompt.shotId}, prompt前80:`, shotPrompt.prompt.slice(0, 80))
+      console.log(`[STORYBOARD-ACT] 阶段B: 生图 ${targetShotId}, prompt前80:`, shotPrompt.prompt.slice(0, 80))
 
-          const refImages: string[] = []
-          if (styleRefUrl) refImages.push(styleRefUrl)
-          if (characterImageUrls.length > 0) refImages.push(...characterImageUrls)
+      const { buffer, isMock, lastError } = await generateImage({
+        model: imageModel || IMAGE_MODELS.primary,
+        prompt: shotPrompt.prompt,
+        referenceImages: refImages.length > 0 ? refImages : undefined,
+        aspectRatio,
+        watermark: false,
+        sequentialImageGeneration: 'disabled',
+        maxImages: 1,
+      })
 
-          const { buffer, isMock, lastError } = await generateImage({
-            model: imageModel || IMAGE_MODELS.primary,
-            prompt: shotPrompt.prompt,
-            referenceImages: refImages.length > 0 ? refImages : undefined,
+      const storageKey = `projects/${params.id}/storyboard/${shotPrompt.shotId}_${Date.now()}.png`
+      await uploadFile(storageKey, buffer, 'image/png')
+      const url = await getSignedFileUrl(storageKey, 3600)
+
+      const asset = await prisma.asset.create({
+        data: {
+          projectId: params.id,
+          stepId: step.id,
+          type: 'IMAGE',
+          mimeType: 'image/png',
+          storageKey,
+          url,
+          metadata: {
+            shotId: shotPrompt.shotId,
+            type: 'storyboard',
+            actNumber,
             aspectRatio,
-            watermark: false,
-            sequentialImageGeneration: 'disabled',
-            maxImages: 1,
-          })
-
-          const storageKey = `projects/${params.id}/storyboard/${shotPrompt.shotId}_${Date.now()}.png`
-          await uploadFile(storageKey, buffer, 'image/png')
-          const url = await getSignedFileUrl(storageKey, 3600)
-
-          const asset = await prisma.asset.create({
-            data: {
-              projectId: params.id,
-              stepId: step.id,
-              type: 'IMAGE',
-              mimeType: 'image/png',
-              storageKey,
-              url,
-              metadata: {
-                shotId: shotPrompt.shotId,
-                type: 'storyboard',
-                actNumber,
-                aspectRatio,
-                imageModel: imageModel || IMAGE_MODELS.primary,
-                prompt: shotPrompt.prompt,
-                caption: shotPrompt.caption,
-                isMock: !!isMock,
-                mockReason: lastError || null,
-              },
-            }
-          })
-
-          newShotAssets.push({ shotId: shotPrompt.shotId, assetId: asset.id, url })
-        } catch (imgErr: any) {
-          console.error(`[STORYBOARD-ACT] 镜头 ${shotPrompt.shotId} 生图失败:`, imgErr.message)
-          failedShots.push(shotPrompt.shotId)
+            imageModel: imageModel || IMAGE_MODELS.primary,
+            prompt: shotPrompt.prompt,
+            caption: shotPrompt.caption,
+            isMock: !!isMock,
+            mockReason: lastError || null,
+          },
         }
-      }
+      })
 
       // 合并 shotAssets
+      const newShotAsset = { shotId: shotPrompt.shotId, assetId: asset.id, url }
       const mergedShotAssets = [
-        ...existingShotAssets.filter((s: any) => !actShotIds.has(s.shotId)),
-        ...newShotAssets,
+        ...cleanedShotAssets.filter((s: any) => s.shotId !== shotPrompt.shotId),
+        newShotAsset,
       ]
+
+      const processedCount = mergedShotAssets.filter((s: any) => actShotIds.has(s.shotId)).length
+      const remainingCount = actPrompts.length - processedCount
 
       const nextOutput = {
         ...existingOutput,
         shotAssets: mergedShotAssets,
-        shotPrompts: mergedShotPrompts,
+        shotPrompts: currentShotPrompts,
         aspectRatio,
         imageModel: imageModel || IMAGE_MODELS.primary,
       }
@@ -427,20 +481,23 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       await prisma.workflowStep.update({
         where: { id: step.id },
         data: {
-          status: step.status === 'PENDING' ? 'COMPLETED' as any : step.status,
+          status: remainingCount === 0 && step.status === 'PENDING' ? 'COMPLETED' as any : step.status,
           outputData: nextOutput,
         },
       })
 
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
 
-      console.log(`[STORYBOARD-ACT] 第 ${actNumber} 幕完成: 成功 ${newShotAssets.length}/${shotPromptResults.length} 张，失败: ${failedShots.join(', ') || '无'}`)
+      console.log(`[STORYBOARD-ACT] 第 ${actNumber} 幕进度: ${processedCount}/${actPrompts.length}, 当前: ${targetShotId}, 剩余: ${remainingCount}`)
       return NextResponse.json({
         success: true,
         data: {
-          generatedCount: newShotAssets.length,
+          status: remainingCount > 0 ? 'processing' : 'completed',
+          currentShotId: targetShotId,
+          processedCount,
+          totalCount: actPrompts.length,
+          remainingCount,
           actNumber,
-          failedShots: failedShots.length > 0 ? failedShots : undefined,
         }
       })
     } catch (e: any) {

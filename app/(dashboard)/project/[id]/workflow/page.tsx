@@ -3662,6 +3662,9 @@ function StoryboardPanel({
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
 
+  // [ACT-QUEUE] 每幕异步生图进度（独立轮询，不占用全局 executing 状态）
+  const [actProgress, setActProgress] = useState<Record<number, { current: number; total: number; shotId: string | null }>>({})
+
   // [WORKFLOW-FIX] 如果已有生成数据，从 outputData 读取模式
   const savedMode = step.outputData?.mode as 'reference' | 'keyframe' | undefined
   const currentMode = savedMode || storyboardMode || 'keyframe'
@@ -3712,14 +3715,59 @@ function StoryboardPanel({
     setStoryboardMode?.(mode)
   }
 
-  function handleGenerateAct(actNumber: number) {
+  async function handleGenerateAct(actNumber: number, force = false) {
     const { ratio, model } = getActSettings(actNumber)
-    onExecute('STORYBOARD', {
-      action: 'generate-act-images',
-      actNumber,
-      aspectRatio: ratio,
-      imageModel: model,
-    })
+    const actShots = shotsByAct.find(([a]) => a === actNumber)?.[1] || []
+    const total = actShots.length
+
+    setActProgress(prev => ({ ...prev, [actNumber]: { current: 0, total, shotId: null } }))
+
+    try {
+      let remaining = total
+      while (remaining > 0) {
+        const res = await fetch(`/api/projects/${projectId}/steps/storyboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'generate-act-images',
+            actNumber,
+            aspectRatio: ratio,
+            imageModel: model,
+            force: force && remaining === total, // 仅在第一轮传 force
+          }),
+        })
+        const result = await res.json()
+        if (!res.ok || !result.success) {
+          throw new Error(result.message || result.error || `HTTP ${res.status}`)
+        }
+
+        const data = result.data
+        await mutate()
+
+        if (data.status === 'completed') {
+          setActProgress(prev => ({
+            ...prev,
+            [actNumber]: { current: data.processedCount, total: data.totalCount, shotId: null },
+          }))
+          break
+        }
+
+        setActProgress(prev => ({
+          ...prev,
+          [actNumber]: { current: data.processedCount, total: data.totalCount, shotId: data.currentShotId },
+        }))
+        remaining = data.remainingCount
+      }
+      setToast({ kind: 'success', message: `第 ${actNumber} 幕图片生成完成` })
+    } catch (e: any) {
+      onError('生图失败：' + e?.message)
+    } finally {
+      setActProgress(prev => {
+        const next = { ...prev }
+        delete next[actNumber]
+        return next
+      })
+    }
   }
 
   async function handleRegenerate(shotId: string, aspectRatio?: string, imageModel?: string) {
@@ -3942,23 +3990,26 @@ function StoryboardPanel({
                   </div>
                   <div className="relative inline-block ml-auto">
                     <button
-                      onClick={() => handleGenerateAct(actNumber)}
-                      disabled={isExecuting}
+                      onClick={() => handleGenerateAct(actNumber, allGenerated)}
+                      disabled={isExecuting || !!actProgress[actNumber]}
                       className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium transition disabled:opacity-50 ${
                         allGenerated
                           ? 'border border-stone-300 bg-white text-stone-700 hover:bg-stone-100'
                           : 'bg-stone-900 text-white hover:bg-stone-800'
                       }`}
                     >
-                      {isExecuting ? (
-                        <><LoaderCircle className="h-3 w-3 animate-spin" /> 生成中...</>
+                      {actProgress[actNumber] ? (
+                        <>
+                          <LoaderCircle className="h-3 w-3 animate-spin" />
+                          {actProgress[actNumber].current}/{actProgress[actNumber].total}
+                        </>
                       ) : allGenerated ? (
                         <><RefreshCw className="h-3 w-3" /> 重新生图</>
                       ) : (
                         <><ImageIcon className="h-3 w-3" /> 生图</>
                       )}
                     </button>
-                    {!allGenerated && <CostBadge cost={DEFAULT_GENERATE_COST} />}
+                    {!allGenerated && !actProgress[actNumber] && <CostBadge cost={DEFAULT_GENERATE_COST} />}
                   </div>
                 </div>
               )}
