@@ -844,7 +844,8 @@ function StepContent({
           setToast={setToast}
           storyboardMode={storyboardMode}
           setStoryboardMode={setStoryboardMode}
-  readOnly={readOnly}
+          framework={project?.framework}
+          readOnly={readOnly}
         />
       )
     case 'KEYFRAMES':
@@ -3610,6 +3611,66 @@ function TrailerPanel({
   )
 }
 
+/* ============================================================
+   分镜 Mock 占位图（前端 Canvas 生成，避免后端 SVG 中文乱码）
+   ============================================================ */
+function StoryboardMockImage({ shot }: { shot: any }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const w = 320
+    const h = 180
+    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+    canvas.width = w * dpr
+    canvas.height = h * dpr
+    ctx.scale(dpr, dpr)
+    ctx.clearRect(0, 0, w, h)
+
+    // 背景
+    ctx.fillStyle = '#f5f5f4'
+    ctx.fillRect(0, 0, w, h)
+
+    // 虚线边框
+    ctx.strokeStyle = '#d6d3d1'
+    ctx.lineWidth = 2
+    ctx.setLineDash([8, 4])
+    ctx.strokeRect(8, 8, w - 16, h - 16)
+
+    // 镜头编号
+    ctx.fillStyle = '#57534e'
+    ctx.font = 'bold 18px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(shot.shotId || '', w / 2, h * 0.38)
+
+    // 场景名
+    ctx.fillStyle = '#a8a29e'
+    ctx.font = '14px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif'
+    const sceneName = (shot.sceneName || '').slice(0, 14)
+    ctx.fillText(sceneName, w / 2, h * 0.58)
+
+    // 待生成标签
+    ctx.fillStyle = '#d6d3d1'
+    ctx.font = '12px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif'
+    ctx.fillText('待生成', w / 2, h * 0.76)
+  }, [shot])
+
+  return (
+    <div className="relative w-full overflow-hidden rounded bg-stone-100" style={{ aspectRatio: '16/9' }}>
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 h-full w-full"
+        style={{ width: '100%', height: '100%' }}
+      />
+    </div>
+  )
+}
+
 function StoryboardPanel({
   step,
   projectId,
@@ -3621,6 +3682,7 @@ function StoryboardPanel({
   storyboardMode,
   setStoryboardMode,
   readOnly,
+  framework,
 }: {
   step: any
   projectId: string
@@ -3632,6 +3694,7 @@ function StoryboardPanel({
   storyboardMode?: 'reference' | 'keyframe'
   setStoryboardMode?: (mode: 'reference' | 'keyframe') => void
   readOnly?: boolean
+  framework?: any
 }) {
   const shots = step.outputData?.shots || []
   const shotAssets = step.resultAssets || []
@@ -3670,6 +3733,16 @@ function StoryboardPanel({
     }
     return Array.from(grouped.entries()).sort((a, b) => a[0] - b[0])
   }, [shots])
+
+  // [CHARACTER-MAP] 角色 ID → 名称映射
+  const characterMap = useMemo(() => {
+    const chars = framework?.characters || []
+    const map: Record<string, string> = {}
+    for (const c of chars) {
+      if (c.id && c.name) map[c.id] = c.name
+    }
+    return map
+  }, [framework])
 
   function getActSettings(act: number) {
     return actSettings[act] || { ratio: '16:9', model: IMAGE_MODELS.primary }
@@ -3799,66 +3872,72 @@ function StoryboardPanel({
                 </div>
               </div>
 
-              {/* 分镜表 */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-stone-100 text-left text-stone-500">
-                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">镜头ID</th>
-                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">场景</th>
-                      <th className="px-4 py-2 text-xs font-medium">描述</th>
-                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">运镜</th>
-                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">时长</th>
-                      <th className="px-4 py-2 text-xs font-medium whitespace-nowrap">角色</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-50">
-                    {actShots.map((shot: any) => (
-                      <tr key={shot.shotId}>
-                        <td className="px-4 py-2 font-mono text-xs text-stone-600 whitespace-nowrap">{shot.shotId}</td>
-                        <td className="px-4 py-2 text-stone-600 whitespace-nowrap">{shot.sceneName}</td>
-                        <td className="px-4 py-2 text-stone-600">{shot.description}</td>
-                        <td className="px-4 py-2 text-stone-500 whitespace-nowrap">{shot.cameraMove}</td>
-                        <td className="px-4 py-2 text-stone-500 whitespace-nowrap">{shot.duration}s</td>
-                        <td className="px-4 py-2 text-xs text-stone-400 whitespace-nowrap">
-                          {shot.characters?.join(', ')}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {/* 分镜行卡片列表（左侧信息 + 右侧图片） */}
+              <div className="divide-y divide-stone-100">
+                {actShots.map((shot: any) => {
+                  const asset = actAssetsMap.get(shot.shotId)
+                  const isRegenerating = regeneratingId === shot.shotId
+                  const cardRatio = asset?.metadata?.aspectRatio || '16:9'
+                  const cardModel = asset?.metadata?.imageModel || IMAGE_MODELS.primary
+                  const mappedChars = shot.characters?.map((cid: string) => characterMap[cid] || cid).join('、')
 
-              {/* 已生成缩略图 */}
-              {generatedCount > 0 && (
-                <div className="flex flex-wrap gap-2 px-4 py-3 border-t border-stone-100">
-                  {actShots.map((shot: any) => {
-                    const asset = actAssetsMap.get(shot.shotId)
-                    if (!asset) return null
-                    const isRegenerating = regeneratingId === shot.shotId
-                    const cardRatio = asset.metadata?.aspectRatio || '16:9'
-                    const cardModel = asset.metadata?.imageModel || IMAGE_MODELS.primary
-                    return (
-                      <div key={shot.shotId} className="group/thumb relative h-16 w-24">
-                        <img
-                          src={asset.url}
-                          alt=""
-                          className="h-16 w-24 rounded object-cover"
-                        />
-                        <HoverImageBadge
-                          src={asset.url}
-                          aspectRatio={cardRatio}
-                          imageModel={cardModel}
-                          onRegenerate={(ar, m) => handleRegenerate(shot.shotId, ar, m)}
-                          isRegenerating={isRegenerating}
-                          anyRegenerating={!!regeneratingId}
-                          wrapperClassName="absolute inset-0"
-                        />
+                  return (
+                    <div
+                      key={shot.shotId}
+                      className="flex flex-col sm:flex-row gap-4 px-4 py-3"
+                    >
+                      {/* 左侧：镜头信息 */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-mono text-[11px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
+                            {shot.shotId}
+                          </span>
+                          <span className="text-sm font-medium text-stone-800">{shot.sceneName}</span>
+                        </div>
+                        <p className="text-sm text-stone-600 leading-relaxed mb-2">{shot.description}</p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-500">
+                          <span>
+                            <span className="text-stone-400">运镜</span> {shot.cameraMove}
+                          </span>
+                          <span>
+                            <span className="text-stone-400">时长</span> {shot.duration}s
+                          </span>
+                          {mappedChars && (
+                            <span>
+                              <span className="text-stone-400">角色</span>{' '}
+                              <span className="text-stone-600">{mappedChars}</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    )
-                  })}
-                </div>
-              )}
+
+                      {/* 右侧：图片区 */}
+                      <div className="w-full sm:w-44 shrink-0">
+                        {asset ? (
+                          <div className="group/thumb relative w-full" style={{ aspectRatio: '16/9' }}>
+                            <img
+                              src={asset.url}
+                              alt=""
+                              className="h-full w-full rounded object-cover"
+                            />
+                            <HoverImageBadge
+                              src={asset.url}
+                              aspectRatio={cardRatio}
+                              imageModel={cardModel}
+                              onRegenerate={(ar, m) => handleRegenerate(shot.shotId, ar, m)}
+                              isRegenerating={isRegenerating}
+                              anyRegenerating={!!regeneratingId}
+                              wrapperClassName="absolute inset-0"
+                            />
+                          </div>
+                        ) : (
+                          <StoryboardMockImage shot={shot} />
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
 
               {/* 生图控制 */}
               {!readOnly && (
