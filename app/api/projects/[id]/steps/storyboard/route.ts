@@ -3,7 +3,9 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
-import { getTextClient } from '@/lib/api-clients'
+import { getTextClient, getImageClient } from '@/lib/api-clients'
+import { generateImage } from '@/lib/api-clients/xiaomi'
+import { getStyleRefUrl } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
@@ -237,7 +239,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
   }
 
-  // === generate-act-images: 按幕增量生成草图 ===
+  // === generate-act-images: 按幕增量生成真实 AI 图片（两阶段：提示词→生图） ===
   if (action === 'generate-act-images') {
     const actNumber = body?.actNumber
     if (typeof actNumber !== 'number') {
@@ -246,7 +248,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     const aspectRatio = body?.aspectRatio || '16:9'
     const imageModel = body?.imageModel
-    console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕草图，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
+    console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
+
+    const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+    if (!pointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+    }
 
     const existingOutput = (step.outputData as any) || {}
     const prompts = existingOutput.prompts || []
@@ -257,84 +264,153 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       return NextResponse.json({ error: 'VALIDATION_002', message: `幕 ${actNumber} 没有待生成的镜头` }, { status: 400 })
     }
 
+    // 删除该幕已有的 assets（重新生成）
+    const allAssets = await prisma.asset.findMany({
+      where: { projectId: params.id, stepId: step.id }
+    })
+    const actAssets = allAssets.filter((a: any) => a.metadata?.actNumber === actNumber)
+    for (const asset of actAssets) {
+      await prisma.asset.delete({ where: { id: asset.id } }).catch(() => {})
+    }
+
+    const existingShotAssets = existingOutput.shotAssets || []
+    const actShotIds = new Set(actPrompts.map((p: any) => p.shotId))
+
     try {
-      const sizeMap: Record<string, { w: number; h: number }> = {
-        '16:9': { w: 1024, h: 576 },
-        '9:16': { w: 576, h: 1024 },
-        '1:1': { w: 1024, h: 1024 },
-        '4:3': { w: 1024, h: 768 },
-        '3:4': { w: 768, h: 1024 },
-        '21:9': { w: 1344, h: 576 },
-      }
-      const { w: svgW, h: svgH } = sizeMap[aspectRatio] || sizeMap['16:9']
+      const framework = project.framework as any
+      const textClient = await getTextClient()
 
-      // 删除该幕已有的 assets（重新生成）
-      const allAssets = await prisma.asset.findMany({
-        where: { projectId: params.id, stepId: step.id }
-      })
-      const actAssets = allAssets.filter((a: any) => a.metadata?.actNumber === actNumber)
-      for (const asset of actAssets) {
-        await prisma.asset.delete({ where: { id: asset.id } }).catch(() => {})
-      }
+      // ===== 阶段 A：为每个 shot 并行生成专业生图提示词 =====
+      console.log(`[STORYBOARD-ACT] 阶段A: 为 ${actPrompts.length} 个镜头生成提示词`)
+      const shotPromptResults = await Promise.all(
+        actPrompts.map(async (promptItem: any) => {
+          const shot = allShots.find((s: any) => s.shotId === promptItem.shotId) || {}
 
-      const existingShotAssets = existingOutput.shotAssets || []
-      const actShotIds = new Set(actPrompts.map((p: any) => p.shotId))
+          const characterNames = (promptItem.characters || [])
+            .map((cid: string) => {
+              const char = framework?.characters?.find((c: any) => c.id === cid)
+              return char ? `${char.name}(${cid})` : cid
+            })
+            .join('、')
 
-      const newShotAssets = []
-      for (const promptItem of actPrompts) {
-        const shot = allShots.find((s: any) => s.shotId === promptItem.shotId) || {}
-        const charColors = (promptItem.characters || []).map((cid: string, idx: number) => {
-          const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6']
-          return { id: cid, color: colors[idx % colors.length] }
-        })
+          const llmPrompt = `基于以下分镜信息，生成一段适合 AI 图像生成模型的英文提示词（prompt）：
 
-        const safeDesc = (promptItem.chineseDesc || '')
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
+分镜描述：${shot.description || promptItem.chineseDesc || ''}
+运镜方式：${shot.cameraMove || promptItem.cameraMove || '固定'}
+场景：${shot.sceneName || promptItem.sceneName || ''}
+时长：${shot.duration || promptItem.duration || 5}秒
+涉及角色：${characterNames || '无'}
 
-        const svg = `
-          <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
-            <rect width="100%" height="100%" fill="#f8f9fa"/>
-            <text x="50%" y="10%" font-family="system-ui, sans-serif" font-size="24" fill="#333" text-anchor="middle">分镜 ${promptItem.shotId}</text>
-            <text x="50%" y="20%" font-family="system-ui, sans-serif" font-size="16" fill="#666" text-anchor="middle">${promptItem.cameraMove || '固定'} | 第${promptItem.actNumber}幕 | ${promptItem.duration || 5}秒</text>
-            ${charColors.map((c: any, i: number) =>
-              `<circle cx="${200 + i * 300}" cy="300" r="80" fill="${c.color}" opacity="0.3" stroke="${c.color}" stroke-width="4"/>
-               <text x="${200 + i * 300}" y="300" font-family="system-ui, sans-serif" font-size="20" fill="${c.color}" text-anchor="middle" dy=".3em">角色${i + 1}</text>`
-            ).join('')}
-            <rect x="50" y="${svgH - 126}" width="${svgW - 100}" height="80" fill="none" stroke="#333" stroke-width="2" stroke-dasharray="8,4"/>
-            <text x="50%" y="${svgH - 86}" font-family="system-ui, sans-serif" font-size="14" fill="#333" text-anchor="middle">${safeDesc}</text>
-          </svg>
-        `
-        const buffer = await sharp(Buffer.from(svg)).png().toBuffer()
-        const storageKey = `projects/${params.id}/storyboard/${promptItem.shotId}.png`
-        await uploadFile(storageKey, buffer, 'image/png')
-        const url = await getSignedFileUrl(storageKey, 3600)
+要求：
+1. 提示词必须包含场景环境、角色动作、光影氛围、镜头感描述
+2. 如果涉及角色，必须引用该角色的形象特征（从角色设定中提取），确保角色一致性
+3. 提示词长度控制在 200-500 词，适合即梦/Flux/DALL-E 等模型
+4. 同时生成一个中文描述（用于前端展示）
+5. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
+{"prompt": "英文生图提示词...", "caption": "中文画面描述..."}`
 
-        const asset = await prisma.asset.create({
-          data: {
-            projectId: params.id,
-            stepId: step.id,
-            type: 'IMAGE',
-            mimeType: 'image/png',
-            storageKey,
-            url,
-            metadata: {
+          try {
+            const resultText = await textClient.generate(llmPrompt, { temperature: 0.7, maxTokens: 2048 })
+            const parsed = extractJsonFromMarkdown(resultText) || {}
+            return {
               shotId: promptItem.shotId,
-              type: 'storyboard',
-              characters: promptItem.characters,
-              duration: promptItem.duration,
-              actNumber: promptItem.actNumber,
-              aspectRatio,
-              imageModel: imageModel || IMAGE_MODELS.primary,
-            },
+              prompt: parsed.prompt || promptItem.englishPrompt || '',
+              caption: parsed.caption || promptItem.chineseDesc || '',
+            }
+          } catch (err: any) {
+            console.error(`[STORYBOARD-ACT] 镜头 ${promptItem.shotId} 提示词生成失败:`, err.message)
+            return {
+              shotId: promptItem.shotId,
+              prompt: promptItem.englishPrompt || '',
+              caption: promptItem.chineseDesc || '',
+            }
           }
         })
-        newShotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url })
+      )
+
+      // 保存 shotPrompts 到 outputData
+      const existingShotPrompts = existingOutput.shotPrompts || []
+      const mergedShotPrompts = [
+        ...existingShotPrompts.filter((p: any) => !actShotIds.has(p.shotId)),
+        ...shotPromptResults,
+      ]
+
+      // ===== 阶段 B：基于提示词生成真实 AI 图片 =====
+      console.log(`[STORYBOARD-ACT] 阶段B: 开始为 ${shotPromptResults.length} 个镜头生图`)
+
+      let styleRefUrl = ''
+      let stylePrompt = ''
+      try {
+        const ref = await getStyleRefUrl(params.id)
+        styleRefUrl = ref.styleRefUrl
+        stylePrompt = ref.stylePrompt
+        console.log('[STORYBOARD-ACT] 风格参考图:', styleRefUrl.slice(0, 80))
+      } catch (refErr: any) {
+        console.warn('[STORYBOARD-ACT] 风格参考图获取失败:', refErr.message)
       }
 
-      // 合并 shotAssets：保留非该幕的已有数据，添加新生成的
+      const characterAssets = await prisma.asset.findMany({
+        where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
+      })
+      const characterImageUrls = characterAssets
+        .map((a) => a.url)
+        .filter((u): u is string => typeof u === 'string' && u.length > 0)
+
+      const newShotAssets = []
+      const failedShots: string[] = []
+
+      for (const shotPrompt of shotPromptResults) {
+        try {
+          console.log(`[STORYBOARD-ACT] 生图: ${shotPrompt.shotId}, prompt前80:`, shotPrompt.prompt.slice(0, 80))
+
+          const refImages: string[] = []
+          if (styleRefUrl) refImages.push(styleRefUrl)
+          if (characterImageUrls.length > 0) refImages.push(...characterImageUrls)
+
+          const { buffer, isMock, lastError } = await generateImage({
+            model: imageModel || IMAGE_MODELS.primary,
+            prompt: shotPrompt.prompt,
+            referenceImages: refImages.length > 0 ? refImages : undefined,
+            aspectRatio,
+            watermark: false,
+            sequentialImageGeneration: 'disabled',
+            maxImages: 1,
+          })
+
+          const storageKey = `projects/${params.id}/storyboard/${shotPrompt.shotId}_${Date.now()}.png`
+          await uploadFile(storageKey, buffer, 'image/png')
+          const url = await getSignedFileUrl(storageKey, 3600)
+
+          const asset = await prisma.asset.create({
+            data: {
+              projectId: params.id,
+              stepId: step.id,
+              type: 'IMAGE',
+              mimeType: 'image/png',
+              storageKey,
+              url,
+              metadata: {
+                shotId: shotPrompt.shotId,
+                type: 'storyboard',
+                actNumber,
+                aspectRatio,
+                imageModel: imageModel || IMAGE_MODELS.primary,
+                prompt: shotPrompt.prompt,
+                caption: shotPrompt.caption,
+                isMock: !!isMock,
+                mockReason: lastError || null,
+              },
+            }
+          })
+
+          newShotAssets.push({ shotId: shotPrompt.shotId, assetId: asset.id, url })
+        } catch (imgErr: any) {
+          console.error(`[STORYBOARD-ACT] 镜头 ${shotPrompt.shotId} 生图失败:`, imgErr.message)
+          failedShots.push(shotPrompt.shotId)
+        }
+      }
+
+      // 合并 shotAssets
       const mergedShotAssets = [
         ...existingShotAssets.filter((s: any) => !actShotIds.has(s.shotId)),
         ...newShotAssets,
@@ -343,6 +419,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const nextOutput = {
         ...existingOutput,
         shotAssets: mergedShotAssets,
+        shotPrompts: mergedShotPrompts,
         aspectRatio,
         imageModel: imageModel || IMAGE_MODELS.primary,
       }
@@ -355,9 +432,19 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         },
       })
 
-      console.log(`[STORYBOARD-ACT] 第 ${actNumber} 幕生成完成: ${newShotAssets.length} 张草图`)
-      return NextResponse.json({ success: true, data: { generatedCount: newShotAssets.length, actNumber } })
+      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
+
+      console.log(`[STORYBOARD-ACT] 第 ${actNumber} 幕完成: 成功 ${newShotAssets.length}/${shotPromptResults.length} 张，失败: ${failedShots.join(', ') || '无'}`)
+      return NextResponse.json({
+        success: true,
+        data: {
+          generatedCount: newShotAssets.length,
+          actNumber,
+          failedShots: failedShots.length > 0 ? failedShots : undefined,
+        }
+      })
     } catch (e: any) {
+      await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
       console.error(`[STORYBOARD-ACT] 第 ${actNumber} 幕生成失败:`, e.message)
       return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
     }
