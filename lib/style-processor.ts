@@ -20,6 +20,7 @@ export async function processStyleGeneration(
   aspectRatio: string = '16:9',
   imageModel?: string
 ) {
+  console.log(`[StyleProcessor-ENTER] stepId=${stepId}, projectId=${projectId}, styleOptions=${styleOptions.length}, ratio=${aspectRatio}, imageModel=${imageModel || '默认'}`)
   console.log(`[ASPECT-RATIO] [StyleProcessor] Starting for step ${stepId}, ratio: ${aspectRatio}`)
 
   // 幂等检查：若 step 已 COMPLETED/FAILED，直接跳过（防止 BullMQ + setImmediate 双触发）
@@ -36,75 +37,87 @@ export async function processStyleGeneration(
   try {
     // 工作指令.txt（2026-05-24）：3 张风格图分别由 3 个不同模型生成
     // 每张图根据 styleOption.modelNo 查找对应模型，单独调用 API
-    const results = await Promise.all(
-      styleOptions.map(async (opt, idx) => {
-        // 确定模型：优先使用 modelNo 映射，否则回退到统一 imageModel，最后默认 primary
-        const modelConfig = opt.modelNo
-          ? STYLE_MODEL_POOL.find(m => m.no === opt.modelNo) || STYLE_MODEL_POOL[0]
-          : null
-        const modelId = modelConfig?.id || imageModel || IMAGE_MODELS.primary
+    // 工作指令.txt（2026-06-07 卡死排查）：为每个 generateImage 调用添加 200s 超时，防止 Promise.all 永久挂起
+    const generateWithTimeout = (opt: StyleOption, idx: number) => {
+      return Promise.race([
+        (async () => {
+          // 确定模型：优先使用 modelNo 映射，否则回退到统一 imageModel，最后默认 primary
+          const modelConfig = opt.modelNo
+            ? STYLE_MODEL_POOL.find(m => m.no === opt.modelNo) || STYLE_MODEL_POOL[0]
+            : null
+          const modelId = modelConfig?.id || imageModel || IMAGE_MODELS.primary
 
-        console.log(`[STYLE-GEN] 风格 ${idx + 1}: ${opt.styleName} → 模型 ${modelConfig?.no || '?'} (${modelId})`)
+          console.log(`[STYLE-GEN] 风格 ${idx + 1}: ${opt.styleName} → 模型 ${modelConfig?.no || '?'} (${modelId})`)
 
-        try {
-          const { buffer, model: usedModel, revisedPrompt, isMock, lastError } = await generateImage({
-            model: modelId,
-            prompt: opt.prompt,
-            aspectRatio,
-          })
-
-          let url: string
-          let storageKey: string
-
-          // 优先尝试上传 R2；若失败降级为 data URL（仍可让前端预览）
           try {
-            storageKey = `projects/${projectId}/styles/style_${opt.id}_${Date.now()}.png`
-            await uploadFile(storageKey, buffer, 'image/png')
-            url = await getSignedFileUrl(storageKey, 3600)
-            console.log(
-              `[StyleProcessor] Image ${idx + 1} uploaded (model=${usedModel}, isMock=${!!isMock}): ${url.slice(0, 80)}...`
-            )
-          } catch (storageErr: any) {
-            console.warn(
-              `[StyleProcessor] R2 upload failed for image ${idx + 1}, using data URL:`,
-              storageErr.message
-            )
-            const base64 = buffer.toString('base64')
-            url = `data:image/png;base64,${base64}`
-            storageKey = `mock/${projectId}/styles/style_${opt.id}.png`
-          }
+            console.log(`[STYLE-GEN-ENTER] 开始调用 generateImage，风格 ${idx + 1}: ${opt.styleName}, modelId=${modelId}, prompt长度=${opt.prompt?.length || 0}`)
+            const { buffer, model: usedModel, revisedPrompt, isMock, lastError } = await generateImage({
+              model: modelId,
+              prompt: opt.prompt,
+              aspectRatio,
+            })
+            console.log(`[STYLE-GEN-EXIT] generateImage 返回，风格 ${idx + 1}: ${opt.styleName}, isMock=${!!isMock}, usedModel=${usedModel}`)
 
-          return {
-            ...opt,
-            imageUrl: url,
-            storageKey,
-            success: true,
-            usedModel,
-            revisedPrompt,
-            isMock: !!isMock,
-            mockReason: lastError,
-            modelNo: modelConfig?.no || 1,
-            modelId: modelConfig?.id || usedModel,
-            modelLabel: modelConfig?.label || usedModel,
+            let url: string
+            let storageKey: string
+
+            // 优先尝试上传 R2；若失败降级为 data URL（仍可让前端预览）
+            try {
+              storageKey = `projects/${projectId}/styles/style_${opt.id}_${Date.now()}.png`
+              await uploadFile(storageKey, buffer, 'image/png')
+              url = await getSignedFileUrl(storageKey, 3600)
+              console.log(
+                `[StyleProcessor] Image ${idx + 1} uploaded (model=${usedModel}, isMock=${!!isMock}): ${url.slice(0, 80)}...`
+              )
+            } catch (storageErr: any) {
+              console.warn(
+                `[StyleProcessor] R2 upload failed for image ${idx + 1}, using data URL:`,
+                storageErr.message
+              )
+              const base64 = buffer.toString('base64')
+              url = `data:image/png;base64,${base64}`
+              storageKey = `mock/${projectId}/styles/style_${opt.id}.png`
+            }
+
+            return {
+              ...opt,
+              imageUrl: url,
+              storageKey,
+              success: true,
+              usedModel,
+              revisedPrompt,
+              isMock: !!isMock,
+              mockReason: lastError,
+              modelNo: modelConfig?.no || 1,
+              modelId: modelConfig?.id || usedModel,
+              modelLabel: modelConfig?.label || usedModel,
+            }
+          } catch (e: any) {
+            console.error(`[StyleProcessor] Image ${idx + 1} failed:`, e.message)
+            return {
+              ...opt,
+              imageUrl: '',
+              storageKey: '',
+              success: false,
+              error: e.message,
+              usedModel: 'unknown',
+              revisedPrompt: undefined,
+              isMock: true,
+              mockReason: e.message,
+              modelNo: opt.modelNo || 1,
+              modelId: modelConfig?.id || imageModel || IMAGE_MODELS.primary,
+              modelLabel: modelConfig?.label || 'unknown',
+            }
           }
-        } catch (e: any) {
-          console.error(`[StyleProcessor] Image ${idx + 1} failed:`, e.message)
-          return {
-            ...opt,
-            imageUrl: '',
-            storageKey: '',
-            success: false,
-            error: e.message,
-            usedModel: 'unknown',
-            revisedPrompt: undefined,
-            isMock: true,
-            mockReason: e.message,
-            modelNo: opt.modelNo || 1,
-            modelId: modelConfig?.id || imageModel || IMAGE_MODELS.primary,
-            modelLabel: modelConfig?.label || 'unknown',
-          }
-        }
-      })
+        })(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`STYLE_TIMEOUT: 风格 ${idx + 1} 生成超时（200s），可能卡在供应商调用`)), 200000)
+        )
+      ])
+    }
+
+    const results = await Promise.all(
+      styleOptions.map((opt, idx) => generateWithTimeout(opt, idx))
     )
 
     const successCount = results.filter((r) => r.success).length
@@ -197,9 +210,11 @@ export async function processStyleGeneration(
     console.log(
       `[StyleProcessor] Completed step ${stepId}, assets: ${assets.length}/${results.length}, mockCount=${mockCount}`
     )
+    console.log(`[StyleProcessor-EXIT-OK] stepId=${stepId}, successCount=${successCount}, mockCount=${mockCount}`)
   } catch (e: any) {
     // 工作指令.txt（2026-06-02 卡死修复）：即使 failStep 也失败，也要记录到日志并再次尝试
     console.error(`[StyleProcessor] Failed step ${stepId}:`, e)
+    console.error(`[StyleProcessor-EXIT-FAIL] stepId=${stepId}, error=${e?.message}`)
     const errMessage = e?.message || 'style generation failed'
     const errDetail = (e?.stack || '').toString().slice(0, 500)
     try {

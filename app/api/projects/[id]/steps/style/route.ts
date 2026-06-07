@@ -1,4 +1,5 @@
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300 // Vercel max 300s, 给 setImmediate 后台任务足够时间
 
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
@@ -208,9 +209,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }
 
       if (!queued) {
+        console.log(`[STYLE-IMAGE] 启动 setImmediate 后台任务，stepId=${step.id}`)
         setImmediate(async () => {
+          console.log(`[STYLE-IMAGE] setImmediate 回调开始执行，stepId=${step.id}`)
           try {
             await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel)
+            console.log(`[STYLE-IMAGE] setImmediate 回调成功完成，stepId=${step.id}`)
           } catch (e: any) {
             // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
             const errMessage = e?.message || 'background style generation failed'
@@ -376,9 +380,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!queued) {
       // 后台直接处理：HTTP 立即返回，生成在后台执行；processStyleGeneration 内部已有
       // try/catch + failStep，绝不会让 step 卡在 PROCESSING。
+      console.log(`[STYLE] 启动 setImmediate 后台任务（compat），stepId=${step.id}`)
       setImmediate(async () => {
+        console.log(`[STYLE] setImmediate 回调开始执行（compat），stepId=${step.id}`)
         try {
           await processStyleGeneration(step.id, params.id, styleOptions)
+          console.log(`[STYLE] setImmediate 回调成功完成（compat），stepId=${step.id}`)
         } catch (e: any) {
           // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
           const errMessage = e?.message || 'background style generation failed'

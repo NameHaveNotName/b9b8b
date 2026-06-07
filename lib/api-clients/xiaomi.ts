@@ -550,7 +550,11 @@ async function callXiaomiImageOnce(p: GenerateImageParams): Promise<XiaomiImageR
   // 工作指令.txt（2026-06-02 卡死修复）：AbortSignal.timeout 在某些 Node.js 补丁版本下可能失效，
   // 使用 AbortController + setTimeout 作为兜底，确保 fetch 永远不会无限挂起。
   const controller = new AbortController()
-  const abortTimer = setTimeout(() => controller.abort(), 180000)
+  const abortTimer = setTimeout(() => {
+    console.error(`[XIAOMI-IMG-ABORT] fetch 超时（180s），强制中断。model=${params.model}`)
+    controller.abort()
+  }, 180000)
+  console.log(`[XIAOMI-IMG-FETCH] 发起 fetch，model=${params.model}，timeout=180s`)
 
   const res = await fetch(`${BASE_URL}/v1/images/generations`, {
     method: 'POST',
@@ -742,7 +746,9 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
     const subParams = { ...params, model: tryModel }
     for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
       try {
+        console.log(`[_generateImageInner] About to call callXiaomiImageOnce, model=${tryModel}, attempt=${attempt + 1}/${BACKOFF_MS.length + 1}, prompt=${subParams.prompt?.slice(0, 60)}...`)
         const raw = await callXiaomiImageOnce(subParams)
+        console.log(`[_generateImageInner] callXiaomiImageOnce returned OK, model=${tryModel}`)
         const buffer = await rawToBuffer(raw)
         return {
           buffer,
