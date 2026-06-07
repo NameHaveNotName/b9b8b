@@ -138,6 +138,13 @@
 - [x] 8.1 Docker 一键部署配置（Dockerfile + docker-compose.yml + Makefile）（2026-05-27）
 - [x] 8.2 局域网可访问配置（dev:lan 脚本 + show-ip.js）（2026-05-27）
 - [x] 8.3 全局路径修正（临时目录/数据库路径/ffmpeg 路径全部改为相对路径或环境变量）（2026-05-27）
-- [ ] 8.4 Vercel 生产部署配置（Function 内存 3008MB，超时 max）
+- [~] 8.4 Vercel 生产部署配置（Function 内存 3008MB，超时 max）
+  - [x] style/route.ts 添加 maxDuration=300（2026-06-07）
+  - [~] 排查风格统一生图卡死：后端未调用供应商但前端显示 90%（2026-06-07）
+    - [x] Phase 1: 供应商调用链全节点加日志（style-processor/xiaomi.ts/route.ts）
+    - [x] Phase 2/3: Promise.all 添加 200s 超时保护（Promise.race），防止永久挂起
+    - [x] Phase 4: 前端已有 10min 超时检测 + FAILED 状态处理
+    - [x] Phase 5: 环境变量检查（.env.local 有 key，.env.vercel.prod 为空需 Dashboard 配置）
+    - [ ] 待验证：部署后触发风格统一，查看 Vercel Runtime Logs
 - [ ] 8.5 种子数据：预置 3 个完整项目案例（非遗/招生/产品）
 - [ ] 8.6 答辩演示模式：冻结 API 调用，只展示预置案例

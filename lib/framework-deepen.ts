@@ -133,7 +133,25 @@ export async function deepenCharacters(framework: any, stepId: string) {
       })
     } catch (e: any) {
       console.error(`[DEEPEN-CHARACTER] ${char.name} 深化失败:`, e.message)
-      completedCharacters.push(char)
+      // 工作指令.txt（2026-06-07）：即使深化失败也要保留 deepened 字段（空值+错误标记），
+      // 否则前端 c.deepened 不存在会导致深化区域完全不显示，用户无法区分"未深化"和"深化失败"。
+      const failedChar = {
+        ...char,
+        deepened: {
+          appearance: '',
+          personality: '',
+          catchphrase: '',
+          attitudes: {},
+          memoryPoints: '',
+          _failed: true,
+          _error: e.message,
+        },
+      }
+      completedCharacters.push(failedChar)
+
+      const newCharacters = [...(framework.characters || [])]
+      newCharacters[i] = failedChar
+      framework = { ...framework, characters: newCharacters }
     }
   }
 

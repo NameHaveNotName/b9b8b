@@ -1770,6 +1770,26 @@ function FrameworkPanel({
                     {/* 深化内容 */}
                     {c.deepened && (
                       <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
+                        {/* 工作指令.txt（2026-06-07）：检测深化是否实际有内容，避免空 deepened 对象导致显示空白区域 */}
+                        {(() => {
+                          const hasContent = !!(
+                            c.deepened.appearance ||
+                            c.deepened.personality ||
+                            c.deepened.catchphrase ||
+                            (c.deepened.attitudes && Object.keys(c.deepened.attitudes).length > 0) ||
+                            c.deepened.memoryPoints
+                          )
+                          if (!hasContent) {
+                            return (
+                              <div className="text-xs text-stone-400">
+                                {c.deepened._failed
+                                  ? `深化失败：${c.deepened._error || '请重试'}`
+                                  : '深化内容为空'}
+                              </div>
+                            )
+                          }
+                          return null
+                        })()}
                         {c.deepened.appearance && (
                           <div>
                             <span className="text-xs text-stone-400">形象外貌</span>
