@@ -12,6 +12,65 @@ import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/po
 import { logOperation } from '@/lib/operations'
 import { STEP_COSTS } from '@/lib/points-config'
 
+/**
+ * 生成概念图提示词（供 generate-prompts 和 generate-images 共用）
+ * 成功返回 { prompts, totalScenes }，失败抛出异常（调用方需 catch 并 failStep）
+ */
+async function generateConceptPrompts(
+  project: any,
+  frameworkStep: any,
+  stepId: string
+): Promise<{ prompts: any[]; totalScenes: number }> {
+  const framework = (project.framework || frameworkStep.outputData) as any
+  const acts = Array.isArray(framework?.acts) ? framework.acts : []
+
+  const prompt = loadPromptTemplate('concept', {
+    USER_INPUT: JSON.stringify({ framework })
+  })
+  const textClient = await getTextClient()
+  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+  const parsed = extractJsonFromMarkdown(resultText)
+  const parsedScenes = parsed.scenes || []
+
+  const prompts: any[] = []
+  for (const act of acts) {
+    const actNo = act.actNo || act.actNumber || 1
+    const keyScenes = Array.isArray(act.keyScenes) ? act.keyScenes : (Array.isArray(act.scenes) ? act.scenes : [])
+    const sceneCount = Math.max(1, Math.min(keyScenes.length || 1, 3))
+    for (let i = 0; i < sceneCount; i++) {
+      const sceneDesc = keyScenes[i] || `幕${actNo}场景${i + 1}`
+      const llmScene = parsedScenes.find(
+        (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
+      )
+      const imagePrompt = llmScene?.imagePrompt || sceneDesc
+      prompts.push({
+        id: `prompt_act${actNo}_scene${i + 1}`,
+        chineseDesc: sceneDesc,
+        englishPrompt: imagePrompt,
+        target: `concept_act${actNo}_scene${i + 1}`,
+        actNumber: actNo,
+        sceneIndex: i,
+      })
+    }
+  }
+
+  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  await prisma.workflowStep.update({
+    where: { id: stepId },
+    data: {
+      status: 'PENDING' as any,
+      outputData: {
+        ...(step?.outputData as any || {}),
+        prompts,
+        totalScenes: prompts.length,
+      },
+    },
+  })
+
+  console.log(`[CONCEPT-PROMPT] 生成 ${prompts.length} 条提示词`)
+  return { prompts, totalScenes: prompts.length }
+}
+
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
   if (!userId) {
@@ -51,54 +110,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (action === 'generate-prompts') {
     try {
       console.log('[CONCEPT-PROMPT] 收到 generate-prompts 请求')
-
-      const framework = (project.framework || frameworkStep.outputData) as any
-      const acts = Array.isArray(framework?.acts) ? framework.acts : []
-
-      const prompt = loadPromptTemplate('concept', {
-        USER_INPUT: JSON.stringify({ framework })
-      })
-      const textClient = await getTextClient()
-      const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
-      const parsed = extractJsonFromMarkdown(resultText)
-      const parsedScenes = parsed.scenes || []
-
-      const prompts: any[] = []
-      for (const act of acts) {
-        const actNo = act.actNo || act.actNumber || 1
-        const keyScenes = Array.isArray(act.keyScenes) ? act.keyScenes : (Array.isArray(act.scenes) ? act.scenes : [])
-        // 每幕概念图数量：基于 keyScenes 数量，至少1张，最多3张
-        const sceneCount = Math.max(1, Math.min(keyScenes.length || 1, 3))
-        for (let i = 0; i < sceneCount; i++) {
-          const sceneDesc = keyScenes[i] || `幕${actNo}场景${i + 1}`
-          const llmScene = parsedScenes.find(
-            (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
-          )
-          const imagePrompt = llmScene?.imagePrompt || sceneDesc
-          prompts.push({
-            id: `prompt_act${actNo}_scene${i + 1}`,
-            chineseDesc: sceneDesc,
-            englishPrompt: imagePrompt,
-            target: `concept_act${actNo}_scene${i + 1}`,
-            actNumber: actNo,
-            sceneIndex: i,
-          })
-        }
-      }
-
-      await prisma.workflowStep.update({
-        where: { id: step.id },
-        data: {
-          status: 'PENDING' as any,
-          outputData: {
-            ...(step.outputData as any || {}),
-            prompts,
-            totalScenes: prompts.length,
-          },
-        },
-      })
-
-      console.log(`[CONCEPT-PROMPT] 生成 ${prompts.length} 条提示词，等待用户确认`)
+      const { prompts } = await generateConceptPrompts(project, frameworkStep, step.id)
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
       const isAbort = e?.name === 'AbortError' || /aborted|timeout|timed out/i.test(e?.message || '')
@@ -127,19 +139,37 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const prompts = existingOutput.prompts || []
     console.log('[CONCEPT-IMAGE] existingOutput keys:', Object.keys(existingOutput))
     console.log('[CONCEPT-IMAGE] prompts count:', prompts.length)
-    if (prompts.length === 0) {
-      console.error('[CONCEPT-IMAGE] No prompts found. existingOutput:', JSON.stringify(existingOutput).slice(0, 500))
-      return NextResponse.json({ error: 'No prompts found. Please call generate-prompts first.' }, { status: 400 })
+
+    // 工作指令.txt（2026-06-07）：prompts 为空时自动触发提示词生成，不返回 400
+    let resolvedPrompts = prompts
+    if (resolvedPrompts.length === 0) {
+      console.warn('[CONCEPT-IMAGE] No prompts found, auto-triggering prompt generation')
+      try {
+        const generated = await generateConceptPrompts(project, frameworkStep, step.id)
+        resolvedPrompts = generated.prompts
+        console.log(`[CONCEPT-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
+      } catch (promptErr: any) {
+        const isAbort = promptErr?.name === 'AbortError' || /aborted|timeout|timed out/i.test(promptErr?.message || '')
+        const errorMessage = isAbort
+          ? '提示词生成超时（模型响应较慢），请稍后重试'
+          : promptErr.message
+        console.error(`[CONCEPT-IMAGE] Auto-prompt generation failed: ${errorMessage}`, promptErr?.stack?.slice(0, 300))
+        await failStep(step.id, errorMessage)
+        return NextResponse.json({ error: 'API_001', message: errorMessage }, { status: 500 })
+      }
     }
 
+    // force=true 时清空旧资产（必须重新读取最新 outputData，避免覆盖自动生成的 prompts）
     if (force) {
       console.log('[CONCEPT-IMAGE] force=true, clearing old assets')
       await prisma.asset.deleteMany({
         where: { projectId: params.id, step: { stepType: 'CONCEPT' } }
       })
+      const latestStep = await prisma.workflowStep.findUnique({ where: { id: step.id } })
+      const latestOutput = (latestStep?.outputData as any) || existingOutput
       await prisma.workflowStep.update({
         where: { id: step.id },
-        data: { status: 'PENDING' as any, outputData: existingOutput, errorMessage: null },
+        data: { status: 'PENDING' as any, outputData: latestOutput, errorMessage: null },
       })
     }
 
@@ -171,7 +201,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       const scenes = []
       const failedScenes: string[] = []
 
-      for (const promptItem of prompts) {
+      for (const promptItem of resolvedPrompts) {
         try {
           const result = await imageClient.generateConceptScene(
             params.id,
@@ -228,7 +258,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
       await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      console.log(`[CONCEPT-IMAGE] 完成: 成功 ${scenes.length}/${prompts.length} 条，失败: ${failedScenes.join(', ') || '无'}`)
+      console.log(`[CONCEPT-IMAGE] 完成: 成功 ${scenes.length}/${resolvedPrompts.length} 条，失败: ${failedScenes.join(', ') || '无'}`)
       return NextResponse.json({ success: true, data: { scenes, totalScenes: scenes.length } })
     } catch (e: any) {
       await failStep(step.id, e.message)
