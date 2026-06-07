@@ -78,15 +78,28 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const svg = `
       <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <style>
+            @font-face {
+              font-family: 'LocalNoto';
+              src: local('Noto Sans SC'), local('WenQuanYi Zen Hei'), local('WenQuanYi Micro Hei'),
+                   local('Microsoft YaHei'), local('SimHei'), local('PingFang SC'),
+                   local('Hiragino Sans GB'), local('Droid Sans Fallback');
+            }
+            .cn { font-family: 'LocalNoto', 'Noto Sans SC', 'WenQuanYi Zen Hei', 'WenQuanYi Micro Hei',
+                  'Microsoft YaHei', 'SimHei', 'PingFang SC', 'Hiragino Sans GB',
+                  'Droid Sans Fallback', system-ui, sans-serif; }
+          </style>
+        </defs>
         <rect width="100%" height="100%" fill="#f8f9fa"/>
-        <text x="50%" y="10%" font-family="system-ui, sans-serif" font-size="24" fill="#333" text-anchor="middle">分镜 ${targetShot.shotId}</text>
-        <text x="50%" y="20%" font-family="system-ui, sans-serif" font-size="16" fill="#666" text-anchor="middle">${targetShot.cameraMove || '固定'} | 第${targetShot.actNumber}幕 | ${targetShot.duration || 5}秒 | ${newRatio}</text>
+        <text x="50%" y="10%" class="cn" font-size="24" fill="#333" text-anchor="middle">分镜 ${targetShot.shotId}</text>
+        <text x="50%" y="20%" class="cn" font-size="16" fill="#666" text-anchor="middle">${targetShot.cameraMove || '固定'} | 第${targetShot.actNumber}幕 | ${targetShot.duration || 5}秒 | ${newRatio}</text>
         ${charColors.map((c: any, i: number) =>
           `<circle cx="${200 + i * 300}" cy="300" r="80" fill="${c.color}" opacity="0.3" stroke="${c.color}" stroke-width="4"/>
-           <text x="${200 + i * 300}" y="300" font-family="system-ui, sans-serif" font-size="20" fill="${c.color}" text-anchor="middle" dy=".3em">角色${i + 1}</text>`
+           <text x="${200 + i * 300}" y="300" class="cn" font-size="20" fill="${c.color}" text-anchor="middle" dy=".3em">角色${i + 1}</text>`
         ).join('')}
         <rect x="50" y="450" width="${svgW - 100}" height="80" fill="none" stroke="#333" stroke-width="2" stroke-dasharray="8,4"/>
-        <text x="50%" y="490" font-family="system-ui, sans-serif" font-size="14" fill="#333" text-anchor="middle">${safeDesc}</text>
+        <text x="50%" y="490" class="cn" font-size="14" fill="#333" text-anchor="middle">${safeDesc}</text>
       </svg>
     `
     const buffer = await sharp(Buffer.from(svg)).png().toBuffer()

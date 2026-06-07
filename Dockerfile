@@ -2,7 +2,7 @@
 FROM node:18-alpine AS base
 
 # 安装系统依赖（ffmpeg、Python、构建工具）
-RUN apk add --no-cache ffmpeg python3 make g++ libc6-compat
+RUN apk add --no-cache ffmpeg python3 make g++ libc6-compat font-wqy-zenhei
 
 WORKDIR /app
 

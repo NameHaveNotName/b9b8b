@@ -840,12 +840,25 @@ export async function generateMockImage(prompt: string): Promise<GenerateImageRe
   const safePrompt = (prompt || '').slice(0, 50).replace(/[<>&]/g, '')
   const svg = `
     <svg width="1024" height="1536" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <style>
+          @font-face {
+            font-family: 'LocalNoto';
+            src: local('Noto Sans SC'), local('WenQuanYi Zen Hei'), local('WenQuanYi Micro Hei'),
+                 local('Microsoft YaHei'), local('SimHei'), local('PingFang SC'),
+                 local('Hiragino Sans GB'), local('Droid Sans Fallback');
+          }
+          .cn { font-family: 'LocalNoto', 'Noto Sans SC', 'WenQuanYi Zen Hei', 'WenQuanYi Micro Hei',
+                'Microsoft YaHei', 'SimHei', 'PingFang SC', 'Hiragino Sans GB',
+                'Droid Sans Fallback', sans-serif; }
+        </style>
+      </defs>
       <rect width="100%" height="100%" fill="#1a1a2e"/>
       <rect x="40" y="40" width="944" height="1456" fill="none" stroke="#f59e0b" stroke-width="6" stroke-dasharray="20,10"/>
-      <text x="50%" y="42%" font-family="sans-serif" font-size="48" fill="white" text-anchor="middle">AI 生成图像</text>
-      <text x="50%" y="49%" font-family="sans-serif" font-size="22" fill="white" text-anchor="middle" opacity="0.7">${safePrompt}</text>
-      <text x="50%" y="57%" font-family="sans-serif" font-size="22" fill="#f59e0b" text-anchor="middle" font-weight="bold">⚠️ MOCK 预览图（真实 API 失败）</text>
-      <text x="50%" y="62%" font-family="sans-serif" font-size="16" fill="#fbbf24" text-anchor="middle" opacity="0.8">请检查模型可用性 / API 配额</text>
+      <text x="50%" y="42%" class="cn" font-size="48" fill="white" text-anchor="middle">AI 生成图像</text>
+      <text x="50%" y="49%" class="cn" font-size="22" fill="white" text-anchor="middle" opacity="0.7">${safePrompt}</text>
+      <text x="50%" y="57%" class="cn" font-size="22" fill="#f59e0b" text-anchor="middle" font-weight="bold">⚠️ MOCK 预览图（真实 API 失败）</text>
+      <text x="50%" y="62%" class="cn" font-size="16" fill="#fbbf24" text-anchor="middle" opacity="0.8">请检查模型可用性 / API 配额</text>
     </svg>
   `
   const buffer = await sharp(Buffer.from(svg)).png().toBuffer()
