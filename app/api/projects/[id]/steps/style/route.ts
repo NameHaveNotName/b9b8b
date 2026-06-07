@@ -15,6 +15,83 @@ import { STEP_COSTS } from '@/lib/points-config'
 
 const styleQueue = createQueue('style-generation')
 
+/**
+ * 生成风格提示词（供 generate-prompts 和 generate-images 共用）
+ * 成功返回 { prompts, styleOptions }，失败抛出异常（调用方需 catch 并 failStep）
+ */
+async function generateStylePrompts(
+  project: any,
+  frameworkStep: any,
+  stepId: string
+): Promise<{ prompts: any[]; styleOptions: any[] }> {
+  const framework = project.framework || (frameworkStep.outputData as any)
+  const storyBrief = framework?.synopsis || framework?.storyBrief || ''
+  const visualKeywords = framework?.visualStyle || framework?.styleGuide || framework?.visualKeywords || ''
+  const mood = framework?.mood || framework?.atmosphere || ''
+
+  const prompt = loadPromptTemplate('style-generation', {
+    STORY_BRIEF: storyBrief,
+    VISUAL_KEYWORDS: visualKeywords,
+    MOOD: mood,
+  })
+  const textClient = await getTextClient()
+  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+  const parsed = extractJsonFromMarkdown(resultText)
+
+  let styleOptions: any[] = []
+  if (Array.isArray(parsed)) {
+    styleOptions = parsed
+  } else if (Array.isArray(parsed.styles)) {
+    styleOptions = parsed.styles.map((s: any, i: number) => ({
+      id: s.id || String(i + 1),
+      styleName: s.styleName || s.label || `风格 ${i + 1}`,
+      styleDescription: s.styleDescription || s.description || '',
+      prompt: s.prompt || s.stylePrompt || '',
+      modelNo: s.modelNo,
+    }))
+  } else if (Array.isArray(parsed.styleOptions)) {
+    styleOptions = parsed.styleOptions
+  }
+
+  styleOptions = assignModelNoFallback(styleOptions)
+  console.log('[STYLE-MODEL-ASSIGN] LLM 分配结果:', styleOptions.map((s: any) =>
+    ({ name: s.styleName, modelNo: s.modelNo })
+  ))
+
+  const prompts = styleOptions.map((s, i) => ({
+    id: `prompt_${i + 1}`,
+    chineseDesc: s.styleDescription || s.description || '',
+    englishPrompt: s.prompt || s.stylePrompt || '',
+    target: `style_sample_${i + 1}`,
+    styleName: s.styleName || `风格 ${i + 1}`,
+    styleId: s.id || String(i + 1),
+    modelNo: s.modelNo,
+  }))
+
+  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  await prisma.workflowStep.update({
+    where: { id: stepId },
+    data: {
+      status: 'PENDING' as any,
+      outputData: {
+        ...(step?.outputData as any || {}),
+        prompts,
+        styleOptions: styleOptions.map((s, i) => ({
+          ...s,
+          id: s.id || String(i + 1),
+          imageUrl: null,
+        })),
+        selectedStyleId: null,
+        styleRefUrl: null,
+        generatedCount: 0,
+      },
+    },
+  })
+
+  console.log(`[STYLE-PROMPT] 生成 ${prompts.length} 条提示词`)
+  return { prompts, styleOptions }
+}
+
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
   if (!userId) {
@@ -53,74 +130,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (action === 'generate-prompts') {
     try {
       console.log('[STYLE-PROMPT] 收到 generate-prompts 请求')
-
-      const framework = project.framework || (frameworkStep.outputData as any)
-      const storyBrief = framework?.synopsis || framework?.storyBrief || ''
-      const visualKeywords = framework?.visualStyle || framework?.styleGuide || framework?.visualKeywords || ''
-      const mood = framework?.mood || framework?.atmosphere || ''
-
-      const prompt = loadPromptTemplate('style-generation', {
-        STORY_BRIEF: storyBrief,
-        VISUAL_KEYWORDS: visualKeywords,
-        MOOD: mood,
-      })
-      const textClient = await getTextClient()
-      const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
-      const parsed = extractJsonFromMarkdown(resultText)
-
-      let styleOptions: any[] = []
-      if (Array.isArray(parsed)) {
-        styleOptions = parsed
-      } else if (Array.isArray(parsed.styles)) {
-        styleOptions = parsed.styles.map((s: any, i: number) => ({
-          id: s.id || String(i + 1),
-          styleName: s.styleName || s.label || `风格 ${i + 1}`,
-          styleDescription: s.styleDescription || s.description || '',
-          prompt: s.prompt || s.stylePrompt || '',
-          modelNo: s.modelNo,
-        }))
-      } else if (Array.isArray(parsed.styleOptions)) {
-        styleOptions = parsed.styleOptions
-      }
-
-      // 工作指令.txt（2026-05-24）：modelNo 校验与兜底分配
-      styleOptions = assignModelNoFallback(styleOptions)
-      console.log('[STYLE-MODEL-ASSIGN] LLM 分配结果:', styleOptions.map((s: any) =>
-        ({ name: s.styleName, modelNo: s.modelNo })
-      ))
-
-      // 生成中英文提示词（保留 modelNo）
-      const prompts = styleOptions.map((s, i) => ({
-        id: `prompt_${i + 1}`,
-        chineseDesc: s.styleDescription || s.description || '',
-        englishPrompt: s.prompt || s.stylePrompt || '',
-        target: `style_sample_${i + 1}`,
-        styleName: s.styleName || `风格 ${i + 1}`,
-        styleId: s.id || String(i + 1),
-        modelNo: s.modelNo,
-      }))
-
-      // 暂存到 outputData.prompts
-      await prisma.workflowStep.update({
-        where: { id: step.id },
-        data: {
-          status: 'PENDING' as any,
-          outputData: {
-            ...(step.outputData as any || {}),
-            prompts,
-            styleOptions: styleOptions.map((s, i) => ({
-              ...s,
-              id: s.id || String(i + 1),
-              imageUrl: null,
-            })),
-            selectedStyleId: null,
-            styleRefUrl: null,
-            generatedCount: 0,
-          },
-        },
-      })
-
-      console.log(`[STYLE-PROMPT] 生成 ${prompts.length} 条提示词，等待用户确认`)
+      const { prompts } = await generateStylePrompts(project, frameworkStep, step.id)
       return NextResponse.json({
         success: true,
         status: 'PROMPT_READY',
@@ -156,27 +166,45 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     console.log('[STYLE-IMAGE] existingOutput keys:', Object.keys(existingOutput))
     console.log('[STYLE-IMAGE] prompts count:', prompts.length)
     console.log('[STYLE-IMAGE] step.status:', step.status, 'step.id:', step.id)
-    if (prompts.length === 0) {
-      console.error('[STYLE-IMAGE] No prompts found. existingOutput:', JSON.stringify(existingOutput).slice(0, 500))
-      return NextResponse.json({ error: 'No prompts found. Please call generate-prompts first.' }, { status: 400 })
+    // 工作指令.txt（2026-06-07）：prompts 为空时自动触发提示词生成，不返回 400
+    let resolvedPrompts = prompts
+    let resolvedStyleOptions = existingOutput.styleOptions || []
+    if (resolvedPrompts.length === 0) {
+      console.warn('[STYLE-IMAGE] No prompts found, auto-triggering prompt generation')
+      try {
+        const generated = await generateStylePrompts(project, frameworkStep, step.id)
+        resolvedPrompts = generated.prompts
+        resolvedStyleOptions = generated.styleOptions
+        console.log(`[STYLE-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
+      } catch (promptErr: any) {
+        const isAbort = promptErr?.name === 'AbortError' || /aborted|timeout|timed out/i.test(promptErr?.message || '')
+        const errorMessage = isAbort
+          ? '提示词生成超时（模型响应较慢），请稍后重试'
+          : promptErr.message
+        console.error(`[STYLE-IMAGE] Auto-prompt generation failed: ${errorMessage}`, promptErr?.stack?.slice(0, 300))
+        await failStep(step.id, errorMessage)
+        return NextResponse.json({ error: 'API_001', message: errorMessage }, { status: 500 })
+      }
     }
 
-    // force=true 时清空旧资产
+    // force=true 时清空旧资产（必须重新读取最新 outputData，避免覆盖自动生成的 prompts）
     if (force) {
       console.log('[STYLE-IMAGE] force=true, clearing old assets')
       await prisma.asset.deleteMany({
         where: { projectId: params.id, step: { stepType: 'STYLE' } }
       })
+      const latestStep = await prisma.workflowStep.findUnique({ where: { id: step.id } })
+      const latestOutput = (latestStep?.outputData as any) || existingOutput
       await prisma.workflowStep.update({
         where: { id: step.id },
-        data: { status: 'PENDING' as any, outputData: existingOutput, errorMessage: null },
+        data: { status: 'PENDING' as any, outputData: latestOutput, errorMessage: null },
       })
     }
 
     await startStep(step.id)
 
     // 构建 styleOptions 用于生图（携带 modelNo）
-    const styleOptions = prompts.map((p: any) => ({
+    const styleOptions = resolvedPrompts.map((p: any) => ({
       id: p.styleId || p.id,
       styleName: p.styleName,
       styleDescription: p.chineseDesc,
@@ -249,7 +277,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }
 
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      console.log(`[STYLE-IMAGE] 用户确认，开始生图，共 ${prompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
+      console.log(`[STYLE-IMAGE] 用户确认，开始生图，共 ${resolvedPrompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
       return NextResponse.json({
         success: true,
         message: queued ? '风格生成任务已入队' : '风格生成任务已在后台启动',

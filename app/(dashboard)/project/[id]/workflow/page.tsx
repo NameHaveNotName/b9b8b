@@ -392,14 +392,14 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
               if (currentStep.stepType === 'FRAMEWORK') {
                 executeStep('FRAMEWORK', { regenerate: true })
               } else if (['STYLE', 'CHARACTER', 'CONCEPT', 'STORYBOARD', 'KEYFRAMES'].includes(currentStep.stepType)) {
-                // 工作指令.txt（2026-06-04）：有 prompts 时只重新生图，保留用户编辑的提示词
+                // 工作指令.txt（2026-06-07）：重试必须走完整流程，不能跳过提示词生成
                 const hasPrompts = currentStep.outputData?.prompts?.length > 0
                 if (hasPrompts) {
                   const defaultRatio = currentStep.outputData?.aspectRatio || '16:9'
                   const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
-                  executeStep(currentStep.stepType, { action: 'generate-images', aspectRatio: defaultRatio, imageModel: defaultModel })
+                  executeStep(currentStep.stepType, { action: 'generate-images', force: true, aspectRatio: defaultRatio, imageModel: defaultModel })
                 } else {
-                  executeStep(currentStep.stepType)
+                  executeStep(currentStep.stepType, { action: 'generate-prompts' })
                 }
               } else {
                 executeStep(currentStep.stepType)
@@ -2204,14 +2204,14 @@ function StylePanel({
         />
         <button
           onClick={() => {
-            // 工作指令.txt（2026-06-04）：有 prompts 时只重新生图，保留用户编辑的提示词
+            // 工作指令.txt（2026-06-07）：重试必须走完整流程，不能跳过提示词生成
             const hasPrompts = step.outputData?.prompts?.length > 0
             if (hasPrompts) {
               const defaultRatio = step.outputData?.aspectRatio || '16:9'
               const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
-              onExecute('STYLE', { action: 'generate-images', aspectRatio: defaultRatio, imageModel: defaultModel })
+              onExecute('STYLE', { action: 'generate-images', force: true, aspectRatio: defaultRatio, imageModel: defaultModel })
             } else {
-              onExecute('STYLE')
+              onExecute('STYLE', { action: 'generate-prompts' })
             }
           }}
           disabled={isExecuting}
