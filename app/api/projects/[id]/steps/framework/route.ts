@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
@@ -577,13 +578,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
 
     // 启动后台自动深化（Phase 1-3：角色 → 故事梗概+幕结构 → 环境）
-    setImmediate(async () => {
-      try {
-        await runDeepening(params.id, step.id, framework)
-      } catch (e: any) {
-        console.error('[FRAMEWORK] 后台深化失败:', e.message)
-      }
-    })
+    waitUntil(
+      (async () => {
+        try {
+          await runDeepening(params.id, step.id, framework)
+        } catch (e: any) {
+          console.error('[FRAMEWORK] 后台深化失败:', e.message)
+        }
+      })()
+    )
 
     // 文本类步骤也应保存 outputData 到 Asset，确保资产库能展示
     const existingAsset = await prisma.asset.findFirst({

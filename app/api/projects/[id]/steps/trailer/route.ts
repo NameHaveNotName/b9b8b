@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { createQueue, isDemoMode as queueIsDemoMode } from '@/lib/queue'
@@ -170,8 +171,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
 
-    // 工作指令.txt（Round 6 任务二）：BullMQ 入队 + setImmediate 兜底（修 "Failed to fetch"）
-    // 仅当显式开启 TRAILER_USE_QUEUE=1 时才走 BullMQ；否则默认 setImmediate 后台处理，
+    // 工作指令.txt（2026-06-07）：BullMQ 入队 + after() 兜底（修 "Failed to fetch" + setImmediate 在 Vercel 不执行）
+    // 仅当显式开启 TRAILER_USE_QUEUE=1 时才走 BullMQ；否则默认 after() 后台处理，
     // 避免 Redis 不可用时 videoQueue.add() 因 enableOfflineQueue: false 抛错导致 POST 挂起。
     const conceptImageKeys = filteredAssets.map((a) => a.storageKey)
     const useQueue = process.env.TRAILER_USE_QUEUE === '1'
@@ -189,15 +190,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         queued = true
         console.log(`[TRAILER-POST] 入队成功 job.id=${job.id}`)
       } catch (queueErr: any) {
-        console.warn('[TRAILER-POST] BullMQ queue failed, fallback to setImmediate:', queueErr.message)
+        console.warn('[TRAILER-POST] BullMQ queue failed, fallback to after():', queueErr.message)
       }
     }
 
     if (!queued) {
-      console.log(`[TRAILER-POST] 走 setImmediate 兜底分支`)
-      setImmediate(() => {
-        processTrailerInline(step.id, params.id, conceptImageKeys)
-      })
+      console.log(`[TRAILER-POST] 走 waitUntil 兜底分支`)
+      waitUntil(processTrailerInline(step.id, params.id, conceptImageKeys))
     }
 
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })

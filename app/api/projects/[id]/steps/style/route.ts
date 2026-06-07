@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300 // Vercel max 300s, 给 setImmediate 后台任务足够时间
+export const maxDuration = 300 // Vercel max 300s, 给 after() 后台任务足够时间
 
 import { NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
@@ -237,43 +238,45 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }
 
       if (!queued) {
-        console.log(`[STYLE-IMAGE] 启动 setImmediate 后台任务，stepId=${step.id}`)
-        setImmediate(async () => {
-          console.log(`[STYLE-IMAGE] setImmediate 回调开始执行，stepId=${step.id}`)
-          try {
-            await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel)
-            console.log(`[STYLE-IMAGE] setImmediate 回调成功完成，stepId=${step.id}`)
-          } catch (e: any) {
-            // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
-            const errMessage = e?.message || 'background style generation failed'
-            const errDetail = (e?.stack || '').toString().slice(0, 500)
-            console.error('[STYLE-IMAGE] Background processing failed:', errMessage, errDetail)
+        console.log(`[STYLE-IMAGE] 启动 waitUntil 后台任务，stepId=${step.id}`)
+        waitUntil(
+          (async () => {
+            console.log(`[STYLE-IMAGE] waitUntil 回调开始执行，stepId=${step.id}`)
             try {
-              await failStep(step.id, `${errMessage} | detail: ${errDetail}`)
-            } catch (failErr: any) {
-              console.error('[STYLE-IMAGE] failStep also failed:', failErr?.message)
-              // 兜底：直接更新数据库
+              await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel)
+              console.log(`[STYLE-IMAGE] waitUntil 回调成功完成，stepId=${step.id}`)
+            } catch (e: any) {
+              // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
+              const errMessage = e?.message || 'background style generation failed'
+              const errDetail = (e?.stack || '').toString().slice(0, 500)
+              console.error('[STYLE-IMAGE] Background processing failed:', errMessage, errDetail)
               try {
-                await prisma.workflowStep.update({
-                  where: { id: step.id },
-                  data: { status: 'FAILED' as any, errorMessage: errMessage.slice(0, 200) },
+                await failStep(step.id, `${errMessage} | detail: ${errDetail}`)
+              } catch (failErr: any) {
+                console.error('[STYLE-IMAGE] failStep also failed:', failErr?.message)
+                // 兜底：直接更新数据库
+                try {
+                  await prisma.workflowStep.update({
+                    where: { id: step.id },
+                    data: { status: 'FAILED' as any, errorMessage: errMessage.slice(0, 200) },
+                  })
+                } catch {}
+              }
+              // 记录失败日志
+              try {
+                await logOperation({
+                  userId,
+                  projectId: params.id,
+                  workflowStepId: step.id,
+                  actionType: 'error',
+                  cost: 0,
+                  status: 'failed',
+                  metadata: { error: errMessage, detail: errDetail, phase: 'background-generation' },
                 })
               } catch {}
             }
-            // 记录失败日志
-            try {
-              await logOperation({
-                userId,
-                projectId: params.id,
-                workflowStepId: step.id,
-                actionType: 'error',
-                cost: 0,
-                status: 'failed',
-                metadata: { error: errMessage, detail: errDetail, phase: 'background-generation' },
-              })
-            } catch {}
-          }
-        })
+          })()
+        )
       }
 
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
@@ -381,7 +384,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       data: { outputData },
     })
 
-    // 3. 任务派发：默认走 setImmediate 后台处理（保证无 Redis/无独立 Worker 也能完成）。
+    // 3. 任务派发：默认走 after() 后台处理（保证无 Redis/无独立 Worker 也能完成）。
     //    仅当显式开启 STYLE_USE_QUEUE=1 时才尝试 BullMQ，避免"入队成功但 Worker 未启动"导致卡 95%。
     const useQueue = process.env.STYLE_USE_QUEUE === '1'
     let queued = false
@@ -401,48 +404,50 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         queued = true
         console.log('[STYLE] Job queued via BullMQ')
       } catch (queueErr: any) {
-        console.warn('[STYLE] BullMQ queue failed, fallback to setImmediate:', queueErr.message)
+        console.warn('[STYLE] BullMQ queue failed, fallback to after():', queueErr.message)
       }
     }
 
     if (!queued) {
       // 后台直接处理：HTTP 立即返回，生成在后台执行；processStyleGeneration 内部已有
       // try/catch + failStep，绝不会让 step 卡在 PROCESSING。
-      console.log(`[STYLE] 启动 setImmediate 后台任务（compat），stepId=${step.id}`)
-      setImmediate(async () => {
-        console.log(`[STYLE] setImmediate 回调开始执行（compat），stepId=${step.id}`)
-        try {
-          await processStyleGeneration(step.id, params.id, styleOptions)
-          console.log(`[STYLE] setImmediate 回调成功完成（compat），stepId=${step.id}`)
-        } catch (e: any) {
-          // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
-          const errMessage = e?.message || 'background style generation failed'
-          const errDetail = (e?.stack || '').toString().slice(0, 500)
-          console.error('[STYLE] Background processing failed:', errMessage, errDetail)
+      console.log(`[STYLE] 启动 waitUntil 后台任务（compat），stepId=${step.id}`)
+      waitUntil(
+        (async () => {
+          console.log(`[STYLE] waitUntil 回调开始执行（compat），stepId=${step.id}`)
           try {
-            await failStep(step.id, `${errMessage} | detail: ${errDetail}`)
-          } catch (failErr: any) {
-            console.error('[STYLE] failStep also failed:', failErr?.message)
+            await processStyleGeneration(step.id, params.id, styleOptions)
+            console.log(`[STYLE] waitUntil 回调成功完成（compat），stepId=${step.id}`)
+          } catch (e: any) {
+            // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
+            const errMessage = e?.message || 'background style generation failed'
+            const errDetail = (e?.stack || '').toString().slice(0, 500)
+            console.error('[STYLE] Background processing failed:', errMessage, errDetail)
             try {
-              await prisma.workflowStep.update({
-                where: { id: step.id },
-                data: { status: 'FAILED' as any, errorMessage: errMessage.slice(0, 200) },
+              await failStep(step.id, `${errMessage} | detail: ${errDetail}`)
+            } catch (failErr: any) {
+              console.error('[STYLE] failStep also failed:', failErr?.message)
+              try {
+                await prisma.workflowStep.update({
+                  where: { id: step.id },
+                  data: { status: 'FAILED' as any, errorMessage: errMessage.slice(0, 200) },
+                })
+              } catch {}
+            }
+            try {
+              await logOperation({
+                userId,
+                projectId: params.id,
+                workflowStepId: step.id,
+                actionType: 'error',
+                cost: 0,
+                status: 'failed',
+                metadata: { error: errMessage, detail: errDetail, phase: 'background-generation-compat' },
               })
             } catch {}
           }
-          try {
-            await logOperation({
-              userId,
-              projectId: params.id,
-              workflowStepId: step.id,
-              actionType: 'error',
-              cost: 0,
-              status: 'failed',
-              metadata: { error: errMessage, detail: errDetail, phase: 'background-generation-compat' },
-            })
-          } catch {}
-        }
-      })
+        })()
+      )
     }
 
     await logOperation({
