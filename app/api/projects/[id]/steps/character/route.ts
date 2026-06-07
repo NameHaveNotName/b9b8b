@@ -210,6 +210,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
             aspectRatio,
             imageModel
           )
+          // 防御：确保 result 包含必需的 url 和 storageKey
+          if (!result?.url || !result?.storageKey) {
+            console.error(`[CHARACTER-IMAGE] 角色 ${promptItem.characterName} 返回结果缺少 url/storageKey:`, JSON.stringify(result))
+            failedCharacters.push(promptItem.characterName)
+            continue
+          }
           const asset = await prisma.asset.create({
             data: {
               projectId: params.id,
@@ -231,6 +237,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
               },
             },
           })
+          console.log(`[CHARACTER-IMAGE] Asset 创建成功: assetId=${asset.id}, stepId=${step.id}, char=${promptItem.characterName}, url=${result.url.slice(0, 60)}`)
           portraits.push({ character: enrichedCharacter, assetId: asset.id, url: result.url, llmPrompt: promptItem.englishPrompt })
         } catch (imgErr: any) {
           console.error(`[CHARACTER-IMAGE] 角色 ${promptItem.characterName} 生图失败:`, imgErr?.message)
@@ -247,7 +254,9 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
       await completeStep(step.id, { portraits, characterCount: portraits.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      console.log(`[CHARACTER-IMAGE] 完成: 成功 ${portraits.length}/${resolvedPrompts.length} 条，失败: ${failedCharacters.join(', ') || '无'}`)
+      // 验证数据库中 Asset 是否真实存在
+      const dbAssetCount = await prisma.asset.count({ where: { stepId: step.id } })
+      console.log(`[CHARACTER-IMAGE] 完成: 成功 ${portraits.length}/${resolvedPrompts.length} 条，失败: ${failedCharacters.join(', ') || '无'}，数据库 Asset 数: ${dbAssetCount}`)
       return NextResponse.json({ success: true, data: { portraits, characterCount: portraits.length } })
     } catch (e: any) {
       await failStep(step.id, e.message)
