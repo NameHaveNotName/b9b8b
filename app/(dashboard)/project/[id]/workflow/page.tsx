@@ -3113,8 +3113,8 @@ function CharacterPanel({
                 <p className="text-sm font-medium text-stone-800">
                   {asset.metadata?.characterName}
                 </p>
-                <p className="text-xs text-stone-500">
-                  {asset.metadata?.characterId}
+                <p className="text-xs text-stone-400 line-clamp-2">
+                  {asset.metadata?.chineseDesc || asset.metadata?.characterId}
                 </p>
                 {/* Round 6 Phase 2+5：可展开/可编辑的英文提示词 */}
                 {asset.metadata?.llmPrompt && (

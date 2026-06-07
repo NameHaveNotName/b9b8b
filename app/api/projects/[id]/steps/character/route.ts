@@ -37,9 +37,10 @@ async function generateCharacterPrompts(
   const prompts = characters.map((character, i) => {
     const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
     const charPrompt = charData?.imagePrompt || ''
+    const charDesc = charData?.description || character.description || `${character.name}（${character.role}）`
     return {
       id: `prompt_${i + 1}`,
-      chineseDesc: character.description || '',
+      chineseDesc: charDesc,
       englishPrompt: charPrompt || `Character portrait: ${character.name}, ${character.role}`,
       target: `character_${character.id}`,
       characterName: character.name,
@@ -220,6 +221,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
               metadata: {
                 characterId: promptItem.characterId,
                 characterName: promptItem.characterName,
+                chineseDesc: promptItem.chineseDesc,
                 styleRefUrl: styleRefUrl || null,
                 llmPrompt: promptItem.englishPrompt,
                 aspectRatio,
@@ -353,6 +355,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
             metadata: {
               characterId: character.id,
               characterName: character.name,
+              chineseDesc: character.description || `${character.name}（${character.role}）`,
               styleRefUrl: styleRefUrl || null,
               llmPrompt: charPrompt,
               aspectRatio: '16:9',

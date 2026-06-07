@@ -104,6 +104,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         metadata: {
           characterId: character.id,
           characterName: character.name,
+          chineseDesc: latestPrompt?.chineseDesc || character.description || `${character.name}（${character.role || '角色'}）`,
           styleRefUrl,
           llmPrompt: latestPrompt?.englishPrompt || character.description,
           aspectRatio: newRatio,
