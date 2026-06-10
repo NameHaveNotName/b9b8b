@@ -144,6 +144,13 @@ model Project {
   assets            Asset[]
   comparisons       Comparison[]
   creativeIterations CreativeIteration[]
+  videoSegments     VideoSegment[]
+
+  // 合成视频相关字段
+  combinedVideoUrl    String?   // 合成后的完整视频 URL
+  combinedVideoStatus String?   @default("pending") // pending | processing | completed | failed
+  bgmUrl              String?   // 宣传片背景音乐 URL
+
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -267,6 +274,29 @@ model OperationLog {
 }
 
 // 创意扩散深化迭代历史版本
+model VideoSegment {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shotId       String   // 对应分镜 shot_001
+  stepName     String   // 'TRAILER' | 'VIDEO_DIRECT' | 'VIDEO_RENDER'
+  prompt       String   // 英文视频生成提示词
+  caption      String?  // 中文画面描述（前端展示用）
+  videoUrl     String?  // 生成后的视频 URL（R2 签名 URL）
+  storageKey   String?  // R2 存储 key
+  status       String   @default("pending") // pending | generating | completed | failed
+  sequence     Int      // 片段顺序（用于 ffmpeg concat）
+  duration     Int?     // 片段时长（秒）
+  isMock       Boolean  @default(false) // 是否 Ken Burns 兜底
+  errorMessage String?  // 失败原因
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([projectId, status])
+  @@index([projectId, stepName])
+  @@index([projectId, sequence])
+}
+
 model CreativeIteration {
   id                  String   @id @default(cuid())
   projectId           String   @map("project_id")

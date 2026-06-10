@@ -1,15 +1,131 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
-import { createQueue, isDemoMode as queueIsDemoMode } from '@/lib/queue'
+import { createQueue } from '@/lib/queue'
 import { startStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { generateSegmentPrompts, generateOneVideoSegment, composeVideo } from '@/lib/video-segment-utils'
 
-// [DASHBOARD-FIX] DEMO 模式下使用 createQueue 返回 Mock，避免 ECONNREFUSED
 const videoQueue = createQueue('video-generation')
 
+/** 获取 storyboard shots 和 keyframes */
+async function getStoryboardAndKeyframes(projectId: string) {
+  const storyboardStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType: 'STORYBOARD' } },
+  })
+  const shots = (storyboardStep?.outputData as any)?.shots || []
+
+  const keyframeStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType: 'KEYFRAMES' } },
+  })
+  const keyframesData = keyframeStep?.outputData as any || {}
+  const keyframes = keyframesData.keyframes || keyframesData.results || []
+
+  return { shots, keyframes }
+}
+
+/** 后台生成单个 segment */
+async function backgroundGenerateDirectSegment(
+  segmentId: string,
+  projectId: string,
+  prompt: string,
+  firstFrameUrl: string,
+  lastFrameUrl: string | null,
+  duration: number,
+  videoModel?: string
+) {
+  try {
+    console.log(`[DIRECT-SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
+    const result = await generateOneVideoSegment({
+      segmentId,
+      projectId,
+      stepName: 'VIDEO_DIRECT',
+      prompt,
+      imageUrl: firstFrameUrl,
+      duration,
+      videoModel,
+    })
+
+    await prisma.videoSegment.update({
+      where: { id: segmentId },
+      data: {
+        videoUrl: result.url,
+        storageKey: result.storageKey,
+        status: 'completed',
+        duration: result.duration,
+        isMock: result.isMock,
+      },
+    })
+
+    await prisma.asset.create({
+      data: {
+        projectId,
+        type: 'VIDEO',
+        mimeType: 'video/mp4',
+        storageKey: result.storageKey,
+        url: result.url,
+        metadata: {
+          segmentId,
+          duration: result.duration,
+          isMock: result.isMock,
+          stepType: 'VIDEO_DIRECT',
+        },
+      },
+    })
+
+    console.log(`[DIRECT-SEGMENT-BG] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
+  } catch (e: any) {
+    console.error(`[DIRECT-SEGMENT-BG] 失败 segmentId=${segmentId}:`, e?.message)
+    await prisma.videoSegment.update({
+      where: { id: segmentId },
+      data: {
+        status: 'failed',
+        errorMessage: (e?.message || '生成失败').slice(0, 200),
+      },
+    })
+  }
+}
+
+/** 后台合成视频 */
+async function backgroundComposeDirectVideo(projectId: string) {
+  try {
+    console.log(`[DIRECT-COMPOSE-BG] 开始合成 projectId=${projectId}`)
+    const segments = await prisma.videoSegment.findMany({
+      where: { projectId, stepName: 'VIDEO_DIRECT', status: 'completed' },
+      orderBy: { sequence: 'asc' },
+    })
+
+    if (segments.length === 0) {
+      throw new Error('没有已完成的片段可合成')
+    }
+
+    const result = await composeVideo({
+      projectId,
+      stepName: 'VIDEO_DIRECT',
+      segments: segments.map((s) => ({
+        id: s.id,
+        storageKey: s.storageKey,
+        videoUrl: s.videoUrl,
+        duration: s.duration,
+      })),
+    })
+
+    console.log(`[DIRECT-COMPOSE-BG] 合成完成 videoUrl=${result.videoUrl}`)
+  } catch (e: any) {
+    console.error(`[DIRECT-COMPOSE-BG] 合成失败:`, e?.message)
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { combinedVideoStatus: 'failed' },
+    })
+  }
+}
+
+// ============================================================
+// POST: 主入口（支持 action 分发）
+// ============================================================
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
   if (!userId) {
@@ -17,7 +133,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const project = await prisma.project.findUnique({ where: { id: params.id } })
-
   if (!project || project.userId !== userId) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
   }
@@ -33,36 +148,66 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
   }
 
+  const body = await req.json().catch(() => ({}))
+  const action = body?.action || 'legacy'
+  const videoModel = body?.videoModel
+
+  console.log(`[VIDEO-DIRECT-POST] action=${action} projectId=${params.id}`)
+
+  // -------------------- 向后兼容：旧版批量入队 --------------------
+  if (action === 'legacy') {
+    return handleLegacyDirect(params.id, step.id, body)
+  }
+
+  // -------------------- 新版：生成 Segment Prompts --------------------
+  if (action === 'generate-segment-prompts') {
+    return handleGenerateDirectPrompts(params.id, step.id)
+  }
+
+  // -------------------- 新版：单段生成 --------------------
+  if (action === 'generate-segment-video') {
+    return handleGenerateDirectSegment(params.id, step.id, body)
+  }
+
+  // -------------------- 新版：批量生成 --------------------
+  if (action === 'generate-all-segments') {
+    return handleGenerateAllDirectSegments(params.id, step.id, body)
+  }
+
+  // -------------------- 新版：合成视频 --------------------
+  if (action === 'compose-video') {
+    return handleComposeDirectVideo(params.id, step.id)
+  }
+
+  return NextResponse.json({ error: 'UNKNOWN_ACTION', message: `未知 action: ${action}` }, { status: 400 })
+}
+
+// ============================================================
+// 各 action 处理函数
+// ============================================================
+
+/** 旧版批量入队（向后兼容） */
+async function handleLegacyDirect(projectId: string, stepId: string, body: any) {
+  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  if (!step) {
+    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
+  }
+
   if (step.status === 'COMPLETED' && step.outputData) {
-    console.log('[VIDEO_DIRECT] step already completed, returning cached result')
     return NextResponse.json({ success: true, data: step.outputData, cached: true })
   }
 
-  // 工作指令.txt（2026-05-26 Phase 6）：接收前端传递的视频模型参数
-  let videoModel: string | undefined
-  try {
-    const body = await req.json()
-    videoModel = body?.videoModel
-    if (videoModel) {
-      console.log(`[VIDEO-DIRECT] 前端选择模型: ${videoModel}`)
-    }
-  } catch {
-    // GET 或没有 body 的请求，忽略
+  const videoModel = body?.videoModel
+
+  const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
+  if (shots.length === 0) {
+    return NextResponse.json(
+      { error: 'WORKFLOW_006', message: '请先完成分镜设计' },
+      { status: 400 }
+    )
   }
 
-  // Phase 5: 路由层输入检测
-  const storyboardStep = await prisma.workflowStep.findUnique({
-    where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } }
-  })
-  const storyboardShots = (storyboardStep?.outputData as any)?.shots || []
-
-  const keyframeStep = await prisma.workflowStep.findUnique({
-    where: { projectId_stepType: { projectId: params.id, stepType: 'KEYFRAMES' } },
-    include: { resultAssets: true }
-  })
-
-  // Phase 5: 从分镜设计获取首帧
-  const firstFrames = storyboardShots.filter((s: any) => s.firstFrameUrl)
+  const firstFrames = shots.filter((s: any) => s.firstFrameUrl)
   if (firstFrames.length === 0) {
     return NextResponse.json(
       { error: 'WORKFLOW_006', message: '请先完成分镜设计的视频生成模式，生成起始帧' },
@@ -70,83 +215,260 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     )
   }
 
-  // Phase 5: 从尾帧步骤获取尾帧
-  const keyframesData = keyframeStep?.outputData as any || {}
-  const keyframes = keyframesData.keyframes || keyframesData.results || []
-  const hasLastFrames = keyframes.some((k: any) => k.lastFrameUrl)
-  const strategy = hasLastFrames ? 'first-last' : 'first-only'
-  console.log(`[VIDEO-DIRECT] 生成策略: ${strategy}`)
-
-  if (!hasLastFrames) {
-    console.log('[VIDEO-DIRECT] 未检测到尾帧，使用单首帧生成视频（建议先生成尾帧以获得更连贯动作）')
-  } else {
-    console.log(`[VIDEO-DIRECT] 检测到尾帧，使用首尾帧生成视频, 数量: ${keyframes.length}`)
-  }
-
   const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  await startStep(step.id)
+  await startStep(stepId)
 
   try {
     const jobs = []
     for (const shot of firstFrames) {
       const shotId = shot.shotId
       const firstFrameUrl = shot.firstFrameUrl
-
-      // Phase 5: 检查该 shot 是否有尾帧（支持部分生成情况）
       const kf = keyframes.find((k: any) => k.shotId === shotId)
       const lastFrameUrl = kf?.lastFrameUrl || null
       const shotStrategy = lastFrameUrl ? 'first-last' : 'first-only'
 
       const job = await videoQueue.add('generate-direct', {
-        stepId: step.id,
-        projectId: params.id,
+        stepId,
+        projectId,
         shotId,
         firstFrameUrl,
-        lastFrameUrl,  // Phase 5: 可能为 null
-        strategy: shotStrategy,  // Phase 5: 每 shot 独立策略
+        lastFrameUrl,
+        strategy: shotStrategy,
         type: 'direct',
-        videoModel,  // 工作指令.txt（2026-05-26 Phase 6）：透传模型选择
+        videoModel,
       })
       jobs.push({ shotId, jobId: job.id, strategy: shotStrategy })
     }
 
-    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
+    await deductPointsAndLog(step.projectId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
     return NextResponse.json({
       success: true,
-      taskId: step.id,
+      taskId: stepId,
       status: 'queued',
-      strategy,
       jobs,
     })
   } catch (e: any) {
-    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
+    await deductPointsAndLog(step.projectId, pointsCheck.cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }
 
+/** 生成 Segment Prompts */
+async function handleGenerateDirectPrompts(projectId: string, stepId: string) {
+  try {
+    const { shots } = await getStoryboardAndKeyframes(projectId)
+    if (shots.length === 0) {
+      return NextResponse.json({ error: 'NO_STORYBOARD', message: '未找到分镜数据' }, { status: 400 })
+    }
+
+    const segments = await generateSegmentPrompts(projectId, 'VIDEO_DIRECT', shots)
+
+    await prisma.workflowStep.update({
+      where: { id: stepId },
+      data: {
+        status: 'PENDING' as any,
+        outputData: {
+          ...(await prisma.workflowStep.findUnique({ where: { id: stepId } }))?.outputData as any || {},
+          segmentPromptsGenerated: true,
+          segmentCount: segments.length,
+        },
+      },
+    })
+
+    return NextResponse.json({
+      success: true,
+      status: 'PROMPT_READY',
+      segments,
+      message: `已生成 ${segments.length} 个分镜的视频提示词`,
+    })
+  } catch (e: any) {
+    console.error('[VIDEO-DIRECT-PROMPTS] 失败:', e)
+    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+  }
+}
+
+/** 单段生成 */
+async function handleGenerateDirectSegment(projectId: string, stepId: string, body: any) {
+  const segmentId = body?.segmentId
+  if (!segmentId) {
+    return NextResponse.json({ error: 'MISSING_SEGMENT_ID' }, { status: 400 })
+  }
+
+  const segment = await prisma.videoSegment.findUnique({
+    where: { id: segmentId },
+  })
+  if (!segment || segment.projectId !== projectId) {
+    return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
+  }
+
+  if (segment.status === 'generating') {
+    return NextResponse.json({ success: true, message: '该片段正在生成中', status: 'generating' })
+  }
+  if (segment.status === 'completed') {
+    return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
+  }
+
+  const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
+  const shot = shots.find((s: any) => s.shotId === segment.shotId)
+  const firstFrameUrl = shot?.firstFrameUrl || ''
+  if (!firstFrameUrl) {
+    return NextResponse.json({ error: 'NO_IMAGE', message: '该分镜没有可用的首帧' }, { status: 400 })
+  }
+
+  await prisma.videoSegment.update({
+    where: { id: segmentId },
+    data: { status: 'generating', errorMessage: null },
+  })
+
+  waitUntil(backgroundGenerateDirectSegment(
+    segmentId,
+    projectId,
+    segment.prompt,
+    firstFrameUrl,
+    null,
+    segment.duration || 5,
+    body?.videoModel
+  ))
+
+  return NextResponse.json({
+    success: true,
+    segmentId,
+    status: 'generating',
+    message: '片段生成已启动',
+  })
+}
+
+/** 批量生成 */
+async function handleGenerateAllDirectSegments(projectId: string, stepId: string, body: any) {
+  const pendingSegments = await prisma.videoSegment.findMany({
+    where: { projectId, stepName: 'VIDEO_DIRECT', status: 'pending' },
+    orderBy: { sequence: 'asc' },
+  })
+
+  if (pendingSegments.length === 0) {
+    return NextResponse.json({ success: true, message: '没有待生成的片段', count: 0 })
+  }
+
+  const { shots } = await getStoryboardAndKeyframes(projectId)
+
+  await Promise.all(
+    pendingSegments.map((seg) =>
+      prisma.videoSegment.update({
+        where: { id: seg.id },
+        data: { status: 'generating', errorMessage: null },
+      })
+    )
+  )
+
+  waitUntil((async () => {
+    for (const segment of pendingSegments) {
+      const shot = shots.find((s: any) => s.shotId === segment.shotId)
+      const firstFrameUrl = shot?.firstFrameUrl || ''
+      if (!firstFrameUrl) {
+        await prisma.videoSegment.update({
+          where: { id: segment.id },
+          data: { status: 'failed', errorMessage: '没有可用的首帧' },
+        })
+        continue
+      }
+      await backgroundGenerateDirectSegment(
+        segment.id,
+        projectId,
+        segment.prompt,
+        firstFrameUrl,
+        null,
+        segment.duration || 5,
+        body?.videoModel
+      )
+    }
+  })())
+
+  return NextResponse.json({
+    success: true,
+    count: pendingSegments.length,
+    segmentIds: pendingSegments.map((s) => s.id),
+    status: 'generating',
+    message: `已启动 ${pendingSegments.length} 个片段的批量生成`,
+  })
+}
+
+/** 合成视频 */
+async function handleComposeDirectVideo(projectId: string, stepId: string) {
+  const segments = await prisma.videoSegment.findMany({
+    where: { projectId, stepName: 'VIDEO_DIRECT' },
+    orderBy: { sequence: 'asc' },
+  })
+
+  const incomplete = segments.filter((s) => s.status !== 'completed')
+  if (incomplete.length > 0) {
+    return NextResponse.json({
+      error: 'INCOMPLETE_SEGMENTS',
+      message: `还有 ${incomplete.length} 个片段未生成完成，无法合成`,
+      incomplete: incomplete.map((s) => ({ id: s.id, shotId: s.shotId, status: s.status })),
+    }, { status: 400 })
+  }
+
+  if (segments.length === 0) {
+    return NextResponse.json({ error: 'NO_SEGMENTS', message: '没有可合成的片段' }, { status: 400 })
+  }
+
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { combinedVideoStatus: 'processing' },
+  })
+
+  waitUntil(backgroundComposeDirectVideo(projectId))
+
+  return NextResponse.json({
+    success: true,
+    status: 'processing',
+    message: '视频合成已启动，请稍后查看结果',
+  })
+}
+
+// ============================================================
+// GET
+// ============================================================
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'VIDEO_DIRECT' } }
   })
+
   const assets = await prisma.asset.findMany({
     where: { projectId: params.id, type: 'VIDEO', metadata: { path: ['stepType'], equals: 'VIDEO_DIRECT' } }
   })
 
-  // Phase 5: 检测当前策略用于前端显示
-  const keyframeStep = await prisma.workflowStep.findUnique({
-    where: { projectId_stepType: { projectId: params.id, stepType: 'KEYFRAMES' } }
+  const segments = await prisma.videoSegment.findMany({
+    where: { projectId: params.id, stepName: 'VIDEO_DIRECT' },
+    orderBy: { sequence: 'asc' },
   })
-  const keyframesData = keyframeStep?.outputData as any || {}
-  const keyframes = keyframesData.keyframes || keyframesData.results || []
+
+  const project = await prisma.project.findUnique({
+    where: { id: params.id },
+    select: { combinedVideoUrl: true, combinedVideoStatus: true },
+  })
+
+  const { keyframes } = await getStoryboardAndKeyframes(params.id)
   const hasLastFrames = keyframes.some((k: any) => k.lastFrameUrl)
+
+  const out = (step?.outputData as any) || {}
 
   return NextResponse.json({
     status: step?.status || 'not_found',
     strategy: hasLastFrames ? 'first-last' : 'first-only',
-    clips: assets.map(a => ({ shotId: (a.metadata as any)?.shotId, url: a.url, duration: (a.metadata as any)?.duration }))
+    clips: assets.map((a) => ({
+      shotId: (a.metadata as any)?.shotId,
+      url: a.url,
+      duration: (a.metadata as any)?.duration,
+    })),
+    // 新增
+    videoSegments: segments,
+    combinedVideoUrl: project?.combinedVideoUrl,
+    combinedVideoStatus: project?.combinedVideoStatus,
+    segmentPromptsGenerated: out.segmentPromptsGenerated || false,
   })
 }

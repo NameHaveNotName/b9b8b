@@ -2,6 +2,8 @@ import { Worker } from 'bullmq'
 import { redisConnection } from '../lib/queue'
 import { prisma } from '../lib/prisma'
 import { completeStep, failStep, isStepCancelled } from '../lib/workflow-executor'
+import { generateOneVideoSegment } from '../lib/video-segment-utils'
+import { uploadFile, getSignedFileUrl } from '../lib/r2'
 
 // 动态加载 video client（避免在导入时解析路径别名问题）
 async function getVideoClient() {
@@ -10,10 +12,10 @@ async function getVideoClient() {
 }
 
 const worker = new Worker('video-generation', async (job) => {
-  const { stepId, projectId, conceptImageKeys, shotId, firstFrameKey, lastFrameKey, type } = job.data
+  const { stepId, projectId, conceptImageKeys, shotId, firstFrameKey, lastFrameKey, type, segmentId } = job.data
   // 工作指令.txt 第二阶段：Worker 入口诊断三件套
   console.log(`[TRAILER-JOB-START] job.id=${job.id}, name=${job.name}, projectId=${projectId}, stepId=${stepId}, timestamp=${new Date().toISOString()}`)
-  console.log(`[TRAILER-JOB-DATA] type=${type}, conceptImages count=${(conceptImageKeys || []).length}, shotId=${shotId || ''}`)
+  console.log(`[TRAILER-JOB-DATA] type=${type}, conceptImages count=${(conceptImageKeys || []).length}, shotId=${shotId || ''}, segmentId=${segmentId || ''}`)
   console.log(`[TRAILER-JOB-ENV] XIAOMI_API_KEY exists=${!!process.env.XIAOMI_API_KEY}, REDIS_URL exists=${!!process.env.UPSTASH_REDIS_URL}, R2_ACCOUNT_ID exists=${!!process.env.R2_ACCOUNT_ID && !process.env.R2_ACCOUNT_ID!.startsWith('your-')}`)
   const videoClient = await getVideoClient()
 
@@ -83,11 +85,81 @@ const worker = new Worker('video-generation', async (job) => {
       })
     }
 
+    // 工作指令.txt（重构）：单片段视频生成（分镜卡片式）
+    if (job.name === 'generate-segment' && segmentId) {
+      console.log(`[SEGMENT-WORKER] 开始生成 segmentId=${segmentId}`)
+      const segment = await prisma.videoSegment.findUnique({ where: { id: segmentId } })
+      if (!segment) {
+        throw new Error(`VideoSegment not found: ${segmentId}`)
+      }
+
+      const { prompt, stepName, duration } = segment
+      const imageUrl = job.data?.imageUrl
+      const videoModel = job.data?.videoModel
+
+      if (!imageUrl) {
+        throw new Error(`Missing imageUrl for segment: ${segmentId}`)
+      }
+
+      const result = await generateOneVideoSegment({
+        segmentId,
+        projectId,
+        stepName,
+        prompt,
+        imageUrl,
+        duration: duration || 5,
+        videoModel,
+      })
+
+      // 更新 VideoSegment
+      await prisma.videoSegment.update({
+        where: { id: segmentId },
+        data: {
+          videoUrl: result.url,
+          storageKey: result.storageKey,
+          status: 'completed',
+          duration: result.duration,
+          isMock: result.isMock,
+        },
+      })
+
+      // 创建 Asset
+      await prisma.asset.create({
+        data: {
+          projectId,
+          type: 'VIDEO',
+          mimeType: 'video/mp4',
+          storageKey: result.storageKey,
+          url: result.url,
+          metadata: {
+            segmentId,
+            duration: result.duration,
+            isMock: result.isMock,
+            stepType: stepName,
+          },
+        },
+      })
+
+      console.log(`[SEGMENT-WORKER] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
+    }
+
     console.log(`[Worker] Completed job ${job.id}`)
   } catch (e: any) {
     // 工作指令.txt 第二阶段：catch 块统一打 [TRAILER-JOB-FAILED]
     console.error(`[TRAILER-JOB-FAILED] job.id=${job.id}, error=${e?.message}, stack=${(e?.stack || '').slice(0, 500)}`)
     console.error(`[Worker] Failed job ${job.id}:`, e)
+    // 如果是 segment 任务，更新 VideoSegment 状态
+    if (segmentId) {
+      try {
+        await prisma.videoSegment.update({
+          where: { id: segmentId },
+          data: {
+            status: 'failed',
+            errorMessage: (e?.message || '生成失败').slice(0, 200),
+          },
+        })
+      } catch {}
+    }
     await failStep(stepId, e.message)
     throw e
   }
