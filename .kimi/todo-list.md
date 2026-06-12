@@ -23,16 +23,17 @@
 - [x] 3.6 分镜设计 API：输出结构化分镜 JSON + 生成分镜草图（线稿）
 - [x] 3.7 代表画面 API → 已合并进分镜设计的「实拍参考模式」，不再作为独立步骤
 - [x] 3.8 首尾帧生成 API → 改为「生成尾帧」：只生成尾帧，首帧从分镜设计只读引用
-- [x] 3.9 直生视频 API：支持 first-last/first-only 双策略，走 BullMQ 异步
+- [x] 3.9 直生视频 API：支持 first-last/first-only 双策略，走 BullMQ 异步，已升级为分镜卡片式逐段生成 + ffmpeg 拼接
 - [ ] 3.10 AI 渲染 API：实拍视频上传 → 风格化重绘（大动作）
 - [ ] 3.11 电脑运镜 API：镜头预设库（推/拉/摇/移/跟/升/降）+ 关键帧生成
-- [~] 3.12 宣传片生成 API：概念图序列 → 30s 先导片（自动旁白字幕+BGM）
-  - [x] 修复：Hailuo 请求参数最小化（Phase 1，2026-05-17）
-  - [x] 修复：ffmpeg 路径多层兜底（Phase 2，2026-05-17）
-  - [x] 修复：MiniMax 音乐生成替代 Suno（代码就绪，2026-05-18）
-    - 供应商端未开放 music-2.6 模型及路由，BGM 自动回退 30s 静音 AAC
-  - [x] 修复：千问百聆音乐生成替代 MiniMax（代码就绪，2026-05-18）
-    - DashScope 账号未开通 fun-music-v1 权限（403 AccessDenied），BGM 自动回退 MiniMax/静音
+- [x] 3.12 宣传片生成 API：概念图序列 → 动态时长先导片（自动 BGM + 分镜卡片式逐段生成 + ffmpeg 合成）
+  - [x] 后端：`lib/video-segment-utils.ts` 提供 `generateSegmentPrompts` / `generateOneVideoSegment` / `composeVideo`（2026-06-12）
+  - [x] 后端：`app/api/projects/[id]/steps/trailer/route.ts` 支持 action：generate-segment-prompts / generate-segment-video / generate-all-segments / compose-video（2026-06-12）
+  - [x] 后端：`lib/video-utils.ts` `concatVideos` 保留音频、`mixAudioVideo` 原声+BGM 0.3 混音（2026-06-12）
+  - [x] 后端：`lib/bgm-generator.ts` 真实 AI 音乐生成（千问百聆 → MiniMax → 静音降级）（2026-06-12）
+  - [x] 前端：`TrailerPanel` / `VideoDirectPanel` 分镜卡片网格 + 常驻长视频 + 双击跳转 + 时间轴高亮（2026-06-12）
+  - [x] 数据库：VideoSegment 表 + Project 合成字段（2026-06-12）
+  - [x] 构建验证：`npx next build` 通过（2026-06-12）
   - [ ] 待验证：端到端工作流测试
 - [ ] 3.13 一致性检测 API：人脸嵌入向量比对 + 色彩直方图对比
 - [ ] 3.14 情感逻辑审核 API：生成情感 Beat Sheet，检测逻辑漏洞

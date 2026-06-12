@@ -218,6 +218,9 @@ export async function kenBurnsClipFromImage(
  *
  * 用 concat demuxer + 重新编码（不能用 -c copy，因为 Veo / Ken Burns 输出参数可能不同）。
  * 输出统一为：1920x1080 / 25fps / yuv420p / libx264 / aac stereo。
+ *
+ * 2026-06-12 改造：拼接阶段保留音频流（删除 -an），直出视频可直接使用；
+ * 宣传片后续再用 mixAudioVideo 将原声与 BGM 混音。
  */
 export async function concatVideos(segmentPaths: string[], outputPath: string): Promise<string> {
   if (segmentPaths.length === 0) throw new Error('concatVideos: 空数组')
@@ -244,7 +247,8 @@ export async function concatVideos(segmentPaths: string[], outputPath: string): 
     `-pix_fmt yuv420p`,
     `-r 25`,
     `-vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"`,
-    `-an`, // 拼接阶段不带音频，后面 mixAudioVideo 再加 BGM
+    `-c:a aac`,
+    `-b:a 128k`, // 保留/统一音频编码，直出视频可带原声
     `-movflags +faststart`,
     quote(outputPath),
   ].join(' ')
@@ -253,6 +257,19 @@ export async function concatVideos(segmentPaths: string[], outputPath: string): 
 
   await fs.unlink(listPath).catch(() => {})
   return outputPath
+}
+
+/** 检测视频文件是否包含音频流（通过 ffmpeg -i 的 stderr 解析） */
+async function hasAudioStream(videoPath: string): Promise<boolean> {
+  try {
+    const { stderr } = await execAsync(`${quote(FFMPEG_BIN)} -i ${quote(videoPath)}`, {
+      maxBuffer: 32 * 1024 * 1024,
+    })
+    return /Stream\s+#\d+:\d+(?:\(\w+\))?:\s+Audio/i.test(stderr || '')
+  } catch (err: any) {
+    // ffmpeg -i 无输出文件时退出码为 1，但 stderr 仍包含流信息
+    return /Stream\s+#\d+:\d+(?:\(\w+\))?:\s+Audio/i.test(err?.stderr || '')
+  }
 }
 
 /**
@@ -332,34 +349,64 @@ export async function trimAudio(
 }
 
 /**
- * 工作指令.txt（Round 7）：把音频混到视频中，输出最终 MP4。
+ * 工作指令.txt（2026-06-12 改造）：把音频混到视频中，输出最终 MP4。
  *
+ * - 保留视频原声，将 BGM 以 0.3 音量与原声混音（amix）
+ * - 若视频本身无音频流，则直接以 BGM 作为音轨
  * - -c:v copy   不重新编码视频（concatVideos 阶段已处理好）
  * - -c:a aac    音频转码为 AAC（确保 MP4 容器兼容）
- * - -map 0:v:0  从 video 输入取第 1 视频流
- * - -map 1:a:0  从 audio 输入取第 1 音频流
- * - -shortest   两路输入取最短（确保 30s 不溢出）
+ * - -shortest   两路输入取最短（确保 BGM 不溢出）
  */
 export async function mixAudioVideo(
   videoPath: string,
   audioPath: string,
-  outputPath: string
+  outputPath: string,
+  options?: { bgmVolume?: number }
 ): Promise<string> {
-  const cmd = [
-    quote(FFMPEG_BIN),
-    `-y`,
-    `-i ${quote(videoPath)}`,
-    `-i ${quote(audioPath)}`,
-    `-c:v copy`,
-    `-c:a aac`,
-    `-b:a 128k`,
-    `-map 0:v:0`,
-    `-map 1:a:0`,
-    `-shortest`,
-    `-movflags +faststart`,
-    quote(outputPath),
-  ].join(' ')
+  const bgmVolume = options?.bgmVolume ?? 0.3
+  const hasAudio = await hasAudioStream(videoPath)
 
-  await runFfmpeg(`mix(video+audio→${path.basename(outputPath)})`, cmd, 256 * 1024 * 1024)
+  let cmd: string
+  if (hasAudio) {
+    // 视频有原声：原声 + BGM 混音
+    cmd = [
+      quote(FFMPEG_BIN),
+      `-y`,
+      `-i ${quote(videoPath)}`,
+      `-i ${quote(audioPath)}`,
+      `-filter_complex`,
+      `"[1:a]volume=${bgmVolume}[bgm];[0:a][bgm]amix=inputs=2:duration=first[aout]"`,
+      `-map 0:v:0`,
+      `-map "[aout]"`,
+      `-c:v copy`,
+      `-c:a aac`,
+      `-b:a 128k`,
+      `-shortest`,
+      `-movflags +faststart`,
+      quote(outputPath),
+    ].join(' ')
+  } else {
+    // 视频无原声：直接以 BGM 作为音轨
+    cmd = [
+      quote(FFMPEG_BIN),
+      `-y`,
+      `-i ${quote(videoPath)}`,
+      `-i ${quote(audioPath)}`,
+      `-c:v copy`,
+      `-c:a aac`,
+      `-b:a 128k`,
+      `-map 0:v:0`,
+      `-map 1:a:0`,
+      `-shortest`,
+      `-movflags +faststart`,
+      quote(outputPath),
+    ].join(' ')
+  }
+
+  await runFfmpeg(
+    `mix(${hasAudio ? 'orig+bgm' : 'bgm-only'}→${path.basename(outputPath)})`,
+    cmd,
+    256 * 1024 * 1024
+  )
   return outputPath
 }

@@ -11,6 +11,7 @@ import { prisma } from './prisma'
 import { generateText, generateVideoFromImage, generateDirectVideo as generateDirectVideoXiaomi } from './api-clients/xiaomi'
 import { TEXT_MODELS, VIDEO_MODELS } from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
+import { generateTrailerBgm } from './bgm-generator'
 import {
   makeTempDir,
   ensureDir,
@@ -331,23 +332,43 @@ export async function composeVideo(args: {
 
     if (isTrailer) {
       // Trailer: 生成 BGM 并混音
-      // 暂时使用静音占位（简化版，后续可接入真实 BGM 生成）
-      const bgmPath = path.join(tempDir, 'bgm.m4a')
-      const { generateSilentBgm } = await import('./video-utils')
-      await generateSilentBgm(bgmPath, totalDuration)
-      console.log(`[COMPOSE] 静音 BGM 已生成 ${totalDuration}s`)
+      // 读取框架数据用于 BGM 情绪/故事背景
+      const fwStep = await prisma.workflowStep.findUnique({
+        where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
+      })
+      const fw = (fwStep?.outputData as any) || {}
+      const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
+      const acts = Array.isArray(fw.acts) ? fw.acts : []
 
-      // 混音
+      const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
+        tempDir,
+        durationSec: totalDuration,
+        storyBrief,
+        acts,
+      })
+      musicIsMock = bgmIsMock
+      console.log(`[COMPOSE] BGM 就绪 isMock=${bgmIsMock} ext=${bgmExt} duration=${totalDuration}s`)
+
+      // 将 BGM 裁剪到总时长，避免音频过长导致最终视频时长异常
+      const trimmedBgmPath = path.join(tempDir, `bgm_trimmed_${totalDuration}s.m4a`)
+      await trimAudio(bgmPath, trimmedBgmPath, totalDuration)
+      console.log(`[COMPOSE] BGM 已裁剪到 ${totalDuration}s`)
+
+      // 混音：保留原声 + BGM 0.3 音量
       const mixedPath = path.join(tempDir, 'final.mp4')
-      await mixAudioVideo(concatPath, bgmPath, mixedPath)
+      await mixAudioVideo(concatPath, trimmedBgmPath, mixedPath, { bgmVolume: 0.3 })
       finalPath = mixedPath
 
       // 上传 BGM
       const bgmBuf = await fsPromises.readFile(bgmPath)
-      const bgmKey = `projects/${projectId}/bgm_${Date.now()}.m4a`
-      await uploadFile(bgmKey, bgmBuf, 'audio/mp4')
-      musicUrl = await getSignedFileUrl(bgmKey, 3600)
-      musicIsMock = true
+      const bgmKey = `projects/${projectId}/bgm_${Date.now()}.${bgmExt}`
+      try {
+        await uploadFile(bgmKey, bgmBuf, bgmMime)
+        musicUrl = await getSignedFileUrl(bgmKey, 3600)
+        console.log(`[COMPOSE] BGM 上传完成 key=${bgmKey}`)
+      } catch (err: any) {
+        console.warn(`[COMPOSE] BGM 上传失败(不阻塞主流程): ${err?.message}`)
+      }
 
       // 更新项目 BGM URL
       await prisma.project.update({

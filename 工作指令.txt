@@ -1,138 +1,200 @@
 ---
 
-## 问题描述
-
-风格统一步骤点击"重试"后，前端持续显示"进行中"（90%，已 184 秒），但**后端没有触发任何提示词生成**，也**没有向供应商发送生图请求**。供应商侧（小米 API）只记录了 deepseek-chat 的文本调用，**没有任何生图模型（gpt-image-2 / 即梦 / Flux）的调用记录**。这说明重试逻辑没有走到提示词生成或生图调用的代码路径。
-
-## 猜测排查方向
-
-1. **重试按钮的 onClick 没有调用正确的执行函数**：重试按钮可能只重置了前端状态（`setError(null)`），但没有重新触发后端 API 调用。
-2. **提示词生成与生图是两个分离的 API，重试只调用了其中一个**：重试可能只调用了生图 API，但生图 API 依赖提示词生成 API 先完成。如果提示词不存在，生图 API 直接返回错误或被跳过。
-3. **提示词生成 API 被条件判断跳过**：重试时，后端发现 `style_prompts` 字段已存在（即使是空的或旧的），认为不需要重新生成提示词，直接跳到生图阶段，但生图阶段又发现提示词无效，导致整个流程卡住。
-4. **异步队列状态未清理**：重试时，生成队列中仍有之前失败的任务状态，新任务被队列阻塞，没有实际执行。
-5. **Vercel 函数超时导致请求中断**：提示词生成或生图 API 在 Vercel 端执行超过 10 秒（Hobby）或 60 秒（Pro）被强制终止，前端轮询仍在进行，但后端已无任务。
-
----
-
 ## Kimi Code 执行提示词
 
-**任务：排查风格统一"重试后提示词未生成、生图未调用"的系统性问题**
+**任务：重构宣传片与直出视频模块 —— 分镜卡片式逐段生成 + ffmpeg 合成**
 
 ---
 
-### Phase 1: 检查重试按钮的 onClick 逻辑
+### Phase 1: 定位旧版 ffmpeg 合成逻辑
 
-1. 打开风格统一步骤的前端组件，找到"重试"按钮的 `onClick` 处理函数。
-2. 确认重试按钮点击后**实际调用了哪个 API**：
-   - 是 `/api/style/generate`（全流程：提示词+生图）？
-   - 还是 `/api/style/generate-images`（仅生图，假设提示词已存在）？
-   - 还是 `/api/style/generate-prompts`（仅提示词）？
-3. **关键检查**：如果重试调用的是 `generate-images`，但该 API 内部要求先调用 `generate-prompts`，就会导致提示词为空时直接失败。
-4. 在重试的 fetch 调用前后加 `console.log`：
-   ```ts
-   console.log('[RETRY] Calling API:', apiUrl, 'with body:', body);
+1. 全局搜索项目中所有包含 `ffmpeg` 关键词的文件：
    ```
-5. 检查浏览器 Network 面板，确认重试时发出了 POST 请求，且请求 body 不为空。
-
----
-
-### Phase 2: 检查风格统一后端 API 的完整流程
-
-1. 打开风格统一的主执行 API（如 `/api/style/generate/route.ts`）。
-2. 画出该 API 的完整执行链路：
+   搜索关键词：ffmpeg、combine、concat、trailer合成、合成视频、mergeVideo
    ```
-   接收请求 → 鉴权 → 读取项目数据 → [提示词生成?] → [生图调用?] → 返回结果
+2. 重点排查路径：
+   - `app/api/trailer/` 或 `app/api/video/` 下的 API Route
+   - `lib/video/`、`lib/ffmpeg/` 等工具目录
+   - `app/api/projects/[id]/trailer/` 或类似路由
+3. 找到旧版合成逻辑后，确认：
+   - 输入：接收什么参数（视频片段 URL 数组？项目 ID？）
+   - 输出：返回什么（合成后的视频 URL？直接上传到 Storage？）
+   - 是否已集成背景音乐混流（`-i bgm.mp3 -filter_complex amix`）
+   - 执行环境：是在 Vercel Function 内执行，还是通过外部服务（如 AWS Lambda、自建服务器）？
+
+---
+
+### Phase 2: 数据库结构扩展
+
+**新建/扩展 `VideoSegment` 表**（存储每个视频片段，与 schema.prisma 保持一致）：
+
+```sql
+CREATE TABLE IF NOT EXISTS "VideoSegment" (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES "Project"(id) ON DELETE CASCADE,
+  shot_id TEXT NOT NULL, -- 对应分镜 shot_001
+  step_name TEXT NOT NULL, -- 'TRAILER' | 'VIDEO_DIRECT' | 'VIDEO_RENDER'
+  prompt TEXT NOT NULL, -- 视频生成提示词（英文）
+  caption TEXT, -- 分镜中文描述（用于前端展示）
+  video_url TEXT, -- 生成后的视频 URL
+  storage_key TEXT, -- R2 存储 key
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | generating | completed | failed
+  sequence INTEGER NOT NULL, -- 片段顺序
+  duration INTEGER, -- 片段时长（秒）
+  is_mock BOOLEAN NOT NULL DEFAULT false, -- 是否 Ken Burns 兜底
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX "VideoSegment_project_id_status_idx" ON "VideoSegment"("project_id", "status");
+CREATE INDEX "VideoSegment_project_id_step_name_idx" ON "VideoSegment"("project_id", "step_name");
+CREATE INDEX "VideoSegment_project_id_sequence_idx" ON "VideoSegment"("project_id", "sequence");
+```
+
+**扩展 `Project` 表**：
+```sql
+ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS combined_video_url TEXT;
+ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS combined_video_status TEXT DEFAULT 'pending';
+ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS bgm_url TEXT; -- 宣传片背景音乐
+```
+
+---
+
+### Phase 3: 视频生成提示词预生成（不直接生视频）
+
+**触发时机**：用户点击宣传片/直出视频的"开始执行"按钮。
+
+**执行逻辑**：
+1. 后端读取该项目的分镜数据（`storyboard.shots`）。
+2. 为**每个分镜**调用 AI 生成视频生成提示词（prompt）：
+   - 输入：分镜描述 + 运镜 + 角色 + 风格基准
+   - 输出：英文视频生成提示词 + 中文画面描述（caption）
+3. 将结果写入 `VideoSegment` 表：
+   - `prompt` = 英文提示词
+   - `caption` = 分镜中文描述（从分镜数据直接复制，或 AI 优化）
+   - `status` = `pending`
+   - `sequence` = 分镜顺序
+4. 前端接收 `VideoSegment` 数组，渲染为**分镜卡片网格**。
+
+**卡片 UI**（仿照分镜设计模块）：
+```
+┌─────────────────────────────────────┐
+│  [视频预览区 / 占位图]               │
+│  待生成                              │
+├─────────────────────────────────────┤
+│  场景：冥想时刻                       │
+│  描述：黄昏的莫高窟特窟内，陈远盘坐...  │
+│  时长：7s                            │
+│  [🎬 生成视频]  [批量生成 ▼]          │
+└─────────────────────────────────────┘
+```
+
+---
+
+### Phase 4: 单片段视频生成
+
+**交互**：用户点击某卡片的"生成视频"按钮。
+
+**后端逻辑**：
+1. 读取该 `VideoSegment` 的 `prompt`。
+2. 调用视频生成 API（多品牌供应商接口，复用旧版宣传片调用逻辑）。
+3. 返回视频 URL 后，更新 `VideoSegment`：
+   - `video_url` = 返回的 URL
+   - `status` = `completed`
+   - `duration` = 视频实际时长
+4. 前端轮询或 WebSocket 推送，卡片状态从"生成中"变为"已完成"，预览区显示视频。
+
+**批量生成**：
+- 顶部增加"批量生成"按钮，点击后遍历所有 `status = 'pending'` 的片段。
+- 批量提交时，前端显示每个卡片的独立进度，互不阻塞。
+
+---
+
+### Phase 5: 视频合成（ffmpeg）
+
+**触发时机**：所有片段生成完成后，用户点击"合成视频"按钮。
+
+**宣传片模块特殊处理**：
+1. **生成背景音乐**：
+   - 调用 AI 音乐生成 API（或从素材库选取），基于项目情绪基调生成 BGM。
+   - BGM 时长 = 所有片段总时长。
+   - 存入 `Project.bgm_url`。
+2. **ffmpeg 合成命令**：
+   ```bash
+   ffmpeg -f concat -i input.txt -i bgm.mp3 \
+     -filter_complex "[0:v]format=yuv420p[v];[1:a]volume=0.3[a1];[0:a][a1]amix=inputs=2:duration=first[aout]" \
+     -map "[v]" -map "[aout]" -c:v libx264 -c:a aac output.mp4
    ```
-3. **检查条件分支**：
-   - 是否有 `if (project.style_prompts)` 的判断，导致已有 prompts 时跳过提示词生成？
-   - 如果有，确认 `style_prompts` 字段在数据库中的实际值。如果它是空数组 `[]` 或空字符串 `""`，条件判断可能误判为"已存在"。
-4. **检查提示词生成函数**：如果提示词生成被封装为独立函数，确认该函数在重试时是否被调用。
-5. 在 API 入口加日志：
-   ```ts
-   console.log('[STYLE-API] Received request for project:', projectId);
-   console.log('[STYLE-API] Current prompts:', project.style_prompts);
-   console.log('[STYLE-API] Will generate prompts:', !project.style_prompts);
-   ```
+   - `input.txt`：片段列表文件（`file 'segment1.mp4'` 等）
+   - 视频原声保留，BGM 音量降低（`volume=0.3`）
+   - 输出 MP4 上传至 Supabase Storage
+
+**直出视频模块**：
+- 不生成 BGM，直接拼接片段：
+  ```bash
+  ffmpeg -f concat -i input.txt -c copy output.mp4
+  ```
+
+**异步处理**：
+- 合成任务放入队列（或调用外部 ffmpeg 服务），避免 Vercel Function 超时。
+- 前端轮询 `Project.combined_video_status`，显示"合成中"进度。
 
 ---
 
-### Phase 3: 检查提示词生成与生图之间的衔接
+### Phase 6: 前端 UI 布局重构
 
-1. 如果提示词生成是**异步/队列任务**（如使用 BullMQ / Inngest / Vercel Cron）：
-   - 检查重试时是否重新入队
-   - 检查队列中是否有死任务阻塞新任务
-2. 如果提示词生成是**同步顺序执行**：
-   - 检查 `generatePrompts()` 的返回值是否被正确传递给 `generateImages()`
-   - 检查 `generatePrompts()` 失败后，`generateImages()` 是否被跳过（如 `if (!prompts) return;`）
-3. 检查提示词生成失败时，错误是否被正确抛出并返回给前端，而不是静默吞掉。
+**合成完成后界面**：
 
----
+```
+┌─────────────────────────────────────────┐
+│  [合成后的长视频播放器]                  │  ← 常驻上方，固定高度（如 h-96）
+│  进度条：|———●——————————————————|        │
+│  当前时间：00:07 / 总时长 02:35          │
+├─────────────────────────────────────────┤
+│  [分镜卡片列表，可滚动]                  │  ← 下方滚动区域
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐   │
+│  │ shot_001│ │ shot_002│ │ shot_003│   │
+│  │ [视频]  │ │ [视频]  │ │ [视频]  │   │
+│  │ 冥想时刻 │ │ 流光初现│ │  ...    │   │
+│  └─────────┘ └─────────┘ └─────────┘   │
+│  ...                                    │
+└─────────────────────────────────────────┘
+```
 
-### Phase 4: 检查数据库状态对重试的影响
-
-1. 在 Supabase SQL Editor 查询该项目的风格统一相关字段：
-   ```sql
-   SELECT style_prompts, style_status, style_images, updated_at
-   FROM "Project"
-   WHERE id = '项目ID';
-   ```
-2. **关键判断**：
-   - 如果 `style_prompts` 为 `null` / `[]` / `""`：说明提示词从未生成，重试应该触发提示词生成
-   - 如果 `style_prompts` 有旧数据：重试可能误判为"已有提示词"而跳过生成
-   - 如果 `style_status` 为 `'processing'`：重试可能被状态锁阻止
-3. 如果状态字段干扰重试，修改重试逻辑：重试时**强制重置**状态字段（如 `style_status = 'pending'`, `style_prompts = null`），然后重新执行完整流程。
-
----
-
-### Phase 5: 检查 Vercel 函数超时与日志
-
-1. 打开 Vercel Runtime Logs，筛选该项目的风格统一 API 路径。
-2. 检查重试时是否有该 API 的日志记录：
-   - 如果有，但执行时间很短（<< 1 秒）→ 说明 API 被提前 return 或 throw
-   - 如果有，但执行时间达到 Vercel 上限 → 说明函数超时，任务未完成
-   - 如果没有 → 前端请求根本没发到后端（可能是路由错误或中间件拦截）
-3. 如果函数超时，将风格统一改为**异步队列模式**：
-   - API 立即返回"任务已提交"
-   - 实际提示词生成和生图在后台队列中执行
-   - 前端通过轮询获取进度
+**交互细节**：
+1. **常驻视频区**：滚动分镜卡片时，上方视频播放器始终固定，不随滚动消失。
+2. **双击分镜卡片**：
+   - 计算该分镜在总视频中的**开始时间**（前面所有片段时长累加）。
+   - 调用 `videoPlayer.currentTime = startTime`。
+   - 视频自动跳转到对应时间点并播放。
+3. **时间轴同步**：视频播放时，高亮当前正在播放的分镜卡片（根据 `currentTime` 反查对应片段）。
 
 ---
 
-### Phase 6: 修复重试逻辑
+### Phase 7: 状态与错误处理
 
-**目标**：重试时必须走完整的"提示词生成 → 生图"流程，不能跳过任何一步。
-
-1. 修改重试按钮的 onClick：
-   ```ts
-   const handleRetry = async () => {
-     setError(null);
-     setStatus('processing');
-     // 调用完整流程 API，不是仅生图 API
-     const res = await fetch('/api/style/generate', {
-       method: 'POST',
-       body: JSON.stringify({ 
-         projectId, 
-         forceRegenerate: true // 强制重新生成提示词
-       }),
-     });
-     // ...
-   };
-   ```
-2. 修改后端 API，支持 `forceRegenerate` 参数：
-   - 如果 `forceRegenerate = true`，忽略数据库中已有的 `style_prompts`，重新生成
-   - 重新生成提示词后，再执行生图
+| 场景 | 处理 |
+|------|------|
+| 某片段生成失败 | 卡片显示"失败"，提供"重新生成"按钮，不影响其他片段 |
+| 合成时某片段缺失 | 提示"还有 X 个片段未生成，无法合成" |
+| 合成任务超时 | 队列重试，或提示"合成时间较长，请稍后刷新" |
+| BGM 生成失败 | 宣传片合成时跳过 BGM，或提示"无背景音乐" |
 
 ---
 
-### Phase 7: 验证
+### Phase 8: 验证清单
 
-1. 修改后本地测试：点击重试，确认 Network 面板出现 `/api/style/generate` 请求。
-2. 查看 Vercel Logs，确认提示词生成和生图调用都有日志记录。
-3. 查看供应商侧，确认生图模型（gpt-image-2 / 即梦）有调用记录。
-4. 确认前端最终显示生成的风格样图，状态变为"已完成"。
+1. 点击宣传片"开始执行"，确认先显示分镜卡片网格（含提示词），而非直接生成视频。
+2. 点击单卡片"生成视频"，确认该卡片进入生成状态，完成后显示视频预览。
+3. 点击"批量生成"，确认所有待生成卡片同时进入生成状态。
+4. 全部完成后点击"合成视频"，确认宣传片生成 BGM 并调用 ffmpeg，直出视频不生成 BGM。
+5. 合成完成后，确认上方常驻显示长视频，下方可滚动分镜卡片。
+6. 双击某分镜卡片，确认视频跳转到该分镜开始时间。
+7. 播放视频时，确认当前分镜卡片高亮。
 
 ---
 
-**执行顺序**：Phase 1（重试按钮）→ Phase 2（后端 API 流程）→ Phase 3（衔接逻辑）→ Phase 4（数据库状态）→ Phase 5（超时日志）→ Phase 6（修复）→ Phase 7（验证）。
+**执行顺序**：Phase 1（定位旧版）→ Phase 2（数据库）→ Phase 3（提示词预生成）→ Phase 4（单片段生成）→ Phase 5（ffmpeg 合成）→ Phase 6（UI 布局）→ Phase 7（边界）→ Phase 8（验证）。
 
-**先执行 Phase 1 + Phase 2，确认重试按钮实际调用了哪个 API，以及该 API 内部是否走到了提示词生成。**
+**先执行 Phase 1，找到旧版 ffmpeg 合成和视频生成的代码位置，确认现有逻辑后再扩展。**
