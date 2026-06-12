@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-生成软著申请材料：源代码前 30 页（1500 行）Word 文档。
+生成软著申请材料：源代码前/后 30 页 Word 文档。
 
 用法：
   python scripts/generate-copyright-doc.py
 
 输出：
   /mnt/agents/output/软著材料/源代码前30页.docx
+  /mnt/agents/output/软著材料/源代码后30页.docx
 """
 
 import re
 import os
+import sys
 from pathlib import Path
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
@@ -49,15 +51,14 @@ def resolve_posix_path(posix_path: str) -> Path:
 
 
 OUTPUT_DIR = resolve_posix_path("/mnt/agents/output/软著材料")
-OUTPUT_FILE = OUTPUT_DIR / "源代码前30页.docx"
 
 SOFTWARE_NAME = "AI影视全流程工作流系统"
 SOFTWARE_VERSION = "V1.0"
 LINES_PER_PAGE = 50
 MAX_LINES = 30 * LINES_PER_PAGE  # 1500 行
 
-# 按编排方向排序的源码文件列表
-FILE_ORDER = [
+# 前 30 页：项目骨架 → 基础设施 → 业务 API 起点
+FILE_ORDER_FRONT = [
     # 1. 项目骨架层
     "package.json",
     "prisma/schema.prisma",
@@ -71,7 +72,7 @@ FILE_ORDER = [
     "lib/points-config.ts",
     "lib/operations.ts",
     "lib/queue.ts",
-    # 3. 业务 API 层
+    # 3. 业务 API 层（起点）
     "app/api/projects/route.ts",
     "app/api/projects/[id]/route.ts",
     "app/api/projects/[id]/assets/route.ts",
@@ -97,6 +98,54 @@ FILE_ORDER = [
     "app/(dashboard)/project/[id]/workflow/_components/TopStepper.tsx",
     "components/layout/AppSidebar.tsx",
     "components/layout/Header.tsx",
+]
+
+# 后 30 页：工作流核心 API → 视频合成 → 前端工作流 → 管理后台
+FILE_ORDER_BACK = [
+    # 1. 工作流核心 API 层（续前 30 页）
+    "app/api/projects/[id]/assets/route.ts",
+    "app/api/projects/[id]/steps/ideation/route.ts",
+    "app/api/projects/[id]/steps/framework/route.ts",
+    "app/api/projects/[id]/steps/style/route.ts",
+    "app/api/projects/[id]/steps/character/route.ts",
+    "app/api/projects/[id]/steps/concept/route.ts",
+    "app/api/projects/[id]/steps/storyboard/route.ts",
+    "app/api/projects/[id]/steps/keyframes/route.ts",
+    "app/api/projects/[id]/steps/keyframes/generate-last/route.ts",
+    "app/api/projects/[id]/steps/trailer/route.ts",
+    "app/api/projects/[id]/steps/video-direct/route.ts",
+    "app/api/projects/[id]/video-segments/route.ts",
+    "app/api/recharge/route.ts",
+    "app/api/admin/analytics/route.ts",
+    "app/api/admin/users/route.ts",
+    "app/api/admin/recharges/route.ts",
+    "app/api/admin/users/[id]/points/route.ts",
+    # 2. 视频与合成层
+    "lib/video-utils.ts",
+    "lib/video-segment-utils.ts",
+    "lib/bgm-generator.ts",
+    "lib/workflow-executor.ts",
+    "lib/workflow-state.ts",
+    "lib/workflow.ts",
+    "lib/models-config.ts",
+    # 3. 前端工作流组件层
+    "app/layout.tsx",
+    "app/(dashboard)/dashboard/page.tsx",
+    "app/(dashboard)/project/[id]/page.tsx",
+    "app/(dashboard)/project/[id]/workflow/page.tsx",
+    "app/(dashboard)/project/[id]/workflow/_components/TopStepper.tsx",
+    "app/(dashboard)/project/[id]/storyboard/page.tsx",
+    "app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable.tsx",
+    "app/(dashboard)/project/[id]/storyboard/_components/StoryboardCanvas.tsx",
+    "components/layout/AppSidebar.tsx",
+    "components/layout/Header.tsx",
+    "components/workflow/IdeaAnchor.tsx",
+    "components/workflow/StepBadge.tsx",
+    # 4. 管理后台前端层
+    "app/admin/layout.tsx",
+    "app/admin/analytics/page.tsx",
+    "app/admin/users/page.tsx",
+    "app/admin/recharges/page.tsx",
 ]
 
 
@@ -153,7 +202,7 @@ def read_file_lines(rel_path: str) -> list[str]:
     return [separator] + lines
 
 
-def collect_content() -> tuple[list[str], list[str]]:
+def collect_content(file_order: list[str], max_lines_per_file: int | None = None) -> tuple[list[str], list[str]]:
     """
     按顺序收集文件内容，直到凑满 1500 行。
     返回 (lines, included_files)。
@@ -161,12 +210,17 @@ def collect_content() -> tuple[list[str], list[str]]:
     all_lines: list[str] = []
     included_files: list[str] = []
 
-    for rel_path in FILE_ORDER:
+    for rel_path in file_order:
         if len(all_lines) >= MAX_LINES:
             break
         file_lines = read_file_lines(rel_path)
         if not file_lines:
             continue
+
+        # 若启用单文件上限，截取前 N 行（用于后 30 页保证覆盖面）
+        if max_lines_per_file and len(file_lines) > max_lines_per_file + 1:  # +1 保留分隔行
+            file_lines = file_lines[:max_lines_per_file + 1]
+            file_lines.append(f"/* ... {rel_path} 后续内容截断 ... */")
 
         # 预估加入后是否超限
         remaining = MAX_LINES - len(all_lines)
@@ -208,7 +262,22 @@ def add_field(run, field_code: str):
     run._r.append(fld_char_end)
 
 
-def create_docx(lines: list[str], output_path: Path, included_files: list[str]):
+def set_section_start_page(section, start_num: int):
+    """设置该节的起始页码（用于后 30 页从 31 开始）。"""
+    sectPr = section._sectPr
+    pgNumType = OxmlElement("w:pgNumType")
+    pgNumType.set(qn("w:start"), str(start_num))
+    sectPr.append(pgNumType)
+
+
+def create_docx(
+    lines: list[str],
+    output_path: Path,
+    included_files: list[str],
+    *,
+    start_page: int = 1,
+    total_pages_label: str | None = None,
+):
     """生成标准 A4 50 行/页的 docx。"""
     doc = Document()
 
@@ -220,6 +289,9 @@ def create_docx(lines: list[str], output_path: Path, included_files: list[str]):
     section.bottom_margin = Inches(0.6)
     section.left_margin = Inches(0.8)
     section.right_margin = Inches(0.8)
+
+    if start_page != 1:
+        set_section_start_page(section, start_page)
 
     # 页眉
     header = section.header
@@ -237,7 +309,10 @@ def create_docx(lines: list[str], output_path: Path, included_files: list[str]):
     footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     add_field(footer_para.add_run("第 "), "PAGE")
     footer_para.add_run(" 页 共 ")
-    add_field(footer_para.add_run(""), "NUMPAGES")
+    if total_pages_label:
+        footer_para.add_run(total_pages_label)
+    else:
+        add_field(footer_para.add_run(""), "NUMPAGES")
     footer_para.add_run(" 页")
     for run in footer_para.runs:
         run.font.name = "宋体"
@@ -306,18 +381,40 @@ def create_docx(lines: list[str], output_path: Path, included_files: list[str]):
     print(f"     总页数: {total_pages}")
 
 
-def main():
-    print("[INFO] 开始收集源码...")
-    lines, included_files = collect_content()
+def generate_part(
+    file_order: list[str],
+    output_name: str,
+    start_page: int,
+    total_pages_label: str | None,
+    max_lines_per_file: int | None = None,
+):
+    print(f"\n[INFO] 开始生成 {output_name} ...")
+    lines, included_files = collect_content(file_order, max_lines_per_file)
     print(f"[INFO] 已收集 {len(lines)} 行，来自 {len(included_files)} 个文件")
 
-    print("[INFO] 正在生成 Word 文档...")
-    create_docx(lines, OUTPUT_FILE, included_files)
+    output_path = OUTPUT_DIR / output_name
+    create_docx(lines, output_path, included_files, start_page=start_page, total_pages_label=total_pages_label)
 
-    # 输出文件清单
     print("\n纳入文件清单:")
     for f in included_files:
         print(f"  - {f}")
+    return included_files
+
+
+def main():
+    generate_part(
+        FILE_ORDER_FRONT,
+        "源代码前30页.docx",
+        start_page=1,
+        total_pages_label=None,  # 使用 NUMPAGES 域
+    )
+    generate_part(
+        FILE_ORDER_BACK,
+        "源代码后30页.docx",
+        start_page=31,
+        total_pages_label="60",  # 合并后总页数固定 60
+        max_lines_per_file=37,  # 后 30 页单文件上限，保证工作流覆盖面
+    )
 
 
 if __name__ == "__main__":
