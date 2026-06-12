@@ -139,7 +139,9 @@
       "Bash(git push *)",
       "Bash(git reset *)",
       "Bash(git fetch *)",
-      "WebFetch(domain:b9b8b.vercel.app)"
+      "WebFetch(domain:b9b8b.vercel.app)",
+      "Bash(npx vercel *)",
+      "Bash(git log *)"
     ]
   },
   "outputStyle": "default",
