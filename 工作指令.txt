@@ -1,200 +1,51 @@
+以下是调整后的方向性提示词：
+
 ---
 
 ## Kimi Code 执行提示词
 
-**任务：重构宣传片与直出视频模块 —— 分镜卡片式逐段生成 + ffmpeg 合成**
+**任务：生成软著申请材料 —— 源代码前 30 页**
 
 ---
 
-### Phase 1: 定位旧版 ffmpeg 合成逻辑
+### 编排方向
 
-1. 全局搜索项目中所有包含 `ffmpeg` 关键词的文件：
-   ```
-   搜索关键词：ffmpeg、combine、concat、trailer合成、合成视频、mergeVideo
-   ```
-2. 重点排查路径：
-   - `app/api/trailer/` 或 `app/api/video/` 下的 API Route
-   - `lib/video/`、`lib/ffmpeg/` 等工具目录
-   - `app/api/projects/[id]/trailer/` 或类似路由
-3. 找到旧版合成逻辑后，确认：
-   - 输入：接收什么参数（视频片段 URL 数组？项目 ID？）
-   - 输出：返回什么（合成后的视频 URL？直接上传到 Storage？）
-   - 是否已集成背景音乐混流（`-i bgm.mp3 -filter_complex amix`）
-   - 执行环境：是在 Vercel Function 内执行，还是通过外部服务（如 AWS Lambda、自建服务器）？
+**整体顺序**：从项目级配置到核心业务逻辑，按模块依赖关系递进。
+
+1. **项目骨架层**：`package.json`、数据库 schema、框架配置（Next.js/TS 配置）——体现技术栈和架构
+2. **基础设施层**：Supabase 客户端/服务端初始化、认证辅助、积分系统、操作日志——体现数据与权限基础
+3. **业务 API 层**：按工作流顺序排列——用户/项目 → 创意扩散 → 框架搭建 → 风格统一 → 人物设计 → 概念图 → 分镜设计 → 宣传片/视频 → 充值 → 管理后台——体现核心功能完整性
+4. **前端与组件层**：根布局、仪表盘、管理后台页面、通用组件、核心 Hooks——体现界面与交互
+
+**截断原则**：按上述顺序读取，自然凑满 30 页（1500 行）。若某文件跨页，在分页处自然截断，下页开头标注续接。若读完上述类别仍不足 30 页，继续补充 `lib/` 和 `components/` 下的其他核心文件。
+
+**排除原则**：不纳入第三方依赖目录、构建产物、静态资源、环境变量文件、测试文件、lock 文件。
 
 ---
 
-### Phase 2: 数据库结构扩展
+### 格式方向
 
-**新建/扩展 `VideoSegment` 表**（存储每个视频片段，与 schema.prisma 保持一致）：
-
-```sql
-CREATE TABLE IF NOT EXISTS "VideoSegment" (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES "Project"(id) ON DELETE CASCADE,
-  shot_id TEXT NOT NULL, -- 对应分镜 shot_001
-  step_name TEXT NOT NULL, -- 'TRAILER' | 'VIDEO_DIRECT' | 'VIDEO_RENDER'
-  prompt TEXT NOT NULL, -- 视频生成提示词（英文）
-  caption TEXT, -- 分镜中文描述（用于前端展示）
-  video_url TEXT, -- 生成后的视频 URL
-  storage_key TEXT, -- R2 存储 key
-  status TEXT NOT NULL DEFAULT 'pending', -- pending | generating | completed | failed
-  sequence INTEGER NOT NULL, -- 片段顺序
-  duration INTEGER, -- 片段时长（秒）
-  is_mock BOOLEAN NOT NULL DEFAULT false, -- 是否 Ken Burns 兜底
-  error_message TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX "VideoSegment_project_id_status_idx" ON "VideoSegment"("project_id", "status");
-CREATE INDEX "VideoSegment_project_id_step_name_idx" ON "VideoSegment"("project_id", "step_name");
-CREATE INDEX "VideoSegment_project_id_sequence_idx" ON "VideoSegment"("project_id", "sequence");
-```
-
-**扩展 `Project` 表**：
-```sql
-ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS combined_video_url TEXT;
-ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS combined_video_status TEXT DEFAULT 'pending';
-ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS bgm_url TEXT; -- 宣传片背景音乐
-```
+- **纸张**：标准 A4，固定行距，确保每页恰好 50 行
+- **页眉**：软件全称 + 版本号，居中
+- **页脚**：连续页码（第 1 页至第 30 页），居中
+- **代码字体**：等宽或宋体，小字号，保持原始缩进和换行，不人为插入空行凑页数
+- **文件分隔**：不同文件切换时，加注释型分隔行（计入总行数）
+- **跨页标记**：文件在页中截断时，当前页尾标注"续"，下页头标注"续 + 文件名"
 
 ---
 
-### Phase 3: 视频生成提示词预生成（不直接生视频）
+### 安全方向
 
-**触发时机**：用户点击宣传片/直出视频的"开始执行"按钮。
-
-**执行逻辑**：
-1. 后端读取该项目的分镜数据（`storyboard.shots`）。
-2. 为**每个分镜**调用 AI 生成视频生成提示词（prompt）：
-   - 输入：分镜描述 + 运镜 + 角色 + 风格基准
-   - 输出：英文视频生成提示词 + 中文画面描述（caption）
-3. 将结果写入 `VideoSegment` 表：
-   - `prompt` = 英文提示词
-   - `caption` = 分镜中文描述（从分镜数据直接复制，或 AI 优化）
-   - `status` = `pending`
-   - `sequence` = 分镜顺序
-4. 前端接收 `VideoSegment` 数组，渲染为**分镜卡片网格**。
-
-**卡片 UI**（仿照分镜设计模块）：
-```
-┌─────────────────────────────────────┐
-│  [视频预览区 / 占位图]               │
-│  待生成                              │
-├─────────────────────────────────────┤
-│  场景：冥想时刻                       │
-│  描述：黄昏的莫高窟特窟内，陈远盘坐...  │
-│  时长：7s                            │
-│  [🎬 生成视频]  [批量生成 ▼]          │
-└─────────────────────────────────────┘
-```
+提取源代码前，全局扫描以下敏感信息并替换为占位符：
+- 硬编码 API Key、Token、Secret
+- 数据库连接字符串（含密码）
+- 个人邮箱、手机号、身份证号
+- 云服务真实 URL 或凭证
 
 ---
 
-### Phase 4: 单片段视频生成
+### 输出方向
 
-**交互**：用户点击某卡片的"生成视频"按钮。
-
-**后端逻辑**：
-1. 读取该 `VideoSegment` 的 `prompt`。
-2. 调用视频生成 API（多品牌供应商接口，复用旧版宣传片调用逻辑）。
-3. 返回视频 URL 后，更新 `VideoSegment`：
-   - `video_url` = 返回的 URL
-   - `status` = `completed`
-   - `duration` = 视频实际时长
-4. 前端轮询或 WebSocket 推送，卡片状态从"生成中"变为"已完成"，预览区显示视频。
-
-**批量生成**：
-- 顶部增加"批量生成"按钮，点击后遍历所有 `status = 'pending'` 的片段。
-- 批量提交时，前端显示每个卡片的独立进度，互不阻塞。
-
----
-
-### Phase 5: 视频合成（ffmpeg）
-
-**触发时机**：所有片段生成完成后，用户点击"合成视频"按钮。
-
-**宣传片模块特殊处理**：
-1. **生成背景音乐**：
-   - 调用 AI 音乐生成 API（或从素材库选取），基于项目情绪基调生成 BGM。
-   - BGM 时长 = 所有片段总时长。
-   - 存入 `Project.bgm_url`。
-2. **ffmpeg 合成命令**：
-   ```bash
-   ffmpeg -f concat -i input.txt -i bgm.mp3 \
-     -filter_complex "[0:v]format=yuv420p[v];[1:a]volume=0.3[a1];[0:a][a1]amix=inputs=2:duration=first[aout]" \
-     -map "[v]" -map "[aout]" -c:v libx264 -c:a aac output.mp4
-   ```
-   - `input.txt`：片段列表文件（`file 'segment1.mp4'` 等）
-   - 视频原声保留，BGM 音量降低（`volume=0.3`）
-   - 输出 MP4 上传至 Supabase Storage
-
-**直出视频模块**：
-- 不生成 BGM，直接拼接片段：
-  ```bash
-  ffmpeg -f concat -i input.txt -c copy output.mp4
-  ```
-
-**异步处理**：
-- 合成任务放入队列（或调用外部 ffmpeg 服务），避免 Vercel Function 超时。
-- 前端轮询 `Project.combined_video_status`，显示"合成中"进度。
-
----
-
-### Phase 6: 前端 UI 布局重构
-
-**合成完成后界面**：
-
-```
-┌─────────────────────────────────────────┐
-│  [合成后的长视频播放器]                  │  ← 常驻上方，固定高度（如 h-96）
-│  进度条：|———●——————————————————|        │
-│  当前时间：00:07 / 总时长 02:35          │
-├─────────────────────────────────────────┤
-│  [分镜卡片列表，可滚动]                  │  ← 下方滚动区域
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐   │
-│  │ shot_001│ │ shot_002│ │ shot_003│   │
-│  │ [视频]  │ │ [视频]  │ │ [视频]  │   │
-│  │ 冥想时刻 │ │ 流光初现│ │  ...    │   │
-│  └─────────┘ └─────────┘ └─────────┘   │
-│  ...                                    │
-└─────────────────────────────────────────┘
-```
-
-**交互细节**：
-1. **常驻视频区**：滚动分镜卡片时，上方视频播放器始终固定，不随滚动消失。
-2. **双击分镜卡片**：
-   - 计算该分镜在总视频中的**开始时间**（前面所有片段时长累加）。
-   - 调用 `videoPlayer.currentTime = startTime`。
-   - 视频自动跳转到对应时间点并播放。
-3. **时间轴同步**：视频播放时，高亮当前正在播放的分镜卡片（根据 `currentTime` 反查对应片段）。
-
----
-
-### Phase 7: 状态与错误处理
-
-| 场景 | 处理 |
-|------|------|
-| 某片段生成失败 | 卡片显示"失败"，提供"重新生成"按钮，不影响其他片段 |
-| 合成时某片段缺失 | 提示"还有 X 个片段未生成，无法合成" |
-| 合成任务超时 | 队列重试，或提示"合成时间较长，请稍后刷新" |
-| BGM 生成失败 | 宣传片合成时跳过 BGM，或提示"无背景音乐" |
-
----
-
-### Phase 8: 验证清单
-
-1. 点击宣传片"开始执行"，确认先显示分镜卡片网格（含提示词），而非直接生成视频。
-2. 点击单卡片"生成视频"，确认该卡片进入生成状态，完成后显示视频预览。
-3. 点击"批量生成"，确认所有待生成卡片同时进入生成状态。
-4. 全部完成后点击"合成视频"，确认宣传片生成 BGM 并调用 ffmpeg，直出视频不生成 BGM。
-5. 合成完成后，确认上方常驻显示长视频，下方可滚动分镜卡片。
-6. 双击某分镜卡片，确认视频跳转到该分镜开始时间。
-7. 播放视频时，确认当前分镜卡片高亮。
-
----
-
-**执行顺序**：Phase 1（定位旧版）→ Phase 2（数据库）→ Phase 3（提示词预生成）→ Phase 4（单片段生成）→ Phase 5（ffmpeg 合成）→ Phase 6（UI 布局）→ Phase 7（边界）→ Phase 8（验证）。
-
-**先执行 Phase 1，找到旧版 ffmpeg 合成和视频生成的代码位置，确认现有逻辑后再扩展。**
+- 生成标准 Word 文档（`.docx`）
+- 保存到 `/mnt/agents/output/软著材料/` 目录
+- 生成后报告实际纳入的文件清单和总行数
