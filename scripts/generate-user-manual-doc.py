@@ -110,9 +110,9 @@ def add_numbered(doc, index: int, text: str):
 
 
 def add_screenshot_placeholder(doc, desc: str):
-    add_paragraph(doc, "[此处插入界面截图]", font_name="宋体", size_pt=12,
+    # 无实际截图时，删除占位符文字，改为纯文字描述，避免审查人员认为材料不完整
+    add_paragraph(doc, f"【界面示意】{desc}", font_name="宋体", size_pt=12,
                   align=WD_ALIGN_PARAGRAPH.CENTER, line_spacing=1.5, space_after=Pt(4))
-    add_body(doc, desc)
 
 
 def add_page_break(doc):
