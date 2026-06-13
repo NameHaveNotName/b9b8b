@@ -1,92 +1,110 @@
-确认开发完成日期：**2026 年 6 月 7 日**。
+是的，**全局遍历检索替换是主要耗因**。
 
-以下是软件使用说明书的生成提示词：
+Kimi Code 在执行「全局审查」时，为了安全起见会逐文件读取内容、扫描、再确认是否修改。对于一个 Next.js 项目，这意味着它可能读取了 `node_modules` 以外的所有 `.ts/.tsx/.json/.md` 文件，token 消耗会随文件数量线性爆炸。5 小时限额被半小时耗尽，基本符合这种「全量读取」模式。
 
----
+**更高效的替代方案：用命令行 grep 先定位，再精准修改。**
 
-## Kimi Code 执行提示词
-
-**任务：生成软著申请材料 —— 软件使用说明书**
+以下是优化后的提示词，避免再次耗尽限额：
 
 ---
 
-### 文件信息
+## 优化提示词 A（省 token 版）：定位并替换
 
-- **输出路径**：`/mnt/agents/output/软著材料/软件使用说明书.docx`
-- **文件格式**：标准 Word 文档（`.docx`）
-- **用途**：中国版权保护中心软件著作权登记
-- **页数要求**：15–30 页
+```text
+任务：精准定位并替换软件名称与版本号，禁止逐文件全文读取。
 
----
-
-### 内容结构（按顺序）
-
-1. **封面**
-   - 软件全称：AI 影视全流程工作流系统
-   - 版本号：V1.0
-   - 著作权人：康泽铭
-   - 完成日期：2026 年 6 月 7 日
-
-2. **目录**（自动生成页码）
-
-3. **第一章 软件概述**
-   - 1.1 软件简介：AI 驱动的影视工业化生产工具，覆盖从元构思到成片的全流程
-   - 1.2 运行环境：Web 浏览器（Chrome/Firefox/Edge），基于 Next.js 14 + React + TypeScript
-   - 1.3 主要功能模块：创意扩散、框架搭建、风格统一、人物设计、概念图、宣传片、分镜设计、生成尾帧、直出视频、管理后台
-
-4. **第二章 系统功能说明**
-   - 2.1 用户系统：注册、登录、个人中心、点数管理、充值
-   - 2.2 项目管理：新建项目、项目列表、仪表盘统计、项目归档
-   - 2.3 创意扩散模块：灵感输入、创意方向生成、AI 评估与深化迭代
-   - 2.4 框架搭建模块：故事梗概、角色设定、幕结构、环境设定、视觉风格、导入框架文件
-   - 2.5 风格统一模块：视觉基准生成、风格图选定、模型选择
-   - 2.6 人物设计模块：角色形象生成、角色深化、资产入库
-   - 2.7 概念图模块：场景概念图生成、分幕展示
-   - 2.8 分镜设计模块：镜头列表、分镜图生成、视频片段预览
-   - 2.9 视频生成模块：宣传片生成、背景音乐生成、视频片段合成
-   - 2.10 管理后台：用户统计、充值审核、操作日志、数据看板
-
-5. **第三章 操作说明**
-   - 3.1 快速开始：新建项目 → 输入标题 → 创意扩散 → 框架搭建 → 风格统一
-   - 3.2 工作流操作：各步骤的进入、执行、重试、导出、下一步
-   - 3.3 创意深化操作：评估指标查看、改进方向选择、多轮迭代
-   - 3.4 资产库管理：查看生成的图片、视频、文本资产
-   - 3.5 充值与点数：自定义金额充值、充值审核、点数消费
-
-6. **第四章 界面说明**
-   - 4.1 登录/注册界面
-   - 4.2 仪表盘界面：统计卡片、最近项目列表
-   - 4.3 工作流看板：9 步进度条、步骤卡片、状态标签
-   - 4.4 创意扩散界面：创意方向卡片、AI 评估面板、历史版本
-   - 4.5 框架搭建界面：灵感阐释、角色设定卡片、幕结构、环境设定、导出文档
-   - 4.6 分镜设计界面：镜头表格、图片展示区、生成队列
-   - 4.7 管理后台界面：用户列表、统计图表、充值审核表
-
-7. **附录**
-   - 技术栈说明：Next.js 14、React、TypeScript、Tailwind CSS、Prisma、Supabase、ffmpeg
+执行步骤：
+1. 在终端执行以下命令，仅查找包含 "my-app" 的文件（排除 node_modules/.next/dist）：
+   grep -r "my-app" --include="*.json" --include="*.md" --include="*.yml" --include="*.yaml" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.mjs" --include="*.sh" --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist . | head -50
+2. 在终端执行以下命令，查找包含 "0.1.0" 的文件：
+   grep -r "0\.1\.0" --include="*.json" --include="*.md" --include="*.yml" --include="*.yaml" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.mjs" --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist . | head -50
+3. 根据 grep 结果，只修改确实包含本软件标识的文件：
+   - package.json: "name" → "ai-film-flow", "version" → "1.0.0"
+   - 其他文件若包含 "my-app" 或 "0.1.0"，判断是否为第三方依赖引用（如 README 中引用官方示例），若是则保留并注释；若是本软件标识则替换
+4. 修改完成后执行 git diff 确认变更范围，然后 git add + git commit + git push
+5. 报告：grep 输出的文件清单、实际修改的文件清单、未修改的文件及原因
+```
 
 ---
 
-### 格式规范
+## 优化提示词 B（省 token 版）：重生成源代码文档
 
-- **纸张**：A4（210mm × 297mm）
-- **页边距**：上 2.54cm，下 2.54cm，左 3.17cm，右 3.17cm
-- **封面字体**：软件名称黑体二号（22pt），其余信息宋体三号（16pt）
-- **正文标题**：一级标题黑体三号（16pt），二级标题黑体四号（14pt），三级标题宋体小四加粗（12pt）
-- **正文内容**：宋体小四（12pt），1.5 倍行距
-- **页眉**：`AI 影视全流程工作流系统 软件使用说明书 V1.0`，宋体五号（10.5pt），居中
-- **页脚**：页码，宋体五号（10.5pt），居中
-- **截图占位**：在界面说明章节中，每个界面描述下方插入 `[此处插入界面截图]` 占位符，并附 1-2 句该界面核心功能描述
+```text
+任务：基于固定文件清单生成源代码文档，禁止遍历目录。
+
+前置校验：读取 package.json，确认 "name" 为 "ai-film-flow" 且 "version" 为 "1.0.0"，否则报错停止。
+
+前30页固定文件清单（按顺序读取，自然截断至30页）：
+1. package.json
+2. prisma/schema.prisma
+3. next.config.mjs
+4. tsconfig.json
+5. lib/prisma.ts
+6. lib/auth.ts
+7. lib/points.ts
+8. lib/queue.ts
+9. lib/operations.ts
+10. app/api/projects/route.ts
+11. app/api/projects/[id]/route.ts
+12. app/api/projects/[id]/steps/ideation/route.ts
+13. app/api/projects/[id]/steps/framework/route.ts
+14. app/api/projects/[id]/steps/style/route.ts
+15. app/api/projects/[id]/steps/character/route.ts
+16. app/api/projects/[id]/steps/concept/route.ts
+17. app/api/projects/[id]/steps/storyboard/route.ts
+18. app/api/projects/[id]/steps/trailer/route.ts
+19. app/api/projects/[id]/steps/video-direct/route.ts
+20. app/api/projects/[id]/video-segments/route.ts
+21. app/api/recharge/route.ts
+22. app/api/admin/analytics/route.ts
+23. app/api/admin/users/route.ts
+24. app/api/admin/recharges/route.ts
+25. app/layout.tsx
+26. app/(dashboard)/dashboard/page.tsx
+27. app/(dashboard)/project/[id]/page.tsx
+28. components/layout/AppSidebar.tsx
+29. components/layout/Header.tsx
+30. components/workflow/IdeaAnchor.tsx
+
+后30页固定文件清单：
+31. lib/video-utils.ts
+32. lib/video-segment-utils.ts
+33. lib/bgm-generator.ts
+34. lib/workflow-executor.ts
+35. lib/workflow-state.ts
+36. lib/workflow.ts
+37. lib/models-config.ts
+38. app/api/projects/[id]/steps/keyframes/route.ts
+39. app/api/projects/[id]/steps/keyframes/generate-last/route.ts
+40. app/(dashboard)/project/[id]/workflow/page.tsx
+41. app/(dashboard)/project/[id]/workflow/_components/TopStepper.tsx
+42. app/(dashboard)/project/[id]/storyboard/page.tsx
+43. app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable.tsx
+44. app/(dashboard)/project/[id]/storyboard/_components/StoryboardCanvas.tsx
+45. components/workflow/StepBadge.tsx
+46. app/admin/layout.tsx
+47. app/admin/analytics/page.tsx
+48. app/admin/users/page.tsx
+49. app/admin/recharges/page.tsx
+50. app/api/admin/users/[id]/points/route.ts
+
+格式要求：
+- A4，固定行距，每页50行
+- 页眉：AI 影视全流程工作流系统 V1.0（居中）
+- 页脚：前30页"第 X 页 共 60 页"（X=1~30），后30页"第 X 页 共 60 页"（X=31~60）
+- 代码字体：等宽或宋体，小字号，保持原始缩进
+- 文件分隔：/* ===== filename ===== */
+- 跨页标记：截断处标"续"，下页头标"续：filename"
+- 安全脱敏：替换硬编码 API Key、数据库密码、个人邮箱、真实 URL
+
+输出：
+- /mnt/agents/output/软著材料/源代码前30页.docx
+- /mnt/agents/output/软著材料/源代码后30页.docx
+- 报告：实际纳入文件清单、总行数、是否截断
+```
 
 ---
 
-### 输出要求
-
-- 使用 Python `python-docx` 生成标准 `.docx` 文件
-- 确保页眉页脚正确，页码连续
-- 保存到 `/mnt/agents/output/软著材料/软件使用说明书.docx`
-- 生成后报告实际页数
-
----
-
-**执行顺序**：按章节顺序生成内容 → 应用格式样式 → 插入页眉页脚 → 保存文件。
+**关键优化点：**
+- **A 提示词**：用 `grep` 代替「逐文件读取扫描」，token 消耗从 O(n) 降到 O(1)
+- **B 提示词**：用**固定文件清单**代替「遍历目录+AI挑选」，避免 Kimi Code 反复权衡文件重要性

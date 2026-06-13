@@ -537,7 +537,7 @@ LLM 在生成提示词时同步输出 `modelNo` 字段，后端通过 `assignMod
 ### 7.1 项目目录结构
 
 ```
-my-app/
+ai-film-flow/
 ├── app/                          # Next.js App Router
 │   ├── (dashboard)/              # 仪表盘路由组
 │   │   ├── dashboard/            # 项目列表页
