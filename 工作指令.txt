@@ -1,69 +1,51 @@
-已确认 `ai-film-flow` v1.0.0 推送成功，所有材料名称一致性风险已排除。
-
-现在可以直接执行**优化提示词 B**（固定文件清单，不遍历，省 token）：
+已确认。以下是**重新编排的固定文件清单**，缩减基础设施、优先核心工作流 API 与前端组件：
 
 ---
 
+## 优化提示词 C：重编排源代码文档（业务优先版）
+
 ```text
-任务：基于固定文件清单生成源代码文档，禁止遍历目录。
+任务：基于新的固定文件清单重新生成源代码前后30页，确保核心工作流 API 与前端组件被纳入。
 
 前置校验：读取 package.json，确认 "name" 为 "ai-film-flow" 且 "version" 为 "1.0.0"，否则报错停止。
 
-前30页固定文件清单（按顺序读取，自然截断至30页）：
+前30页固定文件清单（按顺序读取，自然截断至30页/1500行）：
 1. package.json
 2. prisma/schema.prisma
-3. next.config.mjs
-4. tsconfig.json
-5. lib/prisma.ts
-6. lib/auth.ts
-7. lib/points.ts
-8. lib/queue.ts
-9. lib/operations.ts
-10. app/api/projects/route.ts
-11. app/api/projects/[id]/route.ts
-12. app/api/projects/[id]/steps/ideation/route.ts
-13. app/api/projects/[id]/steps/framework/route.ts
-14. app/api/projects/[id]/steps/style/route.ts
-15. app/api/projects/[id]/steps/character/route.ts
-16. app/api/projects/[id]/steps/concept/route.ts
-17. app/api/projects/[id]/steps/storyboard/route.ts
-18. app/api/projects/[id]/steps/trailer/route.ts
-19. app/api/projects/[id]/steps/video-direct/route.ts
-20. app/api/projects/[id]/video-segments/route.ts
-21. app/api/recharge/route.ts
-22. app/api/admin/analytics/route.ts
-23. app/api/admin/users/route.ts
-24. app/api/admin/recharges/route.ts
-25. app/layout.tsx
-26. app/(dashboard)/dashboard/page.tsx
-27. app/(dashboard)/project/[id]/page.tsx
-28. components/layout/AppSidebar.tsx
-29. components/layout/Header.tsx
-30. components/workflow/IdeaAnchor.tsx
+3. lib/workflow.ts
+4. lib/workflow-state.ts
+5. app/api/projects/route.ts
+6. app/api/projects/[id]/route.ts
+7. app/api/projects/[id]/steps/ideation/route.ts（创意扩散）
+8. app/api/projects/[id]/steps/framework/route.ts（框架搭建）
+9. app/api/projects/[id]/steps/style/route.ts（风格统一）
+10. app/api/projects/[id]/steps/character/route.ts（人物设计）
+11. app/api/projects/[id]/steps/concept/route.ts（概念图）
+12. app/api/projects/[id]/steps/storyboard/route.ts（分镜设计）
+13. app/api/projects/[id]/steps/trailer/route.ts（宣传片）
+14. app/api/projects/[id]/steps/video-direct/route.ts（直出视频）
+15. app/api/projects/[id]/steps/keyframes/route.ts（生成尾帧）
+16. app/api/projects/[id]/steps/keyframes/generate-last/route.ts（单条尾帧）
 
-后30页固定文件清单：
-31. lib/video-utils.ts
-32. lib/video-segment-utils.ts
-33. lib/bgm-generator.ts
-34. lib/workflow-executor.ts
-35. lib/workflow-state.ts
-36. lib/workflow.ts
-37. lib/models-config.ts
-38. app/api/projects/[id]/steps/keyframes/route.ts
-39. app/api/projects/[id]/steps/keyframes/generate-last/route.ts
-40. app/(dashboard)/project/[id]/workflow/page.tsx
-41. app/(dashboard)/project/[id]/workflow/_components/TopStepper.tsx
-42. app/(dashboard)/project/[id]/storyboard/page.tsx
-43. app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable.tsx
-44. app/(dashboard)/project/[id]/storyboard/_components/StoryboardCanvas.tsx
-45. components/workflow/StepBadge.tsx
-46. app/admin/layout.tsx
-47. app/admin/analytics/page.tsx
-48. app/admin/users/page.tsx
-49. app/admin/recharges/page.tsx
-50. app/api/admin/users/[id]/points/route.ts
+后30页固定文件清单（接续前30页，排除已纳入文件，自然截断至30页/1500行）：
+17. lib/video-utils.ts（ffmpeg 视频合成核心）
+18. lib/video-segment-utils.ts（视频片段处理）
+19. lib/bgm-generator.ts（背景音乐生成）
+20. lib/workflow-executor.ts（工作流执行器）
+21. lib/models-config.ts（AI 模型配置）
+22. app/(dashboard)/project/[id]/workflow/page.tsx（工作流看板前端）
+23. app/(dashboard)/project/[id]/workflow/_components/TopStepper.tsx（顶部步骤条）
+24. app/(dashboard)/project/[id]/storyboard/page.tsx（分镜编辑器前端）
+25. app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable.tsx（分镜表格）
+26. app/(dashboard)/project/[id]/storyboard/_components/StoryboardCanvas.tsx（分镜画布）
+27. components/workflow/IdeaAnchor.tsx（灵感锚点组件）
+28. components/workflow/StepBadge.tsx（步骤状态徽章）
+29. app/admin/analytics/page.tsx（管理后台-数据看板）
+30. app/admin/users/page.tsx（管理后台-用户管理）
+31. app/admin/recharges/page.tsx（管理后台-充值审核）
+32. app/api/admin/users/[id]/points/route.ts（管理员调点数 API）
 
-格式要求：
+格式要求（与前次一致）：
 - A4，固定行距，每页50行
 - 页眉：AI 影视全流程工作流系统 V1.0（居中）
 - 页脚：前30页"第 X 页 共 60 页"（X=1~30），后30页"第 X 页 共 60 页"（X=31~60）
@@ -75,9 +57,13 @@
 输出：
 - /mnt/agents/output/软著材料/源代码前30页.docx
 - /mnt/agents/output/软著材料/源代码后30页.docx
-- 报告：实际纳入文件清单、总行数、是否截断
+- 报告：实际纳入文件清单、总行数、截断位置
 ```
 
 ---
 
-**执行建议**：等 Kimi Code 限额恢复后，直接粘贴上述提示词。固定清单模式不会触发全量遍历，token 消耗可控。
+**关键调整说明**：
+- **前30页**：砍掉 `lib/prisma.ts`、`lib/auth.ts`、`lib/points.ts`、`lib/queue.ts` 等通用基础设施，保留 `package.json` + `schema.prisma` 证明技术栈，其余全部让给**9步工作流 API**
+- **后30页**：以**视频合成算法**（ffmpeg、BGM、片段处理）+ **前端工作流组件**（看板、分镜编辑器、TopStepper）+ **管理后台**为主，体现完整业务闭环
+
+等 Kimi Code 限额恢复后执行即可。

@@ -57,17 +57,12 @@ SOFTWARE_VERSION = "V1.0"
 LINES_PER_PAGE = 50
 MAX_LINES = 30 * LINES_PER_PAGE  # 1500 行
 
-# 前 30 页固定文件清单（按顺序读取，自然截断至 30 页）
+# 前 30 页固定文件清单（按顺序读取，自然截断至 30 页/1500 行）
 FILE_ORDER_FRONT = [
     "package.json",
     "prisma/schema.prisma",
-    "next.config.mjs",
-    "tsconfig.json",
-    "lib/prisma.ts",
-    "lib/auth.ts",
-    "lib/points.ts",
-    "lib/queue.ts",
-    "lib/operations.ts",
+    "lib/workflow.ts",
+    "lib/workflow-state.ts",
     "app/api/projects/route.ts",
     "app/api/projects/[id]/route.ts",
     "app/api/projects/[id]/steps/ideation/route.ts",
@@ -78,37 +73,24 @@ FILE_ORDER_FRONT = [
     "app/api/projects/[id]/steps/storyboard/route.ts",
     "app/api/projects/[id]/steps/trailer/route.ts",
     "app/api/projects/[id]/steps/video-direct/route.ts",
-    "app/api/projects/[id]/video-segments/route.ts",
-    "app/api/recharge/route.ts",
-    "app/api/admin/analytics/route.ts",
-    "app/api/admin/users/route.ts",
-    "app/api/admin/recharges/route.ts",
-    "app/layout.tsx",
-    "app/(dashboard)/dashboard/page.tsx",
-    "app/(dashboard)/project/[id]/page.tsx",
-    "components/layout/AppSidebar.tsx",
-    "components/layout/Header.tsx",
-    "components/workflow/IdeaAnchor.tsx",
+    "app/api/projects/[id]/steps/keyframes/route.ts",
+    "app/api/projects/[id]/steps/keyframes/generate-last/route.ts",
 ]
 
-# 后 30 页固定文件清单
+# 后 30 页固定文件清单（接续前 30 页，排除已纳入文件，自然截断至 30 页/1500 行）
 FILE_ORDER_BACK = [
     "lib/video-utils.ts",
     "lib/video-segment-utils.ts",
     "lib/bgm-generator.ts",
     "lib/workflow-executor.ts",
-    "lib/workflow-state.ts",
-    "lib/workflow.ts",
     "lib/models-config.ts",
-    "app/api/projects/[id]/steps/keyframes/route.ts",
-    "app/api/projects/[id]/steps/keyframes/generate-last/route.ts",
     "app/(dashboard)/project/[id]/workflow/page.tsx",
     "app/(dashboard)/project/[id]/workflow/_components/TopStepper.tsx",
     "app/(dashboard)/project/[id]/storyboard/page.tsx",
     "app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable.tsx",
     "app/(dashboard)/project/[id]/storyboard/_components/StoryboardCanvas.tsx",
+    "components/workflow/IdeaAnchor.tsx",
     "components/workflow/StepBadge.tsx",
-    "app/admin/layout.tsx",
     "app/admin/analytics/page.tsx",
     "app/admin/users/page.tsx",
     "app/admin/recharges/page.tsx",
