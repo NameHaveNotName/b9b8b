@@ -57,61 +57,25 @@ SOFTWARE_VERSION = "V1.0"
 LINES_PER_PAGE = 50
 MAX_LINES = 30 * LINES_PER_PAGE  # 1500 行
 
-# 前 30 页：项目骨架 → 基础设施 → 业务 API 起点
+# 前 30 页固定文件清单（按顺序读取，自然截断至 30 页）
 FILE_ORDER_FRONT = [
-    # 1. 项目骨架层
     "package.json",
     "prisma/schema.prisma",
     "next.config.mjs",
     "tsconfig.json",
-    # 2. 基础设施层
     "lib/prisma.ts",
     "lib/auth.ts",
-    "lib/auth-helpers.ts",
     "lib/points.ts",
-    "lib/points-config.ts",
-    "lib/operations.ts",
     "lib/queue.ts",
-    # 3. 业务 API 层（起点）
+    "lib/operations.ts",
     "app/api/projects/route.ts",
     "app/api/projects/[id]/route.ts",
-    "app/api/projects/[id]/assets/route.ts",
     "app/api/projects/[id]/steps/ideation/route.ts",
     "app/api/projects/[id]/steps/framework/route.ts",
     "app/api/projects/[id]/steps/style/route.ts",
     "app/api/projects/[id]/steps/character/route.ts",
     "app/api/projects/[id]/steps/concept/route.ts",
     "app/api/projects/[id]/steps/storyboard/route.ts",
-    "app/api/projects/[id]/steps/keyframes/route.ts",
-    "app/api/projects/[id]/steps/trailer/route.ts",
-    "app/api/projects/[id]/steps/video-direct/route.ts",
-    "app/api/projects/[id]/video-segments/route.ts",
-    "app/api/recharge/route.ts",
-    "app/api/admin/analytics/route.ts",
-    "app/api/admin/users/route.ts",
-    # 4. 前端与组件层
-    "app/layout.tsx",
-    "app/(dashboard)/dashboard/page.tsx",
-    "app/admin/layout.tsx",
-    "app/admin/analytics/page.tsx",
-    "app/(dashboard)/project/[id]/workflow/page.tsx",
-    "app/(dashboard)/project/[id]/workflow/_components/TopStepper.tsx",
-    "components/layout/AppSidebar.tsx",
-    "components/layout/Header.tsx",
-]
-
-# 后 30 页：工作流核心 API → 视频合成 → 前端工作流 → 管理后台
-FILE_ORDER_BACK = [
-    # 1. 工作流核心 API 层（续前 30 页）
-    "app/api/projects/[id]/assets/route.ts",
-    "app/api/projects/[id]/steps/ideation/route.ts",
-    "app/api/projects/[id]/steps/framework/route.ts",
-    "app/api/projects/[id]/steps/style/route.ts",
-    "app/api/projects/[id]/steps/character/route.ts",
-    "app/api/projects/[id]/steps/concept/route.ts",
-    "app/api/projects/[id]/steps/storyboard/route.ts",
-    "app/api/projects/[id]/steps/keyframes/route.ts",
-    "app/api/projects/[id]/steps/keyframes/generate-last/route.ts",
     "app/api/projects/[id]/steps/trailer/route.ts",
     "app/api/projects/[id]/steps/video-direct/route.ts",
     "app/api/projects/[id]/video-segments/route.ts",
@@ -119,8 +83,16 @@ FILE_ORDER_BACK = [
     "app/api/admin/analytics/route.ts",
     "app/api/admin/users/route.ts",
     "app/api/admin/recharges/route.ts",
-    "app/api/admin/users/[id]/points/route.ts",
-    # 2. 视频与合成层
+    "app/layout.tsx",
+    "app/(dashboard)/dashboard/page.tsx",
+    "app/(dashboard)/project/[id]/page.tsx",
+    "components/layout/AppSidebar.tsx",
+    "components/layout/Header.tsx",
+    "components/workflow/IdeaAnchor.tsx",
+]
+
+# 后 30 页固定文件清单
+FILE_ORDER_BACK = [
     "lib/video-utils.ts",
     "lib/video-segment-utils.ts",
     "lib/bgm-generator.ts",
@@ -128,24 +100,19 @@ FILE_ORDER_BACK = [
     "lib/workflow-state.ts",
     "lib/workflow.ts",
     "lib/models-config.ts",
-    # 3. 前端工作流组件层
-    "app/layout.tsx",
-    "app/(dashboard)/dashboard/page.tsx",
-    "app/(dashboard)/project/[id]/page.tsx",
+    "app/api/projects/[id]/steps/keyframes/route.ts",
+    "app/api/projects/[id]/steps/keyframes/generate-last/route.ts",
     "app/(dashboard)/project/[id]/workflow/page.tsx",
     "app/(dashboard)/project/[id]/workflow/_components/TopStepper.tsx",
     "app/(dashboard)/project/[id]/storyboard/page.tsx",
     "app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable.tsx",
     "app/(dashboard)/project/[id]/storyboard/_components/StoryboardCanvas.tsx",
-    "components/layout/AppSidebar.tsx",
-    "components/layout/Header.tsx",
-    "components/workflow/IdeaAnchor.tsx",
     "components/workflow/StepBadge.tsx",
-    # 4. 管理后台前端层
     "app/admin/layout.tsx",
     "app/admin/analytics/page.tsx",
     "app/admin/users/page.tsx",
     "app/admin/recharges/page.tsx",
+    "app/api/admin/users/[id]/points/route.ts",
 ]
 
 
@@ -402,18 +369,32 @@ def generate_part(
 
 
 def main():
+    # 前置校验：确认 package.json 名称/版本
+    package_json = PROJECT_ROOT / "package.json"
+    import json
+    with open(package_json, "r", encoding="utf-8") as f:
+        pkg = json.load(f)
+    if pkg.get("name") != "ai-film-flow" or pkg.get("version") != "1.0.0":
+        print(
+            f"[ERROR] package.json 校验失败: name={pkg.get('name')}, version={pkg.get('version')}，"
+            "要求 name='ai-film-flow' 且 version='1.0.0'，已停止生成。"
+        )
+        sys.exit(1)
+    print("[OK] package.json 校验通过: ai-film-flow v1.0.0")
+
     generate_part(
         FILE_ORDER_FRONT,
         "源代码前30页.docx",
         start_page=1,
         total_pages_label=None,  # 使用 NUMPAGES 域
+        max_lines_per_file=None,
     )
     generate_part(
         FILE_ORDER_BACK,
         "源代码后30页.docx",
         start_page=31,
         total_pages_label="60",  # 合并后总页数固定 60
-        max_lines_per_file=37,  # 后 30 页单文件上限，保证工作流覆盖面
+        max_lines_per_file=None,
     )
 
 

@@ -1,33 +1,8 @@
-是的，**全局遍历检索替换是主要耗因**。
+已确认 `ai-film-flow` v1.0.0 推送成功，所有材料名称一致性风险已排除。
 
-Kimi Code 在执行「全局审查」时，为了安全起见会逐文件读取内容、扫描、再确认是否修改。对于一个 Next.js 项目，这意味着它可能读取了 `node_modules` 以外的所有 `.ts/.tsx/.json/.md` 文件，token 消耗会随文件数量线性爆炸。5 小时限额被半小时耗尽，基本符合这种「全量读取」模式。
-
-**更高效的替代方案：用命令行 grep 先定位，再精准修改。**
-
-以下是优化后的提示词，避免再次耗尽限额：
+现在可以直接执行**优化提示词 B**（固定文件清单，不遍历，省 token）：
 
 ---
-
-## 优化提示词 A（省 token 版）：定位并替换
-
-```text
-任务：精准定位并替换软件名称与版本号，禁止逐文件全文读取。
-
-执行步骤：
-1. 在终端执行以下命令，仅查找包含 "my-app" 的文件（排除 node_modules/.next/dist）：
-   grep -r "my-app" --include="*.json" --include="*.md" --include="*.yml" --include="*.yaml" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.mjs" --include="*.sh" --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist . | head -50
-2. 在终端执行以下命令，查找包含 "0.1.0" 的文件：
-   grep -r "0\.1\.0" --include="*.json" --include="*.md" --include="*.yml" --include="*.yaml" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.mjs" --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist . | head -50
-3. 根据 grep 结果，只修改确实包含本软件标识的文件：
-   - package.json: "name" → "ai-film-flow", "version" → "1.0.0"
-   - 其他文件若包含 "my-app" 或 "0.1.0"，判断是否为第三方依赖引用（如 README 中引用官方示例），若是则保留并注释；若是本软件标识则替换
-4. 修改完成后执行 git diff 确认变更范围，然后 git add + git commit + git push
-5. 报告：grep 输出的文件清单、实际修改的文件清单、未修改的文件及原因
-```
-
----
-
-## 优化提示词 B（省 token 版）：重生成源代码文档
 
 ```text
 任务：基于固定文件清单生成源代码文档，禁止遍历目录。
@@ -105,6 +80,4 @@ Kimi Code 在执行「全局审查」时，为了安全起见会逐文件读取�
 
 ---
 
-**关键优化点：**
-- **A 提示词**：用 `grep` 代替「逐文件读取扫描」，token 消耗从 O(n) 降到 O(1)
-- **B 提示词**：用**固定文件清单**代替「遍历目录+AI挑选」，避免 Kimi Code 反复权衡文件重要性
+**执行建议**：等 Kimi Code 限额恢复后，直接粘贴上述提示词。固定清单模式不会触发全量遍历，token 消耗可控。
