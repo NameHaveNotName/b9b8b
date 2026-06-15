@@ -47,7 +47,16 @@ export async function middleware(request: NextRequest) {
     if (!isProtectedRoute && !isProtectedApi) {
       return NextResponse.next()
     }
-    // 受保护路由在异常时保守处理：重定向到登录
+
+    // API 路由必须返回 JSON，不能返回 HTML 重定向，否则前端 res.json() 会解析失败
+    if (isProtectedApi) {
+      return NextResponse.json(
+        { error: 'AUTH_001', message: '未登录或服务端认证配置异常' },
+        { status: 401 }
+      )
+    }
+
+    // 受保护页面路由在异常时保守处理：重定向到登录
     const loginUrl = new URL("/login", request.url)
     loginUrl.searchParams.set("redirect", pathname)
     return NextResponse.redirect(loginUrl)

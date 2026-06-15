@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Pencil, Check, X } from 'lucide-react'
+import { apiClient } from '@/lib/api-client'
 
 interface EditableTitleProps {
   projectId: string
@@ -21,14 +22,15 @@ export default function EditableTitle({ projectId, initialTitle }: EditableTitle
     }
     setSaving(true)
     try {
-      const res = await fetch(`/api/projects/${projectId}`, {
+      await apiClient(`/api/projects/${projectId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: title.trim() }),
       })
-      if (!res.ok) throw new Error('保存失败')
       setEditing(false)
-    } catch {
+    } catch (err: any) {
+      console.error('[EditableTitle] save error:', err)
+      alert(err?.message || '保存失败')
       setTitle(initialTitle)
       setEditing(false)
     } finally {

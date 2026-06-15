@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
+import { apiClient } from '@/lib/api-client'
 import { Bell, User, LogOut, Settings, ChevronDown, Zap, Diamond, Receipt } from 'lucide-react'
 import RechargeModal from '@/components/recharge/RechargeModal'
 
@@ -57,12 +58,13 @@ export default function Header() {
     let mounted = true
     async function loadPoints() {
       try {
-        const res = await fetch('/api/user')
-        const data = await res.json()
+        const data = await apiClient<{ user?: { points?: number } }>('/api/user')
         if (mounted && data.user?.points !== undefined) {
           setPoints(data.user.points)
         }
-      } catch {}
+      } catch {
+        // 静默失败，避免 header 崩溃
+      }
     }
     loadPoints()
     const interval = setInterval(loadPoints, 15000) // 15秒轮询

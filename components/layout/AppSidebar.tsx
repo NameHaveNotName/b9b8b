@@ -31,7 +31,15 @@ interface User {
   points?: number
 }
 
-export default function AppSidebar({ user, recentProjects }: { user: User; recentProjects: Project[] }) {
+export default function AppSidebar({
+  user,
+  recentProjects,
+  loading = false,
+}: {
+  user: User
+  recentProjects: Project[]
+  loading?: boolean
+}) {
   const [projectsOpen, setProjectsOpen] = useState(true)
   const pathname = usePathname()
   const { signOut } = useAuth()
@@ -137,21 +145,27 @@ export default function AppSidebar({ user, recentProjects }: { user: User; recen
             )}
           </button>
 
-          {projectsOpen && recentProjects.length > 0 && (
+          {projectsOpen && (
             <div className="mt-1 space-y-0.5 pl-9">
-              {recentProjects.map((p) => (
-                <Link
-                  key={p.id}
-                  href={`/project/${p.id}`}
-                  className={`block truncate rounded-md px-2 py-1.5 text-xs transition ${
-                    pathname === `/project/${p.id}` || pathname?.startsWith(`/project/${p.id}/`)
-                      ? 'bg-amber-50 text-amber-700 font-medium'
-                      : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'
-                  }`}
-                >
-                  {p.title}
-                </Link>
-              ))}
+              {loading ? (
+                <p className="px-2 py-1.5 text-xs text-stone-400">加载中...</p>
+              ) : recentProjects.length === 0 ? (
+                <p className="px-2 py-1.5 text-xs text-stone-400">暂无项目</p>
+              ) : (
+                recentProjects.map((p) => (
+                  <Link
+                    key={p.id}
+                    href={`/project/${p.id}`}
+                    className={`block truncate rounded-md px-2 py-1.5 text-xs transition ${
+                      pathname === `/project/${p.id}` || pathname?.startsWith(`/project/${p.id}/`)
+                        ? 'bg-amber-50 text-amber-700 font-medium'
+                        : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'
+                    }`}
+                  >
+                    {p.title}
+                  </Link>
+                ))
+              )}
             </div>
           )}
         </div>

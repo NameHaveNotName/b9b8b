@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { Clock, Trash2, LoaderCircle } from 'lucide-react'
+import { apiClient } from '@/lib/api-client'
 
 interface ProjectCardProps {
   project: {
@@ -29,9 +30,8 @@ export default function ProjectCard({ project, onDeleted, onError }: ProjectCard
 
     setIsDeleting(true)
     try {
-      const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
-      const data = await res.json()
-      if (!res.ok || !data.success) {
+      const data = await apiClient<{ success?: boolean; message?: string }>(`/api/projects/${project.id}`, { method: 'DELETE' })
+      if (!data.success) {
         throw new Error(data.message || '删除失败')
       }
       onDeleted(project.id)

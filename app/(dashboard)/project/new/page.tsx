@@ -3,10 +3,12 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sparkles, Loader2 } from 'lucide-react'
+import { apiClient } from '@/lib/api-client'
 
 export default function NewProjectPage() {
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
   const charCount = title.length
@@ -16,21 +18,25 @@ export default function NewProjectPage() {
     e.preventDefault()
     if (!isValid) return
     setLoading(true)
+    setError(null)
 
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim() }),
-      })
-      const data = await res.json()
+      const data = await apiClient<{ project?: { id: string }; error?: string; message?: string }>(
+        '/api/projects',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: title.trim() }),
+        }
+      )
       if (data.project?.id) {
         router.push(`/project/${data.project.id}/workflow?step=ideation`)
       } else {
-        alert('创建失败：' + (data.error || '未知错误'))
+        setError('创建失败：' + (data.message || data.error || '未知错误'))
       }
     } catch (err: any) {
-      alert('网络错误：' + err.message)
+      console.error('[NewProjectPage] create error:', err)
+      setError(err?.message || '网络错误，请稍后重试')
     } finally {
       setLoading(false)
     }
@@ -68,6 +74,13 @@ export default function NewProjectPage() {
             </p>
           </div>
         </div>
+
+        {/* 错误提示 */}
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
         {/* 提交按钮 */}
         <button

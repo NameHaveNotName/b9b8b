@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import AppSidebar from '@/components/layout/AppSidebar'
 import Header from '@/components/layout/Header'
+import { apiClient } from '@/lib/api-client'
 
 interface User {
   id: string
@@ -29,36 +30,34 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let mounted = true
     async function fetchData() {
       try {
+        setLoading(true)
+
         // 并行获取用户信息和最近项目
-        const [userRes, projectsRes] = await Promise.all([
-          fetch('/api/user'),
-          fetch('/api/projects'),
+        const [userData, projectsData] = await Promise.all([
+          apiClient<{ user: User }>('/api/user'),
+          apiClient<{ projects: Project[] }>('/api/projects'),
         ])
 
-        if (userRes.status === 401 || projectsRes.status === 401) {
-          window.location.href = '/login'
-          return
-        }
+        if (!mounted) return
 
-        if (userRes.ok) {
-          const userData = await userRes.json()
-          setUser(userData.user || null)
-        }
-
-        if (projectsRes.ok) {
-          const projectsData = await projectsRes.json()
-          setRecentProjects((projectsData.projects || []).slice(0, 5))
-        }
-      } catch (e) {
+        setUser(userData?.user || null)
+        setRecentProjects((projectsData?.projects || []).slice(0, 5))
+      } catch (e: any) {
+        if (!mounted) return
         console.error('[DashboardShell] fetch error:', e)
+        // 401 已由 apiClient 自动跳转到登录页；其他错误静默，避免阻塞页面
       } finally {
-        setLoading(false)
+        if (mounted) setLoading(false)
       }
     }
 
     fetchData()
+    return () => {
+      mounted = false
+    }
   }, [])
 
   return (
@@ -66,10 +65,17 @@ export default function DashboardShell({ children }: { children: React.ReactNode
       <AppSidebar
         user={user || { name: '加载中...', email: '' }}
         recentProjects={recentProjects}
+        loading={loading}
       />
       <main className="flex flex-1 flex-col min-h-screen">
         <Header />
         <div className="flex-1 overflow-auto p-6">
+          {loading && (
+            <div className="mb-4 flex items-center gap-2 text-xs text-stone-400">
+              <div className="h-3 w-3 animate-spin rounded-full border border-stone-300 border-t-amber-600" />
+              正在同步侧边栏数据...
+            </div>
+          )}
           {children}
         </div>
       </main>
