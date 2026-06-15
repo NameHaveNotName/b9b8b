@@ -13,6 +13,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },
+      // 生产数据库暂缺 combinedVideoUrl/combinedVideoStatus 列，先排除避免 P2022
+      omit: {
+        combinedVideoUrl: true,
+        combinedVideoStatus: true,
+      },
       include: {
         steps: {
           orderBy: { order: 'asc' },
@@ -43,7 +48,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
     }
 
-    const project = await prisma.project.findUnique({ where: { id: params.id } })
+    const project = await prisma.project.findUnique({
+      where: { id: params.id },
+      omit: {
+        combinedVideoUrl: true,
+        combinedVideoStatus: true,
+      },
+    })
 
     if (!project || project.userId !== userId) {
       return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
@@ -87,6 +98,10 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },
+      omit: {
+        combinedVideoUrl: true,
+        combinedVideoStatus: true,
+      },
       include: {
         assets: { select: { id: true, url: true, storageKey: true } }
       }

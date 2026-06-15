@@ -18,6 +18,11 @@ export async function GET() {
     const projects = await prisma.project.findMany({
       where: { userId, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
+      // 生产数据库暂缺 combinedVideoUrl/combinedVideoStatus 列，先排除避免 P2022
+      omit: {
+        combinedVideoUrl: true,
+        combinedVideoStatus: true,
+      },
       include: {
         _count: { select: { steps: true, assets: true } },
       },

@@ -59,6 +59,11 @@ export default async function AdminUserProjectsPage({ params }: PageProps) {
   const projects = await prisma.project.findMany({
     where: { userId: user.id },
     orderBy: { updatedAt: 'desc' },
+    // 生产数据库暂缺 combinedVideoUrl/combinedVideoStatus 列，先排除避免 P2022
+    omit: {
+      combinedVideoUrl: true,
+      combinedVideoStatus: true,
+    },
     include: {
       _count: { select: { assets: true, steps: true } },
       steps: { select: { stepType: true, status: true } },
