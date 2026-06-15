@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { WorkflowStepType } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser, getCurrentUserId } from '@/lib/auth-helpers';
+import { projectDashboardSelect } from '@/lib/db/project-select';
 
 export async function GET() {
   try {
@@ -18,14 +19,7 @@ export async function GET() {
     const projects = await prisma.project.findMany({
       where: { userId, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
-      // 生产数据库暂缺 combinedVideoUrl/combinedVideoStatus 列，先排除避免 P2022
-      omit: {
-        combinedVideoUrl: true,
-        combinedVideoStatus: true,
-      },
-      include: {
-        _count: { select: { steps: true, assets: true } },
-      },
+      select: projectDashboardSelect,
     });
 
     console.log('[GET /api/projects] found projects:', projects.length)

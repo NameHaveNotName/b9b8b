@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
+import { projectDetailSelect } from '@/lib/db/project-select'
 import {
   Lightbulb,
   PanelsTopLeft,
@@ -73,15 +74,7 @@ export default async function ProjectPage({ params }: { params: { id: string } }
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },
-      // 生产数据库暂缺 combinedVideoUrl/combinedVideoStatus 列，先排除避免 P2022
-      omit: {
-        combinedVideoUrl: true,
-        combinedVideoStatus: true,
-      },
-      include: {
-        steps: { orderBy: { order: 'asc' } },
-        assets: { orderBy: { createdAt: 'desc' }, take: 6 },
-      },
+      select: projectDetailSelect,
     })
 
     if (!project || project.userId !== userId) {

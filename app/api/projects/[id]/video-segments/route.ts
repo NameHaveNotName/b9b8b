@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
+import { projectCoreSelect } from '@/lib/db/project-select'
 
 /**
  * GET /api/projects/:id/video-segments?stepName=TRAILER
@@ -15,7 +16,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
-  const project = await prisma.project.findUnique({ where: { id: params.id } })
+  const project = await prisma.project.findUnique({
+    where: { id: params.id },
+    select: projectCoreSelect,
+  })
   if (!project || project.userId !== userId) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
   }
@@ -46,8 +50,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       failed: failedCount,
       allCompleted,
     },
-    combinedVideoUrl: project.combinedVideoUrl,
-    combinedVideoStatus: project.combinedVideoStatus,
-    bgmUrl: project.bgmUrl,
+    // 生产数据库暂缺这些媒体字段，schema 与 DB 对齐后恢复
+    combinedVideoUrl: (project as any).combinedVideoUrl ?? null,
+    combinedVideoStatus: (project as any).combinedVideoStatus ?? null,
+    bgmUrl: (project as any).bgmUrl ?? null,
   })
 }

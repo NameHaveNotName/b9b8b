@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
+import { projectDetailSelect, projectCoreSelect } from '@/lib/db/project-select'
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   try {
@@ -13,18 +14,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },
-      // 生产数据库暂缺 combinedVideoUrl/combinedVideoStatus 列，先排除避免 P2022
-      omit: {
-        combinedVideoUrl: true,
-        combinedVideoStatus: true,
-      },
-      include: {
-        steps: {
-          orderBy: { order: 'asc' },
-          include: { resultAssets: true },
-        },
-        assets: { orderBy: { createdAt: 'desc' } },
-      },
+      select: projectDetailSelect,
     })
 
     if (!project || project.userId !== userId) {
@@ -50,10 +40,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },
-      omit: {
-        combinedVideoUrl: true,
-        combinedVideoStatus: true,
-      },
+      select: projectCoreSelect,
     })
 
     if (!project || project.userId !== userId) {
@@ -98,11 +85,8 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },
-      omit: {
-        combinedVideoUrl: true,
-        combinedVideoStatus: true,
-      },
-      include: {
+      select: {
+        ...projectCoreSelect,
         assets: { select: { id: true, url: true, storageKey: true } }
       }
     })

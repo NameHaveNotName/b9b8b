@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { projectDashboardSelect } from '@/lib/db/project-select'
 import { WORKFLOW_STEPS } from '@/lib/workflow'
 import { getCurrentUser } from '@/lib/auth-helpers'
 import Link from 'next/link'
@@ -78,15 +79,7 @@ export default async function DashboardPage() {
       where: { status: 'ACTIVE', userId },
       orderBy: { updatedAt: 'desc' },
       take: 20,
-      select: {
-        id: true,
-        title: true,
-        rawIdea: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: { select: { assets: true } },
-        steps: { select: { order: true, status: true } },
-      },
+      select: projectDashboardSelect,
     })
 
     const stats = [

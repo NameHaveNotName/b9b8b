@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { notFound, redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { projectAdminSelect } from '@/lib/db/project-select'
 import { getCurrentUser } from '@/lib/auth-helpers'
 import Link from 'next/link'
 import {
@@ -59,15 +60,7 @@ export default async function AdminUserProjectsPage({ params }: PageProps) {
   const projects = await prisma.project.findMany({
     where: { userId: user.id },
     orderBy: { updatedAt: 'desc' },
-    // 生产数据库暂缺 combinedVideoUrl/combinedVideoStatus 列，先排除避免 P2022
-    omit: {
-      combinedVideoUrl: true,
-      combinedVideoStatus: true,
-    },
-    include: {
-      _count: { select: { assets: true, steps: true } },
-      steps: { select: { stepType: true, status: true } },
-    },
+    select: projectAdminSelect,
   })
 
   // 操作日志按步骤聚合统计
