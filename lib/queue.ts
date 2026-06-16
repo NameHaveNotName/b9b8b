@@ -55,17 +55,36 @@ function createRealConnection() {
 }
 
 // ============================================================
-// 导出：根据模式选择实现
+// 导出：根据模式选择实现（懒加载，避免构建时建立长连接导致进程无法退出）
 // ============================================================
 
-export const redisConnection = isDemoMode
-  ? (() => { console.log('[DASHBOARD-FIX][QUEUE] DEMO模式，Redis队列短路'); return mockConnection; })()
-  : createRealConnection();
+let _redisConnection: IORedis | undefined;
+
+function getRedisConnection(): IORedis {
+  if (!_redisConnection) {
+    _redisConnection = isDemoMode
+      ? (() => { console.log('[DASHBOARD-FIX][QUEUE] DEMO模式，Redis队列短路'); return mockConnection; })()
+      : createRealConnection();
+  }
+  return _redisConnection;
+}
+
+// 保持旧导出签名：首次访问属性时才真正创建连接
+export const redisConnection = new Proxy({} as IORedis, {
+  get(_, prop) {
+    const conn = getRedisConnection();
+    const value = (conn as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(conn);
+    }
+    return value;
+  },
+});
 
 export function createQueue(name: string) {
-  return isDemoMode ? createMockQueue(name) : new Queue(name, { connection: redisConnection });
+  return isDemoMode ? createMockQueue(name) : new Queue(name, { connection: getRedisConnection() });
 }
 
 export function createWorker(name: string, processor: any) {
-  return isDemoMode ? createMockWorker(name, processor) : new Worker(name, processor, { connection: redisConnection });
+  return isDemoMode ? createMockWorker(name, processor) : new Worker(name, processor, { connection: getRedisConnection() });
 }

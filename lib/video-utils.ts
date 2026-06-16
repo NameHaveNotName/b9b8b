@@ -84,8 +84,14 @@ function resolveFfmpegPath(): string {
   return 'ffmpeg'
 }
 
-// ffmpeg 二进制路径（开发/生产都通过 resolveFfmpegPath 提供）
-const FFMPEG_BIN: string = resolveFfmpegPath()
+// ffmpeg 二进制路径改为懒解析，避免构建阶段执行系统探测命令
+let _FFMPEG_BIN: string | undefined;
+function getFfmpegBin(): string {
+  if (!_FFMPEG_BIN) {
+    _FFMPEG_BIN = resolveFfmpegPath();
+  }
+  return _FFMPEG_BIN;
+}
 
 /** 把命令里所有路径用双引号包裹，规避 Windows 下空格/中文路径问题 */
 function quote(p: string): string {
@@ -196,7 +202,7 @@ export async function kenBurnsClipFromImage(
   ].join(':')
 
   const cmd = [
-    quote(FFMPEG_BIN),
+    quote(getFfmpegBin()),
     `-y`,
     `-loop 1`,
     `-i ${quote(imagePath)}`,
@@ -237,7 +243,7 @@ export async function concatVideos(segmentPaths: string[], outputPath: string): 
 
   // -fflags +genpts 修正可能错位的 PTS；统一重新编码确保兼容
   const cmd = [
-    quote(FFMPEG_BIN),
+    quote(getFfmpegBin()),
     `-y`,
     `-f concat`,
     `-safe 0`,
@@ -262,7 +268,7 @@ export async function concatVideos(segmentPaths: string[], outputPath: string): 
 /** 检测视频文件是否包含音频流（通过 ffmpeg -i 的 stderr 解析） */
 async function hasAudioStream(videoPath: string): Promise<boolean> {
   try {
-    const { stderr } = await execAsync(`${quote(FFMPEG_BIN)} -i ${quote(videoPath)}`, {
+    const { stderr } = await execAsync(`${quote(getFfmpegBin())} -i ${quote(videoPath)}`, {
       maxBuffer: 32 * 1024 * 1024,
     })
     return /Stream\s+#\d+:\d+(?:\(\w+\))?:\s+Audio/i.test(stderr || '')
@@ -283,7 +289,7 @@ export async function generateSilentBgm(
   sampleRate = 44100
 ): Promise<string> {
   const cmd = [
-    quote(FFMPEG_BIN),
+    quote(getFfmpegBin()),
     `-y`,
     `-f lavfi`,
     `-i anullsrc=r=${sampleRate}:cl=stereo`,
@@ -307,7 +313,7 @@ export async function trimVideo(
   durationSec: number
 ): Promise<string> {
   const cmd = [
-    quote(FFMPEG_BIN),
+    quote(getFfmpegBin()),
     `-y`,
     `-i ${quote(inputPath)}`,
     `-ss 0`,
@@ -334,7 +340,7 @@ export async function trimAudio(
   durationSec: number
 ): Promise<string> {
   const cmd = [
-    quote(FFMPEG_BIN),
+    quote(getFfmpegBin()),
     `-y`,
     `-i ${quote(inputPath)}`,
     `-ss 0`,
@@ -370,7 +376,7 @@ export async function mixAudioVideo(
   if (hasAudio) {
     // 视频有原声：原声 + BGM 混音
     cmd = [
-      quote(FFMPEG_BIN),
+      quote(getFfmpegBin()),
       `-y`,
       `-i ${quote(videoPath)}`,
       `-i ${quote(audioPath)}`,
@@ -388,7 +394,7 @@ export async function mixAudioVideo(
   } else {
     // 视频无原声：直接以 BGM 作为音轨
     cmd = [
-      quote(FFMPEG_BIN),
+      quote(getFfmpegBin()),
       `-y`,
       `-i ${quote(videoPath)}`,
       `-i ${quote(audioPath)}`,

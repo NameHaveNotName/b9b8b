@@ -599,7 +599,26 @@ function createRealPrisma(): PrismaClient {
   return new PrismaClient({ adapter })
 }
 
-export const prisma: PrismaClient =
-  globalForPrisma.prisma ?? (useMock ? buildMockPrisma() : createRealPrisma())
+function getPrisma(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = useMock ? buildMockPrisma() : createRealPrisma()
+  }
+  return globalForPrisma.prisma
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+// 生产构建时懒加载，避免模块顶层建立数据库连接导致构建进程无法退出
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_, prop) {
+    const instance = getPrisma()
+    const value = (instance as any)[prop]
+    if (typeof value === 'function') {
+      return value.bind(instance)
+    }
+    return value
+  },
+})
+
+if (process.env.NODE_ENV !== 'production') {
+  // 开发环境下立即创建并缓存，保证 HMR 复用
+  getPrisma()
+}
