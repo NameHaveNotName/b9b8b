@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { WorkflowStepType } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser, getCurrentUserId } from '@/lib/auth-helpers';
-import { projectDashboardSelect } from '@/lib/db/project-select';
+import { projectDashboardSelect, projectCoreSelect } from '@/lib/db/project-select';
 
 export async function GET() {
   try {
@@ -43,7 +43,15 @@ export async function POST(req: Request) {
     console.log('[POST /api/projects] userId:', user.id)
 
     const body = await req.json().catch(() => ({}));
-    const title = body?.title || body?.rawIdea;
+
+    // 生产数据库暂缺合成视频相关列，先清理 body 中可能携带的未知/缺失字段，
+    // 再从显式白名单字段构建 data，避免 Prisma 写入数据库不存在的列。
+    const safeBody = { ...body };
+    delete safeBody.combinedVideoUrl;
+    delete safeBody.combinedVideoStatus;
+    delete safeBody.bgmUrl;
+
+    const title = safeBody?.title || safeBody?.rawIdea;
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return NextResponse.json({ error: 'VALID_001', message: '项目标题不能为空' }, { status: 400 });
     }
@@ -54,9 +62,13 @@ export async function POST(req: Request) {
       data: {
         userId: user.id,
         title: trimmedTitle,
-        rawIdea: '',
+        rawIdea:
+          safeBody?.rawIdea && typeof safeBody.rawIdea === 'string'
+            ? safeBody.rawIdea
+            : '',
         status: 'ACTIVE',
       },
+      select: projectCoreSelect,
     });
 
     console.log('[POST /api/projects] created project:', project.id, 'with userId:', user.id)
