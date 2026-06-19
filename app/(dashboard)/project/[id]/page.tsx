@@ -82,7 +82,7 @@ export default async function ProjectPage({ params }: { params: { id: string } }
     }
 
     // 非项目所有者且非管理员 → 重定向到 dashboard
-    if (project.userId !== user.id && user.role !== 'ADMIN') {
+    if (project.userId !== user.id && !user.isAdmin) {
       redirect('/dashboard')
     }
 
