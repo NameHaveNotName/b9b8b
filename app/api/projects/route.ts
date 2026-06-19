@@ -44,14 +44,7 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
 
-    // 生产数据库暂缺合成视频相关列，先清理 body 中可能携带的未知/缺失字段，
-    // 再从显式白名单字段构建 data，避免 Prisma 写入数据库不存在的列。
-    const safeBody = { ...body };
-    delete safeBody.combinedVideoUrl;
-    delete safeBody.combinedVideoStatus;
-    delete safeBody.bgmUrl;
-
-    const title = safeBody?.title || safeBody?.rawIdea;
+    const title = body?.title || body?.rawIdea;
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return NextResponse.json({ error: 'VALID_001', message: '项目标题不能为空' }, { status: 400 });
     }
@@ -62,10 +55,7 @@ export async function POST(req: Request) {
       data: {
         userId: user.id,
         title: trimmedTitle,
-        rawIdea:
-          safeBody?.rawIdea && typeof safeBody.rawIdea === 'string'
-            ? safeBody.rawIdea
-            : '',
+        rawIdea: body?.rawIdea && typeof body.rawIdea === 'string' ? body.rawIdea : '',
         status: 'ACTIVE',
       },
       select: projectCoreSelect,
