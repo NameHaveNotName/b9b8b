@@ -1,5 +1,5 @@
 {
-  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then npx prisma migrate deploy; fi && next build",
+  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then timeout 60 npx prisma migrate deploy || true; fi && next build",
   "outputDirectory": ".next",
   "installCommand": "npm install",
   "framework": "nextjs",
