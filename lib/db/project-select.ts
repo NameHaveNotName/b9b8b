@@ -45,6 +45,8 @@ export const projectDetailSelect = {
       stepType: true,
       status: true,
       order: true,
+      outputData: true,
+      errorMessage: true,
     },
   },
   assets: {
