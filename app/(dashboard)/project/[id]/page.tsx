@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import { getCurrentUserId } from '@/lib/auth-helpers'
+import { getCurrentUser } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { projectDetailSelect } from '@/lib/db/project-select'
 import {
@@ -67,8 +67,8 @@ function formatDate(date: Date): string {
 
 export default async function ProjectPage({ params }: { params: { id: string } }) {
   try {
-    const userId = await getCurrentUserId()
-    if (!userId) {
+    const user = await getCurrentUser()
+    if (!user) {
       redirect('/login')
     }
 
@@ -77,8 +77,13 @@ export default async function ProjectPage({ params }: { params: { id: string } }
       select: projectDetailSelect,
     })
 
-    if (!project || project.userId !== userId) {
+    if (!project) {
       notFound()
+    }
+
+    // 非项目所有者且非管理员 → 重定向到 dashboard
+    if (project.userId !== user.id && user.role !== 'ADMIN') {
+      redirect('/dashboard')
     }
 
     const completedCount = project.steps.filter((s) => s.status === 'COMPLETED').length
