@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId } from '@/lib/auth-helpers'
+import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
@@ -99,8 +99,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     const project = await prisma.project.findUnique({ where: { id: params.id } })
-    if (!project || project.userId !== userId) {
-      return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+    if (!project) {
+      return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
+    }
+    const access = await checkProjectAccess(project.userId)
+    if (!access.allowed) {
+      return access.response
     }
 
     const body = await req.json().catch(() => ({}))

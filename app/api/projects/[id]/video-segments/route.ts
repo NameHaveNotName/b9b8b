@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { projectCoreSelect } from '@/lib/db/project-select'
 
@@ -11,17 +11,17 @@ import { projectCoreSelect } from '@/lib/db/project-select'
  * 返回项目的所有 VideoSegment，用于前端轮询生成进度。
  */
 export async function GET(req: Request, { params }: { params: { id: string } }) {
-  const userId = await getCurrentUserId()
-  if (!userId) {
-    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  }
-
   const project = await prisma.project.findUnique({
     where: { id: params.id },
     select: projectCoreSelect,
   })
-  if (!project || project.userId !== userId) {
-    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  if (!project) {
+    return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
+  }
+
+  const access = await checkProjectAccess(project.userId)
+  if (!access.allowed) {
+    return access.response
   }
 
   const { searchParams } = new URL(req.url)

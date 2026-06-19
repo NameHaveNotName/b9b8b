@@ -1,25 +1,23 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { projectDetailSelect, projectCoreSelect } from '@/lib/db/project-select'
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   try {
-    const userId = await getCurrentUserId()
-    if (!userId) {
-      return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    }
-
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       select: projectDetailSelect,
     })
 
-    if (!project || project.userId !== userId) {
-      return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+    if (!project) {
+      return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
+
+    const access = await checkProjectAccess(project.userId)
+    if (!access.allowed) return access.response
 
     return NextResponse.json({ project })
   } catch (error: any) {
@@ -33,19 +31,17 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
-    const userId = await getCurrentUserId()
-    if (!userId) {
-      return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    }
-
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       select: projectCoreSelect,
     })
 
-    if (!project || project.userId !== userId) {
-      return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+    if (!project) {
+      return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
+
+    const access = await checkProjectAccess(project.userId)
+    if (!access.allowed) return access.response
 
     const body = await req.json().catch(() => ({}))
 
@@ -79,11 +75,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   try {
-    const userId = await getCurrentUserId()
-    if (!userId) {
-      return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    }
-
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       select: {
@@ -92,9 +83,12 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
       }
     })
 
-    if (!project || project.userId !== userId) {
-      return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+    if (!project) {
+      return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
+
+    const access = await checkProjectAccess(project.userId)
+    if (!access.allowed) return access.response
 
     const projectId = params.id
     console.log(`[DELETE-PROJECT] 开始删除项目: ${projectId}, 资产数=${project.assets.length}`)

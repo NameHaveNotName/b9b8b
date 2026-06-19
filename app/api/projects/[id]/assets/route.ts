@@ -1,25 +1,25 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  const userId = await getCurrentUserId()
-  if (!userId) {
-    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  }
-
   const project = await prisma.project.findUnique({
     where: { id: params.id },
     select: { userId: true },
   })
 
-  if (!project || project.userId !== userId) {
-    return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
+  if (!project) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  const access = await checkProjectAccess(project.userId)
+  if (!access.allowed) {
+    return access.response
   }
 
   const { searchParams } = new URL(req.url)
