@@ -50,9 +50,5 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       failed: failedCount,
       allCompleted,
     },
-    // 生产数据库暂缺这些媒体字段，schema 与 DB 对齐后恢复
-    combinedVideoUrl: (project as any).combinedVideoUrl ?? null,
-    combinedVideoStatus: (project as any).combinedVideoStatus ?? null,
-    bgmUrl: (project as any).bgmUrl ?? null,
   })
 }

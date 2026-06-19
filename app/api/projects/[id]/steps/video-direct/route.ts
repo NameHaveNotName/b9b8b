@@ -116,10 +116,6 @@ async function backgroundComposeDirectVideo(projectId: string) {
     console.log(`[DIRECT-COMPOSE-BG] 合成完成 videoUrl=${result.videoUrl}`)
   } catch (e: any) {
     console.error(`[DIRECT-COMPOSE-BG] 合成失败:`, e?.message)
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { combinedVideoStatus: 'failed' },
-    })
   }
 }
 
@@ -416,11 +412,6 @@ async function handleComposeDirectVideo(projectId: string, stepId: string) {
     return NextResponse.json({ error: 'NO_SEGMENTS', message: '没有可合成的片段' }, { status: 400 })
   }
 
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { combinedVideoStatus: 'processing' },
-  })
-
   waitUntil(backgroundComposeDirectVideo(projectId))
 
   return NextResponse.json({
@@ -447,11 +438,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     orderBy: { sequence: 'asc' },
   })
 
-  const project = await prisma.project.findUnique({
-    where: { id: params.id },
-    select: { combinedVideoUrl: true, combinedVideoStatus: true },
-  })
-
   const { keyframes } = await getStoryboardAndKeyframes(params.id)
   const hasLastFrames = keyframes.some((k: any) => k.lastFrameUrl)
 
@@ -467,8 +453,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     })),
     // 新增
     videoSegments: segments,
-    combinedVideoUrl: project?.combinedVideoUrl,
-    combinedVideoStatus: project?.combinedVideoStatus,
     segmentPromptsGenerated: out.segmentPromptsGenerated || false,
   })
 }

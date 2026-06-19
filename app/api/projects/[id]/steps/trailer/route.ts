@@ -179,10 +179,6 @@ async function backgroundComposeVideo(
     console.log(`[COMPOSE-BG] 合成完成 videoUrl=${result.videoUrl}`)
   } catch (e: any) {
     console.error(`[COMPOSE-BG] 合成失败:`, e?.message)
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { combinedVideoStatus: 'failed' },
-    })
   }
 }
 
@@ -522,12 +518,6 @@ async function handleComposeVideo(projectId: string, stepId: string) {
     return NextResponse.json({ error: 'NO_SEGMENTS', message: '没有可合成的片段' }, { status: 400 })
   }
 
-  // 更新项目状态
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { combinedVideoStatus: 'processing' },
-  })
-
   // 后台合成
   waitUntil(backgroundComposeVideo(projectId, 'TRAILER'))
 
@@ -556,11 +546,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     orderBy: { sequence: 'asc' },
   })
 
-  const project = await prisma.project.findUnique({
-    where: { id: params.id },
-    select: { combinedVideoUrl: true, combinedVideoStatus: true, bgmUrl: true },
-  })
-
   const out = (step.outputData as any) || {}
   return NextResponse.json({
     status: step.status,
@@ -572,9 +557,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     musicIsMock: out.musicIsMock ?? true,
     // 新增：VideoSegment 数据
     videoSegments: segments,
-    combinedVideoUrl: project?.combinedVideoUrl,
-    combinedVideoStatus: project?.combinedVideoStatus,
-    bgmUrl: project?.bgmUrl,
     segmentPromptsGenerated: out.segmentPromptsGenerated || false,
   })
 }

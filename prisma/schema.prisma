@@ -146,11 +146,6 @@ model Project {
   creativeIterations CreativeIteration[]
   videoSegments     VideoSegment[]
 
-  // 合成视频相关字段
-  combinedVideoUrl    String?   // 合成后的完整视频 URL
-  combinedVideoStatus String?   @default("pending") // pending | processing | completed | failed
-  bgmUrl              String?   // 宣传片背景音乐 URL
-
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
