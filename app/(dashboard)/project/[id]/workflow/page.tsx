@@ -3253,7 +3253,8 @@ function ConceptPanel({
   }
 
   // 前端驱动分批递归生成：每次只生成 1 张，避免 Vercel Hobby 60s 超时
-  const generateOne = async (sceneIndex: number, aspectRatio: string, imageModel: string) => {
+  // 使用前端自己计算的 totalScenes，不依赖 hasMore
+  const generateOne = async (sceneIndex: number, totalScenes: number, aspectRatio: string, imageModel: string) => {
     setGeneratingIndex(sceneIndex)
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
@@ -3269,9 +3270,10 @@ function ConceptPanel({
         setLocalAssets(prev => [...prev, data.asset])
       }
 
-      if (data.hasMore) {
-        // 递归生成下一张
-        await generateOne(sceneIndex + 1, aspectRatio, imageModel)
+      // 前端自己判断是否还有下一张
+      const nextIndex = sceneIndex + 1
+      if (nextIndex < totalScenes) {
+        await generateOne(nextIndex, totalScenes, aspectRatio, imageModel)
       } else {
         // 全部完成，刷新全局状态
         setGeneratingIndex(null)
@@ -3297,7 +3299,7 @@ function ConceptPanel({
         defaultModel={defaultModel}
         onConfirm={(ratio, model) => {
           // 只用前端驱动的 generateOne 单张递归生成，避免同步生成 6 张超时
-          generateOne(0, ratio, model)
+          generateOne(0, step.outputData.prompts.length, ratio, model)
         }}
         onRegeneratePrompts={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
         isExecuting={isExecuting}
@@ -3373,11 +3375,12 @@ function ConceptPanel({
     setLocalAssets([])
     const defaultRatio = (step.outputData as any)?.aspectRatio || '16:9'
     const defaultModel = (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
+    const totalScenes = (step.outputData as any)?.prompts?.length || 6
     console.log('[CONCEPT-REGENERATE-ALL] 整体重做')
     // force=true API 会重置 step 状态，完成后触发 generateOne 从第 0 张开始
     await onExecute('CONCEPT', { force: true })
     // API 同步完成后，executing 被清空，重新触发分批生成
-    generateOne(0, defaultRatio, defaultModel)
+    generateOne(0, totalScenes, defaultRatio, defaultModel)
   }
 
   return (
