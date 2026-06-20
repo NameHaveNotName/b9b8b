@@ -1180,7 +1180,7 @@ export async function submitJimengVideo(params: {
 
   const text = await res.text()
   console.log(`[JIMENG-SUBMIT] 响应状态: ${res.status}`)
-  console.log(`[JIMENG-SUBMIT] 响应体:`, text.slice(0, 500);
+  console.log(`[JIMENG-SUBMIT] 响应体:`, text.slice(0, 500));
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -2321,7 +2321,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
     })
 
     const text = await res.text()
-    console.log('[VIDEO-DIRECT-HAILUO] ←', res.status, text.slice(0, 500);
+    console.log('[VIDEO-DIRECT-HAILUO] ←', res.status, text.slice(0, 500));
 
     if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -2492,7 +2492,7 @@ export async function generateConceptSceneWithEdit(params: {
   })
 
   const text = await res.text()
-  console.log('[CONCEPT-EDIT] 响应:', res.status, text.slice(0, 500);
+  console.log('[CONCEPT-EDIT] 响应:', res.status, text.slice(0, 500));
 
   if (!res.ok) {
     throw new XiaomiHttpError(res.status, text)
