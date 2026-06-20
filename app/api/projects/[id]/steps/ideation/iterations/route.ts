@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { checkProjectAccess } from '@/lib/auth-helpers'
+import { checkProjectAccess, getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {

@@ -3,7 +3,7 @@ import { IMAGE_MODELS, MODEL_SIZE_MAP, VIDEO_MODELS } from '@/lib/models-config'
 import fs from 'fs'
 import path from 'path'
 
-const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
+const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://yunwu.ai'
 // 工作指令.txt（防御版）：API_KEY 兼容 OPENAI_API_KEY 兜底
 const API_KEY = process.env.XIAOMI_API_KEY || process.env.OPENAI_API_KEY
 
