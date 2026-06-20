@@ -21,6 +21,17 @@ export const projectCoreSelect = {
   rawIdea: true,
   status: true,
   selectedStyleId: true,
+  // 工作流步骤完成状态（条件解锁 DAG 状态机）
+  stepIdeaDone: true,
+  stepFrameworkDone: true,
+  stepStyleDone: true,
+  stepCharacterDone: true,
+  stepConceptDone: true,
+  stepStoryboardDone: true,
+  stepStoryboardFirstframeDone: true,
+  stepTrailerDone: true,
+  stepEndingDone: true,
+  stepDirectDone: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.ProjectSelect
