@@ -41,11 +41,11 @@ export async function processStyleGeneration(
     const generateWithTimeout = (opt: StyleOption, idx: number) => {
       return Promise.race([
         (async () => {
-          // 确定模型：优先使用 modelNo 映射，否则回退到统一 imageModel，最后默认 primary
+          // 确定模型：用户显式选择 imageModel 时优先使用，否则用 modelNo 映射，最后默认 primary
           const modelConfig = opt.modelNo
             ? STYLE_MODEL_POOL.find(m => m.no === opt.modelNo) || STYLE_MODEL_POOL[0]
             : null
-          const modelId = modelConfig?.id || imageModel || IMAGE_MODELS.primary
+          const modelId = imageModel || modelConfig?.id || IMAGE_MODELS.primary
 
           console.log(`[STYLE-GEN] 风格 ${idx + 1}: ${opt.styleName} → 模型 ${modelConfig?.no || '?'} (${modelId})`)
 
