@@ -59,6 +59,15 @@ export const projectDetailSelect = {
       order: true,
       outputData: true,
       errorMessage: true,
+      resultAssets: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          type: true,
+          url: true,
+          metadata: true,
+        },
+      },
     },
   },
   assets: {
