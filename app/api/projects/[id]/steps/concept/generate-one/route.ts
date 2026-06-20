@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 import { NextResponse } from 'next/server'
-import { startStep, completeStep } from '@/lib/workflow-executor'
+import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
@@ -10,11 +10,11 @@ import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 
 /**
- * 前端驱动分批生成：每次只生成 1 张图，避免 Vercel Hobby 60s 超时。
- * 前端递归调用直到全部完成，每张图单独请求、独立生命周期。
+ * 概念图单张生成：立即返回 202，后台异步执行生成。
+ * 前端通过轮询 GET /concept/status 获取进度。
  *
  * Body: { sceneIndex: number, aspectRatio?: string, imageModel?: string }
- * Response: { success, sceneIndex, asset, hasMore }
+ * Response: 202 { status: 'ACCEPTED', sceneIndex }
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -40,7 +40,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const aspectRatio = body.aspectRatio || '16:9'
   const imageModel = body.imageModel
 
-  // 读取 concept step 和 prompts
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'CONCEPT' } },
   })
@@ -50,116 +49,102 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const outputData = (step.outputData as any) || {}
   const prompts: any[] = outputData.prompts || []
-
-  // 也支持无 prompts 时自动生成（兜底）
-  let promptItem = prompts[sceneIndex]
-
-  // 首张生成时设置 PROCESSING 状态
-  if (sceneIndex === 0) {
-    await startStep(step.id)
-  }
-  if (!promptItem) {
-    // 没有保存的 prompts，从 framework 实时生成
-    return NextResponse.json({ error: 'VALID_002', message: '提示词未生成，请先点击"生成概念图"生成提示词' }, { status: 400 })
-  }
-
-  // 去重：已生成则直接返回已有结果（用 JS 过滤避免 Prisma JSON path 查询兼容性问题）
   const totalScenes = prompts.length
-  const isLast = sceneIndex + 1 >= totalScenes
-  const existingAssets = await prisma.asset.findMany({
-    where: { projectId: params.id, stepId: step.id },
-  })
-  const existing = existingAssets.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)
-  if (existing) {
-    return NextResponse.json({
-      success: true,
-      sceneIndex,
-      asset: {
-        id: existing.id,
-        url: existing.url,
-        metadata: existing.metadata,
-      },
-      hasMore: !isLast,
-      totalScenes,
-      duplicate: true,
-    })
-  }
 
-  // 获取风格图和角色图
-  let styleRefUrl = ''
-  let stylePrompt = ''
-  try {
-    const ref = await getStyleRefUrl(params.id)
-    styleRefUrl = ref.styleRefUrl
-    stylePrompt = ref.stylePrompt
-  } catch (refErr: any) {
-    return NextResponse.json(
-      { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图' },
-      { status: 400 }
-    )
-  }
+  // 立即返回 202，后台异步执行
+  waitUntil(
+    (async () => {
+      console.log(`[CONCEPT-BG] 开始生成第 ${sceneIndex + 1}/${totalScenes} 张`)
 
-  const characterAssets = await prisma.asset.findMany({
-    where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
-  })
+      // 首张设置 PROCESSING
+      if (sceneIndex === 0) {
+        await prisma.workflowStep.update({
+          where: { id: step.id },
+          data: { status: 'PROCESSING' as any },
+        }).catch(() => {})
+      }
 
-  // 【调试日志】确认 API 配置
-  console.log('[CONCEPT-GEN-ONE] 请求参数:', { sceneIndex, aspectRatio, imageModel })
-  console.log('[CONCEPT-GEN-ONE] XIAOMI_BASE_URL:', process.env.XIAOMI_BASE_URL || '(未设置，使用默认 yunwu.ai)')
-  console.log('[CONCEPT-GEN-ONE] XIAOMI_API_KEY 前8位:', process.env.XIAOMI_API_KEY?.slice(0, 8) || '(未设置)')
-  const characterImageUrls = characterAssets
-    .map((a) => a.url)
-    .filter((u) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u))
+      const promptItem = prompts[sceneIndex]
+      if (!promptItem) {
+        console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 无对应 prompt`)
+        return
+      }
 
-  const imageClient = await getImageClient()
-  console.log('[CONCEPT-GEN-ONE] 准备调用 generateConceptScene，prompt 前80字符:', promptItem.englishPrompt.slice(0, 80))
-  const result = await imageClient.generateConceptScene(
-    params.id,
-    promptItem.englishPrompt,
-    styleRefUrl,
-    stylePrompt,
-    characterImageUrls,
-    undefined,
-    aspectRatio,
-    imageModel
+      // 去重检查
+      const existingAssets = await prisma.asset.findMany({
+        where: { projectId: params.id, stepId: step.id },
+      })
+      const existing = existingAssets.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)
+      if (existing) {
+        console.log(`[CONCEPT-BG] sceneIndex=${sceneIndex} 已存在，跳过`)
+        return
+      }
+
+      // 获取参考图
+      let styleRefUrl = ''
+      try {
+        const ref = await getStyleRefUrl(params.id)
+        styleRefUrl = ref.styleRefUrl
+      } catch (refErr: any) {
+        console.error('[CONCEPT-BG] 风格图提取失败:', refErr?.message)
+        return
+      }
+
+      const characterAssets = await prisma.asset.findMany({
+        where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
+      })
+      const characterImageUrls = characterAssets
+        .map((a) => a.url)
+        .filter((u) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u))
+
+      // 生成
+      const imageClient = await getImageClient()
+      console.log('[CONCEPT-BG] 调用 generateConceptScene, prompt:', promptItem.englishPrompt?.slice(0, 60))
+      const result = await imageClient.generateConceptScene(
+        params.id,
+        promptItem.englishPrompt,
+        styleRefUrl,
+        '',
+        characterImageUrls,
+        undefined,
+        aspectRatio,
+        imageModel
+      )
+
+      // 保存 asset
+      await prisma.asset.create({
+        data: {
+          projectId: params.id,
+          stepId: step.id,
+          type: 'IMAGE',
+          mimeType: 'image/png',
+          storageKey: result.storageKey,
+          url: result.url,
+          metadata: {
+            actNumber: promptItem.actNumber,
+            sceneIndex,
+            llmPrompt: promptItem.englishPrompt,
+            prompt: promptItem.englishPrompt,
+            aspectRatio,
+            imageModel: imageModel || IMAGE_MODELS.primary,
+          },
+        },
+      })
+      console.log(`[CONCEPT-BG] 完成 sceneIndex=${sceneIndex}，isLast=${sceneIndex + 1 >= totalScenes}`)
+
+      // 最后一张标记完成
+      if (sceneIndex + 1 >= totalScenes) {
+        await prisma.workflowStep.update({
+          where: { id: step.id },
+          data: {
+            status: 'COMPLETED' as any,
+            outputData: { ...outputData, totalScenes, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary },
+          },
+        }).catch(() => {})
+        console.log('[CONCEPT-BG] 全部完成，step 已标记 COMPLETED')
+      }
+    })()
   )
 
-  const asset = await prisma.asset.create({
-    data: {
-      projectId: params.id,
-      stepId: step.id,
-      type: 'IMAGE',
-      mimeType: 'image/png',
-      storageKey: result.storageKey,
-      url: result.url,
-      metadata: {
-        ...result.metadata,
-        actNumber: promptItem.actNumber,
-        sceneIndex: sceneIndex,
-        llmPrompt: promptItem.englishPrompt,
-        prompt: promptItem.englishPrompt,
-        aspectRatio,
-        imageModel: imageModel || IMAGE_MODELS.primary,
-      },
-    },
-  })
-
-  if (isLast) {
-    await completeStep(step.id, { totalScenes, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary })
-    console.log('[CONCEPT-GEN-ONE] 最后一张完成，step 已标记 COMPLETED')
-  }
-  console.log(`[CONCEPT-GEN-ONE] 完成第 ${sceneIndex + 1}/${totalScenes} 张，hasMore=${!isLast}`)
-
-  return NextResponse.json({
-    success: true,
-    sceneIndex,
-    asset: {
-      id: asset.id,
-      url: asset.url,
-      metadata: asset.metadata,
-    },
-    hasMore: !isLast,
-    totalScenes,
-    isMock: !!result.metadata?.isMock,
-  })
+  return NextResponse.json({ status: 'ACCEPTED', sceneIndex, totalScenes }, { status: 202 })
 }
