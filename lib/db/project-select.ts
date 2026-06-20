@@ -20,6 +20,7 @@ export const projectCoreSelect = {
   title: true,
   rawIdea: true,
   status: true,
+  selectedStyleId: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.ProjectSelect
