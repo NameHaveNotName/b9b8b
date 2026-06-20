@@ -3296,7 +3296,7 @@ function ConceptPanel({
         defaultRatio={defaultRatio}
         defaultModel={defaultModel}
         onConfirm={(ratio, model) => {
-          onExecute('CONCEPT', { action: 'generate-images', aspectRatio: ratio, imageModel: model })
+          // 只用前端驱动的 generateOne 单张递归生成，避免同步生成 6 张超时
           generateOne(0, ratio, model)
         }}
         onRegeneratePrompts={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
