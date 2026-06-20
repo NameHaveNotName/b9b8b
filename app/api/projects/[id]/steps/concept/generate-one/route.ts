@@ -57,14 +57,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'VALID_002', message: '提示词未生成，请先点击"生成概念图"生成提示词' }, { status: 400 })
   }
 
-  // 去重：已生成则直接返回已有结果
-  const existing = await prisma.asset.findFirst({
-    where: {
-      projectId: params.id,
-      stepId: step.id,
-      metadata: { path: ['sceneIndex'], equals: sceneIndex },
-    },
+  // 去重：已生成则直接返回已有结果（用 JS 过滤避免 Prisma JSON path 查询兼容性问题）
+  const existingAssets = await prisma.asset.findMany({
+    where: { projectId: params.id, stepId: step.id },
   })
+  const existing = existingAssets.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)
   if (existing) {
     const totalScenes = prompts.length
     return NextResponse.json({
