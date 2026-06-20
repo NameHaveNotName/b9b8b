@@ -6,7 +6,7 @@
  * 确保工作流路由无需修改即可运行。
  */
 
-import { generateText, generateImage, uploadBufferToR2 } from './xiaomi'
+import { generateText, generateImage, generateConceptSceneWithEdit, uploadBufferToR2 } from './xiaomi'
 import { IMAGE_MODELS, TEXT_MODELS } from '@/lib/models-config'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 
@@ -199,27 +199,21 @@ export async function getImageClient(): Promise<ImageClient> {
       async generateConceptScene(projectId, sceneDesc, styleRefUrl, _stylePrompt?, characterImageUrls?, size?, aspectRatio?, imageModel?) {
         const prompt = `${_stylePrompt || ''}, ${sceneDesc}, cinematic wide shot, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism`
         const storageKey = `projects/${projectId}/concepts/concept_${Date.now()}.png`
-        // 工作指令.txt（Round 6 任务一）：多图参考 — styleRefUrl + 所有角色图。
-        // xiaomi.ts 内部会过滤非 http(s) 并按 doubao-multi 协议构造 image: [...] 数组。
-        const refImages: string[] = []
-        if (styleRefUrl) refImages.push(styleRefUrl)
-        if (Array.isArray(characterImageUrls)) refImages.push(...characterImageUrls.filter(Boolean))
-        console.log(`[MODEL-SELECT] [generateConceptScene] 模型: ${imageModel || '默认'}`)
-        const { buffer, isMock, lastError } = await generateImage({
-          model: imageModel || IMAGE_MODELS.primary,
+        console.log(`[MODEL-SELECT] [generateConceptScene] 使用 GPT-image-2 编辑模式，角色图: ${characterImageUrls?.length || 0} 张`)
+        // 使用 gpt-image-2 /v1/images/edits 多图编辑端点
+        const raw = await generateConceptSceneWithEdit({
+          styleRefUrl,
+          characterImageUrls,
           prompt,
-          referenceImages: refImages,
-          size: '1024x576',
-          aspectRatio,
-          watermark: false,
-          sequentialImageGeneration: 'disabled',
-          maxImages: 1,
+          size: aspectRatio === '9:16' ? '1024x1536' : aspectRatio === '1:1' ? '1024x1024' : '1024x1024',
+          n: 1,
         })
+        const buffer = Buffer.from(raw.b64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
         const url = await uploadOrDataFallback(storageKey, buffer, 'image/png')
         return {
           url,
           storageKey,
-          metadata: { sceneDesc, styleRef: _stylePrompt || '', characterRefs: characterImageUrls || [], seed: Math.floor(Math.random() * 999999), isMock: !!isMock, ...(lastError ? { mockReason: lastError } : {}) },
+          metadata: { sceneDesc, styleRef: _stylePrompt || '', characterRefs: characterImageUrls || [], seed: Math.floor(Math.random() * 999999) },
         }
       },
 

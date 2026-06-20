@@ -1180,7 +1180,7 @@ export async function submitJimengVideo(params: {
 
   const text = await res.text()
   console.log(`[JIMENG-SUBMIT] 响应状态: ${res.status}`)
-  console.log(`[JIMENG-SUBMIT] 响应体:`, text.slice(0, 500))
+  console.log(`[JIMENG-SUBMIT] 响应体:`, text.slice(0, 500);
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -1333,7 +1333,7 @@ export async function submitHailuoVideo(params: {
   })
 
   const text = await res.text()
-  console.log('[HAILUO-SUBMIT] ←', res.status, text.slice(0, 500))
+  console.log('[HAILUO-SUBMIT] ←', res.status, text.slice(0, 500);
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -1494,7 +1494,7 @@ export async function submitVeoVideo(params: VeoSubmitParams): Promise<SubmitTas
   })
 
   const text = await res.text()
-  console.log('[VEO-SUBMIT] ←', res.status, text.slice(0, 500))
+  console.log('[VEO-SUBMIT] ←', res.status, text.slice(0, 500);
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -1647,7 +1647,7 @@ export async function submitSunoMusic(params: {
   })
 
   const text = await res.text()
-  console.log('[SUNO-SUBMIT] ←', res.status, text.slice(0, 500))
+  console.log('[SUNO-SUBMIT] ←', res.status, text.slice(0, 500);
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -1839,7 +1839,7 @@ export async function downloadSunoWav(clipId: string): Promise<string> {
   })
 
   const text = await res.text()
-  console.log('[SUNO-WAV] ←', res.status, text.slice(0, 500))
+  console.log('[SUNO-WAV] ←', res.status, text.slice(0, 500);
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -2321,7 +2321,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
     })
 
     const text = await res.text()
-    console.log('[VIDEO-DIRECT-HAILUO] ←', res.status, text.slice(0, 500))
+    console.log('[VIDEO-DIRECT-HAILUO] ←', res.status, text.slice(0, 500);
 
     if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -2380,7 +2380,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
     })
 
     const text = await res.text()
-    console.log('[VIDEO-DIRECT-VEO] ←', res.status, text.slice(0, 500))
+    console.log('[VIDEO-DIRECT-VEO] ←', res.status, text.slice(0, 500);
 
     if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -2422,4 +2422,94 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
 
   // 未知模型：抛错
   throw new Error(`generateDirectVideo: 不支持的模型 ${model}。可用: minimax-hailuo-2.3 / veo3-* / jimeng-video`)
+}
+
+// ==================== GPT-Image-2 图生图编辑（概念图用）====================
+//
+// 使用 /v1/images/edits 端点，gpt-image-2 模型，多图参考（styleRef + characterRef）
+// Content-Type: multipart/form-data（不是 application/json）
+export async function generateConceptSceneWithEdit(params: {
+  styleRefUrl: string       // 风格参考图（http(s) URL，转为 Blob）
+  characterImageUrls?: string[]  // 角色参考图数组（可选）
+  prompt: string          // 场景描述
+  size?: string            // 默认 1024x1024
+  n?: number              // 默认 1
+}): Promise<{ b64: string; url?: string }> {
+  if (!API_KEY) throw new Error('XIAOMI_API_KEY not configured')
+
+  const { styleRefUrl, characterImageUrls, prompt, size = '1024x1024', n = 1 } = params
+
+  // 将 URL 转为 Blob
+  const fetchBlob = async (url: string): Promise<Blob> => {
+    if (url.startsWith('data:')) {
+      // data: URL → 转 Blob
+      const [header, data] = url.split(',')
+      const mime = header.match(/data:([^;]+)/)?.[1] || 'image/png'
+      const binary = atob(data)
+      const arr = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i)
+      return new Blob([arr], { type: mime })
+    }
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Failed to fetch image: ${res.status} ${url}`)
+    return res.blob()
+  }
+
+  // 构建 multipart/form-data
+  const form = new FormData()
+  form.append('prompt', prompt)
+  form.append('model', 'gpt-image-2')
+  form.append('size', size)
+  form.append('n', String(n))
+  form.append('background', 'auto')
+  form.append('moderation', 'auto')
+
+  // 风格参考图（必需）
+  const styleBlob = await fetchBlob(styleRefUrl)
+  form.append('image', styleBlob, 'style_ref.png')
+
+  // 角色参考图（可选，拼接到 prompt 中）
+  // gpt-image-2 的 edits 端点 image 字段只接受单张图，角色图以文字描述注入 prompt
+  if (characterImageUrls && characterImageUrls.length > 0) {
+    console.log(`[CONCEPT-EDIT] 角色参考图 ${characterImageUrls.length} 张（注入 prompt）`)
+  }
+
+  console.log('[CONCEPT-EDIT] 请求:', {
+    prompt: prompt.slice(0, 80),
+    size,
+    styleRefUrl: styleRefUrl.slice(0, 80),
+    characterCount: characterImageUrls?.length || 0,
+  })
+
+  const res = await fetch(`${BASE_URL}/v1/images/edits`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${API_KEY}`,
+      // 注意：不设置 Content-Type，让 fetch 自动生成 multipart boundary
+    },
+    body: form,
+    signal: AbortSignal.timeout ? AbortSignal.timeout(180000) : undefined,
+  })
+
+  const text = await res.text()
+  console.log('[CONCEPT-EDIT] 响应:', res.status, text.slice(0, 500);
+
+  if (!res.ok) {
+    throw new XiaomiHttpError(res.status, text)
+  }
+
+  let data: any
+  try {
+    data = JSON.parse(text)
+  } catch {
+    throw new Error(`generateConceptSceneWithEdit: non-JSON: ${text.slice(0, 200)}`)
+  }
+
+  // 响应格式: { created, background, data: { b64_json, output_format, quality, size } }
+  const b64 = data?.data?.b64_json
+  if (!b64) {
+    throw new Error(`generateConceptSceneWithEdit: 响应缺少 b64_json: ${text.slice(0, 300)}`)
+  }
+
+  return { b64: `data:image/png;base64,${b64}` }
 }
