@@ -965,7 +965,7 @@ async function callXiaomiVideoOnce(
 
   console.log('======== [XIAOMI-VIDEO-REQUEST] ========')
   console.log('URL:', `${BASE_URL}/v1/videos/generations`)
-  console.log('Body:', JSON.stringify(body).slice(0, 500))
+  console.log('Body:', JSON.stringify(body).slice(0, 500));
   console.log('========================================')
 
   const res = await fetch(`${BASE_URL}/v1/videos/generations`, {
@@ -1318,7 +1318,7 @@ export async function submitHailuoVideo(params: {
 
   const body = JSON.stringify(bodyObj)
 
-  console.log('[HAILUO-SUBMIT] →', body.slice(0, 500))
+  console.log('[HAILUO-SUBMIT] →', body.slice(0, 500));
   console.log('[HAILUO-SUBMIT] duration 适配:', params.duration ?? 6, '→', params.duration === 10 ? 10 : 6)
 
   const res = await fetch(`${BASE_URL}/minimax/v1/video_generation`, {
@@ -1333,7 +1333,7 @@ export async function submitHailuoVideo(params: {
   })
 
   const text = await res.text()
-  console.log('[HAILUO-SUBMIT] ←', res.status, text.slice(0, 500);
+  console.log('[HAILUO-SUBMIT] ←', res.status, text.slice(0, 500));
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -1494,7 +1494,7 @@ export async function submitVeoVideo(params: VeoSubmitParams): Promise<SubmitTas
   })
 
   const text = await res.text()
-  console.log('[VEO-SUBMIT] ←', res.status, text.slice(0, 500);
+  console.log('[VEO-SUBMIT] ←', res.status, text.slice(0, 500));
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -1647,7 +1647,7 @@ export async function submitSunoMusic(params: {
   })
 
   const text = await res.text()
-  console.log('[SUNO-SUBMIT] ←', res.status, text.slice(0, 500);
+  console.log('[SUNO-SUBMIT] ←', res.status, text.slice(0, 500));
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -1839,7 +1839,7 @@ export async function downloadSunoWav(clipId: string): Promise<string> {
   })
 
   const text = await res.text()
-  console.log('[SUNO-WAV] ←', res.status, text.slice(0, 500);
+  console.log('[SUNO-WAV] ←', res.status, text.slice(0, 500));
 
   if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
@@ -2380,7 +2380,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
     })
 
     const text = await res.text()
-    console.log('[VIDEO-DIRECT-VEO] ←', res.status, text.slice(0, 500);
+    console.log('[VIDEO-DIRECT-VEO] ←', res.status, text.slice(0, 500));
 
     if (!res.ok) throw new XiaomiHttpError(res.status, text)
 
