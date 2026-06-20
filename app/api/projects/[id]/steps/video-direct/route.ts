@@ -8,6 +8,7 @@ import { createQueue } from '@/lib/queue'
 import { startStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 import { generateSegmentPrompts, generateOneVideoSegment, composeVideo } from '@/lib/video-segment-utils'
+import { generateTrailerBgm } from '@/lib/bgm-generator'
 
 const videoQueue = createQueue('video-generation')
 
@@ -177,6 +178,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   // -------------------- 新版：合成视频 --------------------
   if (action === 'compose-video') {
     return handleComposeDirectVideo(params.id, step.id)
+  }
+
+  // -------------------- 新版：生成背景音乐 --------------------
+  if (action === 'generate-bgm') {
+    return handleGenerateDirectBgm(params.id, step.id)
   }
 
   return NextResponse.json({ error: 'UNKNOWN_ACTION', message: `未知 action: ${action}` }, { status: 400 })
@@ -422,6 +428,66 @@ async function handleComposeDirectVideo(projectId: string, stepId: string) {
     success: true,
     status: 'processing',
     message: '视频合成已启动，请稍后查看结果',
+  })
+}
+
+/** 生成直生视频背景音乐（复用 bgm-generator） */
+async function handleGenerateDirectBgm(projectId: string, stepId: string) {
+  const segments = await prisma.videoSegment.findMany({
+    where: { projectId, stepName: 'VIDEO_DIRECT', status: 'completed' },
+    orderBy: { sequence: 'asc' },
+  })
+
+  if (segments.length === 0) {
+    return NextResponse.json({ error: 'NO_SEGMENTS', message: '先生成至少一个视频片段后再生成背景音乐' }, { status: 400 })
+  }
+
+  const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
+
+  const fwStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
+  })
+  const fw = (fwStep?.outputData as any) || {}
+  const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
+  const acts = Array.isArray(fw.acts) ? fw.acts : []
+
+  const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
+    tempDir: '/tmp',
+    durationSec: totalDuration,
+    storyBrief,
+    acts,
+  })
+
+  const { uploadFile, getSignedFileUrl } = await import('@/lib/r2')
+  const fsPromises = await import('fs').then(m => m.promises)
+  const bgmBuf = await fsPromises.readFile(bgmPath)
+  const bgmKey = `projects/${projectId}/bgm_${Date.now()}.${bgmExt}`
+  let musicUrl: string | null = null
+  try {
+    await uploadFile(bgmKey, bgmBuf, bgmMime)
+    musicUrl = await getSignedFileUrl(bgmKey, 3600 * 24 * 7)
+  } catch (err: any) {
+    console.warn(`[BGM] 上传失败: ${err?.message}`)
+  }
+
+  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  const existingOutput = (step?.outputData as any) || {}
+  const updatedOutput = {
+    ...existingOutput,
+    musicUrl,
+    musicIsMock: bgmIsMock,
+    bgmGeneratedAt: new Date().toISOString(),
+  }
+  await prisma.workflowStep.update({
+    where: { id: stepId },
+    data: { outputData: updatedOutput },
+  })
+
+  return NextResponse.json({
+    success: true,
+    musicUrl,
+    musicIsMock: bgmIsMock,
+    message: bgmIsMock ? '生成了静音（API 密钥未配置）' : '背景音乐生成成功',
   })
 }
 

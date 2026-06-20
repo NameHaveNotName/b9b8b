@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import useSWR from 'swr'
-import { LoaderCircle, Play, RefreshCw, Film } from 'lucide-react'
+import { LoaderCircle, Play, RefreshCw, Film, Music } from 'lucide-react'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 
@@ -36,6 +36,7 @@ export default function TrailerPanel({
   const videoRef = useRef<HTMLVideoElement>(null)
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null)
   const [isComposing, setIsComposing] = useState(false)
+  const [isGeneratingBgm, setIsGeneratingBgm] = useState(false)
 
   const { data: segmentData } = useSWR(
     `/api/projects/${projectId}/video-segments?stepName=TRAILER`,
@@ -44,14 +45,36 @@ export default function TrailerPanel({
   )
 
   const segments = segmentData?.segments || []
-  const combinedVideoUrl = segmentData?.combinedVideoUrl
-  const combinedVideoStatus = segmentData?.combinedVideoStatus
-  const bgmUrl = segmentData?.bgmUrl
   const summary = segmentData?.summary
+
+  // 从 step.outputData 读取合成结果（video-segments API 不再返回 combinedVideoUrl/bgmUrl）
+  const stepOutput = (step?.outputData as any) || {}
+  const combinedVideoUrl = stepOutput.combinedVideoUrl || stepOutput.videoUrl || null
+  const combinedVideoStatus = stepOutput.combinedVideoStatus || null
+  const musicUrl = stepOutput.musicUrl || null
+  const musicIsMock = stepOutput.musicIsMock ?? true
 
   const isExecuting = executing === 'TRAILER'
 
   const totalDuration = segments.reduce((sum: number, s: any) => sum + (s.duration || 5), 0)
+
+  const handleGenerateBgm = useCallback(async () => {
+    setIsGeneratingBgm(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/trailer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'generate-bgm' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || '生成失败')
+      // BGM 会写入 step.outputData.musicUrl，mutate 刷新后 UI 自动更新
+    } catch (e: any) {
+      console.error('[BGM] 生成失败:', e)
+    } finally {
+      setIsGeneratingBgm(false)
+    }
+  }, [projectId])
 
   useEffect(() => {
     const video = videoRef.current
@@ -126,10 +149,10 @@ export default function TrailerPanel({
             <span>总时长: {formatTime(totalDuration)}</span>
             <span>{segments.length} 个片段</span>
           </div>
-          {bgmUrl && (
+          {musicUrl && (
             <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
-              <span className="text-xs text-stone-500">背景音乐</span>
-              <audio src={bgmUrl} controls className="mt-1 w-full" />
+              <span className="text-xs text-stone-500">背景音乐 {musicIsMock ? '(静音)' : ''}</span>
+              <audio src={musicUrl} controls className="mt-1 w-full" />
             </div>
           )}
         </div>
@@ -216,6 +239,30 @@ export default function TrailerPanel({
                   <Play className="h-3 w-3" />
                 )}
                 批量生成
+              </button>
+            )}
+            {/* 生成背景音乐 */}
+            {musicUrl ? (
+              <button
+                disabled
+                className="flex items-center gap-1 rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700"
+              >
+                <Music className="h-3 w-3" />
+                {musicIsMock ? '静音' : '已生成 BGM'}
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerateBgm}
+                disabled={isExecuting || isGeneratingBgm || segments.length === 0}
+                className="flex items-center gap-1 rounded-md bg-stone-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-600 disabled:opacity-50"
+                title="先生成至少一个视频片段"
+              >
+                {isGeneratingBgm ? (
+                  <LoaderCircle className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Music className="h-3 w-3" />
+                )}
+                生成 BGM
               </button>
             )}
             {allCompleted && (

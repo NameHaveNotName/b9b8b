@@ -331,25 +331,45 @@ export async function composeVideo(args: {
     let musicIsMock = true
 
     if (isTrailer) {
-      // Trailer: 生成 BGM 并混音
-      // 读取框架数据用于 BGM 情绪/故事背景
-      const fwStep = await prisma.workflowStep.findUnique({
-        where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
+      // 优先从 step outputData 读取已有的 BGM（用户可能已单独生成）
+      const step = await prisma.workflowStep.findUnique({
+        where: { projectId_stepType: { projectId, stepType: 'TRAILER' } },
       })
-      const fw = (fwStep?.outputData as any) || {}
-      const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
-      const acts = Array.isArray(fw.acts) ? fw.acts : []
+      const stepOutput = (step?.outputData as any) || {}
+      const existingBgmUrl = stepOutput.musicUrl
 
-      const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
-        tempDir,
-        durationSec: totalDuration,
-        storyBrief,
-        acts,
-      })
-      musicIsMock = bgmIsMock
-      console.log(`[COMPOSE] BGM 就绪 isMock=${bgmIsMock} ext=${bgmExt} duration=${totalDuration}s`)
+      let bgmPath: string
+      let bgmExt = 'aac'
+      let bgmMime = 'audio/aac'
 
-      // 将 BGM 裁剪到总时长，避免音频过长导致最终视频时长异常
+      if (existingBgmUrl) {
+        // 复用已有 BGM：从 URL 下载
+        bgmPath = path.join(tempDir, `bgm_existing.${existingBgmUrl.includes('.mp3') ? 'mp3' : 'aac'}`)
+        await downloadUrlToTemp(existingBgmUrl, bgmPath)
+        bgmExt = bgmPath.split('.').pop() || 'aac'
+        bgmMime = bgmExt === 'mp3' ? 'audio/mpeg' : `audio/${bgmExt}`
+        musicUrl = existingBgmUrl
+        musicIsMock = stepOutput.musicIsMock ?? false
+        console.log(`[COMPOSE] 复用已有 BGM url=${existingBgmUrl} isMock=${musicIsMock}`)
+      } else {
+        // 没有已有 BGM，生成新的
+        const fwStep = await prisma.workflowStep.findUnique({
+          where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
+        })
+        const fw = (fwStep?.outputData as any) || {}
+        const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
+        const acts = Array.isArray(fw.acts) ? fw.acts : []
+
+        const bgmResult = await generateTrailerBgm({ tempDir, durationSec: totalDuration, storyBrief, acts })
+        bgmPath = bgmResult.bgmPath
+        bgmExt = bgmResult.bgmExt
+        bgmMime = bgmResult.bgmMime
+        bgmIsMock = bgmResult.bgmIsMock
+        musicIsMock = bgmIsMock
+        console.log(`[COMPOSE] 新生成 BGM isMock=${bgmIsMock} ext=${bgmExt}`)
+      }
+
+      // 将 BGM 裁剪到总时长
       const trimmedBgmPath = path.join(tempDir, `bgm_trimmed_${totalDuration}s.m4a`)
       await trimAudio(bgmPath, trimmedBgmPath, totalDuration)
       console.log(`[COMPOSE] BGM 已裁剪到 ${totalDuration}s`)
@@ -358,23 +378,6 @@ export async function composeVideo(args: {
       const mixedPath = path.join(tempDir, 'final.mp4')
       await mixAudioVideo(concatPath, trimmedBgmPath, mixedPath, { bgmVolume: 0.3 })
       finalPath = mixedPath
-
-      // 上传 BGM
-      const bgmBuf = await fsPromises.readFile(bgmPath)
-      const bgmKey = `projects/${projectId}/bgm_${Date.now()}.${bgmExt}`
-      try {
-        await uploadFile(bgmKey, bgmBuf, bgmMime)
-        musicUrl = await getSignedFileUrl(bgmKey, 3600)
-        console.log(`[COMPOSE] BGM 上传完成 key=${bgmKey}`)
-      } catch (err: any) {
-        console.warn(`[COMPOSE] BGM 上传失败(不阻塞主流程): ${err?.message}`)
-      }
-
-      // 更新项目 BGM URL
-      await prisma.project.update({
-        where: { id: projectId },
-        data: { bgmUrl: musicUrl },
-      })
     }
 
     // 上传最终视频
@@ -383,14 +386,23 @@ export async function composeVideo(args: {
     await uploadFile(finalKey, finalBuf, 'video/mp4')
     const videoUrl = await getSignedFileUrl(finalKey, 3600)
 
-    // 更新项目
-    await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        combinedVideoUrl: videoUrl,
-        combinedVideoStatus: 'completed',
-      },
+    // 更新 step outputData 记录合成结果（不再写 Project 表）
+    const step = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType: isTrailer ? 'TRAILER' : 'VIDEO_DIRECT' } },
     })
+    if (step) {
+      const existingOutput = (step.outputData as any) || {}
+      await prisma.workflowStep.update({
+        where: { id: step.id },
+        data: {
+          outputData: {
+            ...existingOutput,
+            combinedVideoUrl: videoUrl,
+            combinedVideoStatus: 'completed',
+          },
+        },
+      })
+    }
 
     await removeDir(tempDir)
     console.log(`[COMPOSE] 最终视频上传完成 key=${finalKey}`)
@@ -398,11 +410,22 @@ export async function composeVideo(args: {
     return { videoUrl, storageKey: finalKey, duration: totalDuration, musicUrl, musicIsMock }
   } catch (e: any) {
     await removeDir(tempDir)
-    // 更新项目状态为失败
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { combinedVideoStatus: 'failed' },
+    // 更新 step 状态为失败
+    const step = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType: isTrailer ? 'TRAILER' : 'VIDEO_DIRECT' } },
     })
+    if (step) {
+      const existingOutput = (step.outputData as any) || {}
+      await prisma.workflowStep.update({
+        where: { id: step.id },
+        data: {
+          outputData: {
+            ...existingOutput,
+            combinedVideoStatus: 'failed',
+          },
+        },
+      })
+    }
     throw e
   }
 }

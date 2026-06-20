@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import useSWR from 'swr'
-import { LoaderCircle, Play, RefreshCw, Film } from 'lucide-react'
+import { LoaderCircle, Play, RefreshCw, Film, Music } from 'lucide-react'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 
@@ -33,6 +33,7 @@ export default function VideoDirectPanel({
   const videoRef = useRef<HTMLVideoElement>(null)
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null)
   const [isComposing, setIsComposing] = useState(false)
+  const [isGeneratingBgm, setIsGeneratingBgm] = useState(false)
 
   // 轮询 VideoSegment 数据
   const { data: segmentData } = useSWR(
@@ -42,13 +43,35 @@ export default function VideoDirectPanel({
   )
 
   const segments = segmentData?.segments || []
-  const combinedVideoUrl = segmentData?.combinedVideoUrl
-  const combinedVideoStatus = segmentData?.combinedVideoStatus
   const summary = segmentData?.summary
+
+  // 从 step.outputData 读取合成结果
+  const stepOutput = (step?.outputData as any) || {}
+  const combinedVideoUrl = stepOutput.combinedVideoUrl || stepOutput.videoUrl || null
+  const combinedVideoStatus = stepOutput.combinedVideoStatus || null
+  const musicUrl = stepOutput.musicUrl || null
+  const musicIsMock = stepOutput.musicIsMock ?? true
 
   const isExecuting = executing === 'VIDEO_DIRECT'
 
   const totalDuration = segments.reduce((sum: number, s: any) => sum + (s.duration || 5), 0)
+
+  const handleGenerateBgm = useCallback(async () => {
+    setIsGeneratingBgm(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/video-direct`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'generate-bgm' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || '生成失败')
+    } catch (e: any) {
+      console.error('[BGM] 生成失败:', e)
+    } finally {
+      setIsGeneratingBgm(false)
+    }
+  }, [projectId])
 
   // 时间轴同步
   useEffect(() => {
@@ -211,6 +234,30 @@ export default function VideoDirectPanel({
                   <Play className="h-3 w-3" />
                 )}
                 批量生成
+              </button>
+            )}
+            {/* 生成背景音乐 */}
+            {musicUrl ? (
+              <button
+                disabled
+                className="flex items-center gap-1 rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700"
+              >
+                <Music className="h-3 w-3" />
+                {musicIsMock ? '静音' : '已生成 BGM'}
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerateBgm}
+                disabled={isExecuting || isGeneratingBgm || segments.length === 0}
+                className="flex items-center gap-1 rounded-md bg-stone-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-600 disabled:opacity-50"
+                title="先生成至少一个视频片段"
+              >
+                {isGeneratingBgm ? (
+                  <LoaderCircle className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Music className="h-3 w-3" />
+                )}
+                生成 BGM
               </button>
             )}
             {allCompleted && (
