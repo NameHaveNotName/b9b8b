@@ -98,11 +98,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const characterAssets = await prisma.asset.findMany({
     where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
   })
+
+  // 【调试日志】确认 API 配置
+  console.log('[CONCEPT-GEN-ONE] 请求参数:', { sceneIndex, aspectRatio, imageModel })
+  console.log('[CONCEPT-GEN-ONE] XIAOMI_BASE_URL:', process.env.XIAOMI_BASE_URL || '(未设置，使用默认 yunwu.ai)')
+  console.log('[CONCEPT-GEN-ONE] XIAOMI_API_KEY 前8位:', process.env.XIAOMI_API_KEY?.slice(0, 8) || '(未设置)')
   const characterImageUrls = characterAssets
     .map((a) => a.url)
     .filter((u) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u))
 
   const imageClient = await getImageClient()
+  console.log('[CONCEPT-GEN-ONE] 准备调用 generateConceptScene，prompt 前80字符:', promptItem.englishPrompt.slice(0, 80))
   const result = await imageClient.generateConceptScene(
     params.id,
     promptItem.englishPrompt,
