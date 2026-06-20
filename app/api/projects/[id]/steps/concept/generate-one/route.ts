@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 import { NextResponse } from 'next/server'
+import { startStep, completeStep } from '@/lib/workflow-executor'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
@@ -52,18 +53,24 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   // 也支持无 prompts 时自动生成（兜底）
   let promptItem = prompts[sceneIndex]
+
+  // 首张生成时设置 PROCESSING 状态
+  if (sceneIndex === 0) {
+    await startStep(step.id)
+  }
   if (!promptItem) {
     // 没有保存的 prompts，从 framework 实时生成
     return NextResponse.json({ error: 'VALID_002', message: '提示词未生成，请先点击"生成概念图"生成提示词' }, { status: 400 })
   }
 
   // 去重：已生成则直接返回已有结果（用 JS 过滤避免 Prisma JSON path 查询兼容性问题）
+  const totalScenes = prompts.length
+  const isLast = sceneIndex + 1 >= totalScenes
   const existingAssets = await prisma.asset.findMany({
     where: { projectId: params.id, stepId: step.id },
   })
   const existing = existingAssets.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)
   if (existing) {
-    const totalScenes = prompts.length
     return NextResponse.json({
       success: true,
       sceneIndex,
@@ -72,7 +79,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         url: existing.url,
         metadata: existing.metadata,
       },
-      hasMore: sceneIndex + 1 < totalScenes,
+      hasMore: !isLast,
       totalScenes,
       duplicate: true,
     })
@@ -137,8 +144,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     },
   })
 
-  const totalScenes = prompts.length
-  console.log(`[CONCEPT-GEN-ONE] 完成第 ${sceneIndex + 1}/${totalScenes} 张，hasMore=${sceneIndex + 1 < totalScenes}`)
+  if (isLast) {
+    await completeStep(step.id, { totalScenes, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary })
+    console.log('[CONCEPT-GEN-ONE] 最后一张完成，step 已标记 COMPLETED')
+  }
+  console.log(`[CONCEPT-GEN-ONE] 完成第 ${sceneIndex + 1}/${totalScenes} 张，hasMore=${!isLast}`)
 
   return NextResponse.json({
     success: true,
@@ -148,7 +158,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       url: asset.url,
       metadata: asset.metadata,
     },
-    hasMore: sceneIndex + 1 < totalScenes,
+    hasMore: !isLast,
     totalScenes,
     isMock: !!result.metadata?.isMock,
   })
