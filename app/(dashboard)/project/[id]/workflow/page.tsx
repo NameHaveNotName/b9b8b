@@ -3212,9 +3212,76 @@ function ConceptPanel({
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
   const [ratios, setRatios] = useState<Record<string, number>>({})
+  // 前端驱动分批生成状态
+  const [generatingIndex, setGeneratingIndex] = useState<number | null>(null)
+  const [localAssets, setLocalAssets] = useState<any[]>([])
 
   if (step.status === 'PROCESSING' || isExecuting) {
-    return <ProcessingBlock message="正在生成概念图..." />
+    // 前端驱动分批：显示已生成图片 + 正在生成的位置
+    const totalScenes = (step.outputData as any)?.totalScenes || '?'
+    const existingCount = assets.length
+    const generatingCount = generatingIndex !== null ? 1 : 0
+    const doneCount = localAssets.length + assets.length
+
+    return (
+      <div className="space-y-6">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+          {generatingIndex !== null
+            ? `正在生成第 ${generatingIndex + 1}/${totalScenes} 张...`
+            : `已生成 ${doneCount}/${totalScenes} 张`}
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {[...assets, ...localAssets].map((asset: any) => (
+            <div key={asset.id} className="overflow-hidden rounded-lg border border-stone-200">
+              <div className="relative w-full bg-stone-100" style={{ aspectRatio: '1.78' }}>
+                <img src={asset.url} alt={asset.metadata?.sceneDesc} className="absolute inset-0 h-full w-full object-cover" />
+              </div>
+              <p className="p-3 text-xs text-stone-500">{asset.metadata?.sceneDesc || asset.metadata?.llmPrompt?.slice(0, 60)}</p>
+            </div>
+          ))}
+          {generatingIndex !== null && (
+            <div className="overflow-hidden rounded-lg border border-blue-300 bg-stone-100">
+              <div className="flex h-48 w-full items-center justify-center">
+                <LoaderCircle className="h-8 w-8 animate-spin text-blue-400" />
+              </div>
+              <p className="p-3 text-center text-xs text-stone-400">生成中...</p>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // 前端驱动分批递归生成：每次只生成 1 张，避免 Vercel Hobby 60s 超时
+  const generateOne = async (sceneIndex: number, aspectRatio: string, imageModel: string) => {
+    setGeneratingIndex(sceneIndex)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sceneIndex, aspectRatio, imageModel }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`)
+
+      // 追加新图片到本地状态
+      if (data.asset) {
+        setLocalAssets(prev => [...prev, data.asset])
+      }
+
+      if (data.hasMore) {
+        // 递归生成下一张
+        await generateOne(sceneIndex + 1, aspectRatio, imageModel)
+      } else {
+        // 全部完成，刷新全局状态
+        setGeneratingIndex(null)
+        await mutate()
+        setToast?.({ kind: 'success', message: '概念图生成完成' })
+      }
+    } catch (e: any) {
+      setGeneratingIndex(null)
+      setToast?.({ kind: 'error', message: '生成失败：' + e.message })
+    }
   }
 
   // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
@@ -3228,7 +3295,10 @@ function ConceptPanel({
         stepLabel="CONCEPT"
         defaultRatio={defaultRatio}
         defaultModel={defaultModel}
-        onConfirm={(ratio, model) => onExecute('CONCEPT', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
+        onConfirm={(ratio, model) => {
+          onExecute('CONCEPT', { action: 'generate-images', aspectRatio: ratio, imageModel: model })
+          generateOne(0, ratio, model)
+        }}
         onRegeneratePrompts={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
         isExecuting={isExecuting}
         editable={!readOnly}
@@ -3300,8 +3370,14 @@ function ConceptPanel({
 
   async function handleRegenerateAll() {
     setShowConfirmAll(false)
+    setLocalAssets([])
+    const defaultRatio = (step.outputData as any)?.aspectRatio || '16:9'
+    const defaultModel = (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
     console.log('[CONCEPT-REGENERATE-ALL] 整体重做')
-    onExecute('CONCEPT', { force: true })
+    // force=true API 会重置 step 状态，完成后触发 generateOne 从第 0 张开始
+    await onExecute('CONCEPT', { force: true })
+    // API 同步完成后，executing 被清空，重新触发分批生成
+    generateOne(0, defaultRatio, defaultModel)
   }
 
   return (
