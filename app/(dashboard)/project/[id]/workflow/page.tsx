@@ -3217,21 +3217,19 @@ function ConceptPanel({
   const [localAssets, setLocalAssets] = useState<any[]>([])
 
   if (step.status === 'PROCESSING' || isExecuting) {
-    // 前端驱动分批：显示已生成图片 + 正在生成的位置
+    // 轮询模式：显示已生成的图片 + 生成进度
     const totalScenes = (step.outputData as any)?.totalScenes || '?'
-    const existingCount = assets.length
-    const generatingCount = generatingIndex !== null ? 1 : 0
-    const doneCount = localAssets.length + assets.length
+    const doneCount = localAssets.length
 
     return (
       <div className="space-y-6">
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
           {generatingIndex !== null
-            ? `正在生成第 ${generatingIndex + 1}/${totalScenes} 张...`
+            ? `生成中... 已完成 ${doneCount}/${totalScenes} 张`
             : `已生成 ${doneCount}/${totalScenes} 张`}
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {[...assets, ...localAssets].map((asset: any) => (
+          {localAssets.map((asset: any) => (
             <div key={asset.id} className="overflow-hidden rounded-lg border border-stone-200">
               <div className="relative w-full bg-stone-100" style={{ aspectRatio: '1.78' }}>
                 <img src={asset.url} alt={asset.metadata?.sceneDesc} className="absolute inset-0 h-full w-full object-cover" />
@@ -3252,38 +3250,54 @@ function ConceptPanel({
     )
   }
 
-  // 前端驱动分批递归生成：每次只生成 1 张，避免 Vercel Hobby 60s 超时
-  // 使用前端自己计算的 totalScenes，不依赖 hasMore
-  const generateOne = async (sceneIndex: number, totalScenes: number, aspectRatio: string, imageModel: string) => {
-    setGeneratingIndex(sceneIndex)
+  // 轮询状态直到全部完成
+  const startPolling = (totalScenes: number) => {
+    let pollCount = 0
+    const interval = setInterval(async () => {
+      pollCount++
+      try {
+        const res = await fetch(`/api/projects/${projectId}/steps/concept/status`)
+        if (!res.ok) return
+        const data = await res.json()
+        // 用 polling 返回的 assets 更新本地状态（去重合并）
+        const newAssets: any[] = data.assets || []
+        setLocalAssets(newAssets)
+        if (data.status === 'COMPLETED' || data.completedCount >= totalScenes) {
+          clearInterval(interval)
+          setGeneratingIndex(null)
+          await mutate()
+          setToast?.({ kind: 'success', message: '概念图生成完成' })
+        }
+        // 超过 5 分钟（100 次 * 3s）自动停止
+        if (pollCount > 100) {
+          clearInterval(interval)
+          setGeneratingIndex(null)
+        }
+      } catch {}
+    }, 3000)
+  }
+
+  // 发送 202 请求触发后台生成，不等待结果
+  const triggerGenerate = async (sceneIndex: number, aspectRatio: string, imageModel: string) => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
+      await fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sceneIndex, aspectRatio, imageModel }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`)
+    } catch {}
+  }
 
-      // 追加新图片到本地状态
-      if (data.asset) {
-        setLocalAssets(prev => [...prev, data.asset])
-      }
-
-      // 前端自己判断是否还有下一张
-      const nextIndex = sceneIndex + 1
-      if (nextIndex < totalScenes) {
-        await generateOne(nextIndex, totalScenes, aspectRatio, imageModel)
-      } else {
-        // 全部完成，刷新全局状态
-        setGeneratingIndex(null)
-        await mutate()
-        setToast?.({ kind: 'success', message: '概念图生成完成' })
-      }
-    } catch (e: any) {
-      setGeneratingIndex(null)
-      setToast?.({ kind: 'error', message: '生成失败：' + e.message })
+  // 点击生成：发送全部 6 个 202 请求，然后轮询状态
+  const startGeneration = async (totalScenes: number, aspectRatio: string, imageModel: string) => {
+    setGeneratingIndex(0)
+    setLocalAssets([])
+    // 发送全部生成请求（立即返回 202）
+    for (let i = 0; i < totalScenes; i++) {
+      triggerGenerate(i, aspectRatio, imageModel)
     }
+    // 开始轮询
+    startPolling(totalScenes)
   }
 
   // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
@@ -3298,8 +3312,8 @@ function ConceptPanel({
         defaultRatio={defaultRatio}
         defaultModel={defaultModel}
         onConfirm={(ratio, model) => {
-          // 只用前端驱动的 generateOne 单张递归生成，避免同步生成 6 张超时
-          generateOne(0, step.outputData.prompts.length, ratio, model)
+          // 发送全部 202 请求 + 轮询
+          startGeneration(step.outputData.prompts.length, ratio, model)
         }}
         onRegeneratePrompts={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
         isExecuting={isExecuting}
@@ -3376,11 +3390,14 @@ function ConceptPanel({
     const defaultRatio = (step.outputData as any)?.aspectRatio || '16:9'
     const defaultModel = (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
     const totalScenes = (step.outputData as any)?.prompts?.length || 6
-    console.log('[CONCEPT-REGENERATE-ALL] 整体重做')
-    // force=true API 会重置 step 状态，完成后触发 generateOne 从第 0 张开始
-    await onExecute('CONCEPT', { force: true })
-    // API 同步完成后，executing 被清空，重新触发分批生成
-    generateOne(0, totalScenes, defaultRatio, defaultModel)
+    // 调用主 API 的 force 路径删除旧资产（不等待完成）
+    fetch(`/api/projects/${projectId}/steps/concept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    }).catch(() => {})
+    // 立即触发新生成
+    startGeneration(totalScenes, defaultRatio, defaultModel)
   }
 
   return (
