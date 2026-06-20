@@ -3214,31 +3214,7 @@ function ConceptPanel({
   const [ratios, setRatios] = useState<Record<string, number>>({})
 
   if (step.status === 'PROCESSING' || isExecuting) {
-    // 流式展示：显示已生成的图片 + 生成进度，不再遮住
-    const existingOutput = (step.outputData as any) || {}
-    const totalScenes = existingOutput.totalScenes || '?'
-    return (
-      <div className="space-y-6">
-        {assets.length > 0 && (
-          <>
-            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
-              正在生成... 已完成 {assets.length} / {totalScenes} 张
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {assets.map((asset: any) => (
-                <div key={asset.id} className="overflow-hidden rounded-lg border border-stone-200">
-                  <div className="relative w-full bg-stone-100" style={{ aspectRatio: '1.78' }}>
-                    <img src={asset.url} alt={asset.metadata?.sceneDesc} className="absolute inset-0 h-full w-full object-cover" />
-                  </div>
-                  <p className="p-3 text-xs text-stone-500">{asset.metadata?.sceneDesc || asset.metadata?.llmPrompt?.slice(0, 60)}</p>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        {assets.length === 0 && <ProcessingBlock message="正在生成概念图..." />}
-      </div>
-    )
+    return <ProcessingBlock message="正在生成概念图..." />
   }
 
   // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
