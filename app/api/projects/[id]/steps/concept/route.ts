@@ -1,6 +1,8 @@
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
@@ -126,7 +128,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
   }
 
-  // === generate-images: 读取已保存提示词，执行生图 ===
+  // === generate-images: 读取已保存提示词，waitUntil 后台流式生成 ===
   if (action === 'generate-images') {
     const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
     if (!pointsCheck.ok) {
@@ -178,96 +180,98 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     await startStep(step.id)
 
-    try {
-      let styleRefUrl: string
-      let stylePrompt: string
-      try {
-        const ref = await getStyleRefUrl(params.id)
-        styleRefUrl = ref.styleRefUrl
-        stylePrompt = ref.stylePrompt
-      } catch (refErr: any) {
-        console.error('[CONCEPT-IMAGE] 风格图提取失败：', refErr?.message)
-        return NextResponse.json(
-          { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图 URL' },
-          { status: 400 }
-        )
-      }
-
-      const characterAssets = await prisma.asset.findMany({
-        where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
-      })
-      const characterImageUrls = characterAssets
-        .map((a) => a.url)
-        .filter((u) => typeof u === 'string' && u.length > 0) as string[]
-
-      const imageClient = await getImageClient()
-      const scenes = []
-      const failedScenes: string[] = []
-
-      for (const promptItem of resolvedPrompts) {
+    // 流式增量生成：每张图生成后立即存入 DB，前端通过 SWR 3s polling 自动增量展示
+    waitUntil(
+      (async () => {
+        console.log(`[CONCEPT-BG] 后台任务开始，共 ${resolvedPrompts.length} 张`)
+        let styleRefUrl = ''
+        let stylePrompt = ''
         try {
-          const result = await imageClient.generateConceptScene(
-            params.id,
-            promptItem.englishPrompt,
-            styleRefUrl,
-            stylePrompt,
-            characterImageUrls,
-            undefined, // size
-            aspectRatio,
-            imageModel
-          )
-          const asset = await prisma.asset.create({
-            data: {
-              projectId: params.id,
-              stepId: step.id,
-              type: 'IMAGE',
-              mimeType: 'image/png',
-              storageKey: result.storageKey,
-              url: result.url,
-              metadata: {
-                ...result.metadata,
-                actNumber: promptItem.actNumber,
-                sceneIndex: promptItem.sceneIndex,
-                llmPrompt: promptItem.englishPrompt,
-                prompt: promptItem.englishPrompt,
-                aspectRatio,
-                imageModel: imageModel || IMAGE_MODELS.primary,
-              },
-            },
-          })
-          scenes.push({
-            actNumber: promptItem.actNumber,
-            sceneIndex: promptItem.sceneIndex,
-            assetId: asset.id,
-            url: result.url,
-            prompt: promptItem.englishPrompt,
-            aspectRatio,
-            isMock: !!result.metadata?.isMock,
-            mockReason: result.metadata?.mockReason || null,
-          })
-        } catch (imgErr: any) {
-          const sceneLabel = `幕${promptItem.actNumber}-场景${promptItem.sceneIndex + 1}`
-          console.error(`[CONCEPT-IMAGE] ${sceneLabel} 生图失败:`, imgErr?.message)
-          failedScenes.push(sceneLabel)
+          const ref = await getStyleRefUrl(params.id)
+          styleRefUrl = ref.styleRefUrl
+          stylePrompt = ref.stylePrompt
+        } catch (refErr: any) {
+          console.error('[CONCEPT-BG] 风格图提取失败:', refErr?.message)
+          await failStep(step.id, refErr?.message || '未找到有效风格参考图 URL')
+          return
         }
-      }
 
-      if (scenes.length === 0) {
-        const errMsg = `所有概念图生图均失败${failedScenes.length > 0 ? '（' + failedScenes.join(', ') + '）' : ''}`
-        await failStep(step.id, errMsg)
-        await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: errMsg })
-        return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
-      }
+        const characterAssets = await prisma.asset.findMany({
+          where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
+        })
+        const characterImageUrls = characterAssets
+          .map((a) => a.url)
+          .filter((u) => typeof u === 'string' && u.length > 0) as string[]
 
-      await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
-      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      console.log(`[CONCEPT-IMAGE] 完成: 成功 ${scenes.length}/${resolvedPrompts.length} 条，失败: ${failedScenes.join(', ') || '无'}`)
-      return NextResponse.json({ success: true, data: { scenes, totalScenes: scenes.length } })
-    } catch (e: any) {
-      await failStep(step.id, e.message)
-      await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
-      return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
-    }
+        const imageClient = await getImageClient()
+        const scenes = []
+        const failedScenes: string[] = []
+
+        for (const promptItem of resolvedPrompts) {
+          try {
+            console.log(`[CONCEPT-BG] 生成中: 幕${promptItem.actNumber}-场景${promptItem.sceneIndex + 1}`)
+            const result = await imageClient.generateConceptScene(
+              params.id,
+              promptItem.englishPrompt,
+              styleRefUrl,
+              stylePrompt,
+              characterImageUrls,
+              undefined,
+              aspectRatio,
+              imageModel
+            )
+            await prisma.asset.create({
+              data: {
+                projectId: params.id,
+                stepId: step.id,
+                type: 'IMAGE',
+                mimeType: 'image/png',
+                storageKey: result.storageKey,
+                url: result.url,
+                metadata: {
+                  ...result.metadata,
+                  actNumber: promptItem.actNumber,
+                  sceneIndex: promptItem.sceneIndex,
+                  llmPrompt: promptItem.englishPrompt,
+                  prompt: promptItem.englishPrompt,
+                  aspectRatio,
+                  imageModel: imageModel || IMAGE_MODELS.primary,
+                },
+              },
+            })
+            scenes.push({
+              actNumber: promptItem.actNumber,
+              sceneIndex: promptItem.sceneIndex,
+              url: result.url,
+              prompt: promptItem.englishPrompt,
+              aspectRatio,
+              isMock: !!result.metadata?.isMock,
+            })
+            console.log(`[CONCEPT-BG] 完成: 幕${promptItem.actNumber}-场景${promptItem.sceneIndex + 1}，已生成 ${scenes.length}/${resolvedPrompts.length}`)
+          } catch (imgErr: any) {
+            const sceneLabel = `幕${promptItem.actNumber}-场景${promptItem.sceneIndex + 1}`
+            console.error(`[CONCEPT-BG] ${sceneLabel} 生图失败:`, imgErr?.message)
+            failedScenes.push(sceneLabel)
+          }
+        }
+
+        if (scenes.length > 0) {
+          await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
+          console.log(`[CONCEPT-BG] 全部完成: 成功 ${scenes.length}/${resolvedPrompts.length}，失败: ${failedScenes.join(', ') || '无'}`)
+        } else {
+          const errMsg = `所有概念图生图均失败${failedScenes.length > 0 ? '（' + failedScenes.join(', ') + '）' : ''}`
+          await failStep(step.id, errMsg)
+        }
+        await deductPointsAndLog(userId, pointsCheck.cost, scenes.length > 0 ? 'generate' : 'error', { projectId: params.id, workflowStepId: step.id, success: scenes.length > 0, errorMessage: scenes.length === 0 ? failedScenes.join('; ') : undefined })
+      })()
+    )
+
+    return NextResponse.json({
+      success: true,
+      status: 'PROCESSING',
+      message: `开始生成 ${resolvedPrompts.length} 张概念图（每张生成后自动显示）`,
+      totalScenes: resolvedPrompts.length,
+    })
   }
 
   // === 默认兼容：无 action 时走原有完整流程 ===
