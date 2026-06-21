@@ -91,8 +91,8 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   const [storyboardMode, setStoryboardMode] = useState<'reference' | 'keyframe'>('keyframe')
   // 工作指令.txt（2026-06-02 卡死修复）：跟踪 PROCESSING 步骤的超时检测
   const processingStartRef = useRef<Record<string, number>>({})
-  // CONCEPT 重试：子组件挂载后传入 startGeneration 函数
-  const conceptPanelRetryRef = useRef<((totalScenes: number, aspectRatio: string, imageModel: string) => void) | null>(null)
+  // CONCEPT 重试：子组件挂载后注册到 window 供 StepHeader 调用
+  // 使用 window 而非 ref/closure 避免 production minifier 消除问题
   const [timeoutError, setTimeoutError] = useState<string | null>(null)
   // 提升到 WorkflowPage 级别，供 executeStep 和 StepContent 共享
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
@@ -402,7 +402,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
                 if (hasPrompts) {
                   const defaultRatio = currentStep.outputData?.aspectRatio || '16:9'
                   const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
-                  conceptPanelRetryRef.current?.(currentStep.outputData.prompts.length, defaultRatio, defaultModel)
+                  ;(window as any).__conceptRetry?.(currentStep.outputData.prompts.length, defaultRatio, defaultModel)
                 } else {
                   executeStep('CONCEPT', { action: 'generate-prompts' })
                 }
@@ -832,7 +832,7 @@ function StepContent({
           mutate={mutate}
           setToast={setToast}
   readOnly={readOnly}
-          onRetryReady={(fn) => { conceptPanelRetryRef.current = fn }}
+          onRetryReady={(fn) => { (window as any).__conceptRetry = fn }}
         />
       )
     case 'TRAILER':
@@ -3319,9 +3319,10 @@ function ConceptPanel({
     startPolling(totalScenes)
   }
 
-  // 挂载时将 startGeneration 暴露给父组件
+  // 挂载时注册到 window，供父组件 StepHeader 调用
   useEffect(() => {
-    onRetryReady?.(startGeneration)
+    (window as any).__conceptRetry = startGeneration
+    return () => { delete (window as any).__conceptRetry }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
