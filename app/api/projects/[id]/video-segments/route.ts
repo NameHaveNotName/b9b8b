@@ -27,13 +27,22 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   const { searchParams } = new URL(req.url)
   const stepName = searchParams.get('stepName') || undefined
 
-  const segments = await prisma.videoSegment.findMany({
-    where: {
-      projectId: params.id,
-      ...(stepName ? { stepName } : {}),
-    },
-    orderBy: { sequence: 'asc' },
-  })
+  let segments: any[] = []
+  try {
+    segments = await prisma.videoSegment.findMany({
+      where: {
+        projectId: params.id,
+        ...(stepName ? { stepName } : {}),
+      },
+      orderBy: { sequence: 'asc' },
+    })
+  } catch (err: any) {
+    if (err.code === 'P2021' || err?.cause?.message?.includes('does not exist')) {
+      // VideoSegment 表尚未创建（迁移未执行），返回空数据
+      return NextResponse.json({ segments: [], summary: { total: 0, pending: 0, generating: 0, completed: 0, failed: 0, allCompleted: false } })
+    }
+    throw err
+  }
 
   const allCompleted = segments.length > 0 && segments.every((s) => s.status === 'completed')
   const pendingCount = segments.filter((s) => s.status === 'pending').length
