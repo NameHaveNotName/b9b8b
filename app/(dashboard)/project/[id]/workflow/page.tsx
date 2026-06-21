@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef, useMemo, useImperativeHandle, forwardRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -90,8 +90,8 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   const [storyboardMode, setStoryboardMode] = useState<'reference' | 'keyframe'>('keyframe')
   // 工作指令.txt（2026-06-02 卡死修复）：跟踪 PROCESSING 步骤的超时检测
   const processingStartRef = useRef<Record<string, number>>({})
-  // CONCEPT 重试用 ref（暴露子组件的 retry 方法）
-  const conceptPanelRef = useRef<{ retry: (totalScenes: number, aspectRatio: string, imageModel: string) => void } | null>(null)
+  // CONCEPT 重试：子组件挂载后传入 startGeneration 函数
+  const [conceptPanelRetry, setConceptPanelRetry] = useState<((totalScenes: number, aspectRatio: string, imageModel: string) => void) | null>(null)
   const [timeoutError, setTimeoutError] = useState<string | null>(null)
   // 提升到 WorkflowPage 级别，供 executeStep 和 StepContent 共享
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
@@ -401,7 +401,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
                 if (hasPrompts) {
                   const defaultRatio = currentStep.outputData?.aspectRatio || '16:9'
                   const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
-                  conceptPanelRef.current?.retry(currentStep.outputData.prompts.length, defaultRatio, defaultModel)
+                  conceptPanelRetry?.(currentStep.outputData.prompts.length, defaultRatio, defaultModel)
                 } else {
                   executeStep('CONCEPT', { action: 'generate-prompts' })
                 }
@@ -823,7 +823,6 @@ function StepContent({
     case 'CONCEPT':
       return (
         <ConceptPanel
-          ref={conceptPanelRef}
           step={step}
           projectId={project.id}
           executing={executing}
@@ -832,6 +831,7 @@ function StepContent({
           mutate={mutate}
           setToast={setToast}
   readOnly={readOnly}
+          onRetryReady={(fn) => setConceptPanelRetry(() => fn)}
         />
       )
     case 'TRAILER':
@@ -3201,7 +3201,7 @@ function CharacterPanel({
   )
 }
 
-const ConceptPanel = forwardRef(({
+function ConceptPanel({
   step,
   projectId,
   executing,
@@ -3210,6 +3210,7 @@ const ConceptPanel = forwardRef(({
   mutate,
   setToast,
   readOnly,
+  onRetryReady,
 }: {
   step: any
   projectId: string
@@ -3219,7 +3220,9 @@ const ConceptPanel = forwardRef(({
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
   readOnly?: boolean
-}, ref) => {
+  /** 组件挂载时传入 startGeneration 函数，供父组件在重试时调用 */
+  onRetryReady?: (fn: (totalScenes: number, aspectRatio: string, imageModel: string) => void) => void
+}) {
   const assets = step.resultAssets || []
   const isExecuting = executing === step.stepType
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
@@ -3315,8 +3318,11 @@ const ConceptPanel = forwardRef(({
     startPolling(totalScenes)
   }
 
-  // 暴露 retry 方法给父组件（通过 ref 调用）
-  useImperativeHandle(ref, () => ({ retry: startGeneration }), [startGeneration])
+  // 挂载时将 startGeneration 暴露给父组件
+  useEffect(() => {
+    onRetryReady?.(startGeneration)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
@@ -3513,7 +3519,7 @@ const ConceptPanel = forwardRef(({
       )}
     </div>
   );
-}));
+}
 
 /* ============================================================
    分镜 Mock 占位图（纯 HTML/CSS，避免 Canvas 字体方块问题）
