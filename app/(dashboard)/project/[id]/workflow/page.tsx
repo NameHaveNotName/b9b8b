@@ -1,4 +1,5 @@
 'use client'
+// force-rebuild: 2026-06-21-1732
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
