@@ -28,7 +28,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     include: { resultAssets: true },
   })
 
-  console.log('[CONCEPT-STATUS] step.status:', step?.status, 'resultAssets count:', step?.resultAssets?.length || 0)
+  console.log('[CONCEPT-STATUS] projectId:', params.id, 'stepId:', step?.id, 'status:', step?.status, 'resultAssets:', step?.resultAssets?.length || 0)
 
   const assets = (step?.resultAssets || [])
     .filter((a) => (a.metadata as any)?.sceneIndex !== undefined)
