@@ -3217,7 +3217,7 @@ function ConceptPanel({
   const [localAssets, setLocalAssets] = useState<any[]>([])
 
   if (step.status === 'PROCESSING' || isExecuting) {
-    // 轮询模式：显示已生成的图片 + 生成进度
+    console.log('[CONCEPT-PANEL] PROCESSING state, generatingIndex:', generatingIndex, 'localAssets:', localAssets.length)
     const totalScenes = (step.outputData as any)?.totalScenes || '?'
     const doneCount = localAssets.length
 

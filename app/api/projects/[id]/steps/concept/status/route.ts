@@ -28,9 +28,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     include: { resultAssets: true },
   })
 
+  console.log('[CONCEPT-STATUS] step.status:', step?.status, 'resultAssets count:', step?.resultAssets?.length || 0)
+
   const assets = (step?.resultAssets || [])
     .filter((a) => (a.metadata as any)?.sceneIndex !== undefined)
     .sort((a, b) => ((a.metadata as any)?.sceneIndex || 0) - ((b.metadata as any)?.sceneIndex || 0))
+
+  console.log('[CONCEPT-STATUS] filtered assets:', assets.length)
 
   const outputData = (step?.outputData as any) || {}
   const totalScenes = outputData.prompts?.length || assets.length || 0
