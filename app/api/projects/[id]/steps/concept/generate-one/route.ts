@@ -1,5 +1,5 @@
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
@@ -80,14 +80,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         return
       }
 
-      // 获取参考图
+      // 获取参考图（失败不阻止生成，继续用空字符串）
       let styleRefUrl = ''
       try {
         const ref = await getStyleRefUrl(params.id)
-        styleRefUrl = ref.styleRefUrl
+        styleRefUrl = ref.styleRefUrl || ''
       } catch (refErr: any) {
-        console.error('[CONCEPT-BG] 风格图提取失败:', refErr?.message)
-        return
+        console.warn('[CONCEPT-BG] 风格图提取失败，继续生成:', refErr?.message)
       }
 
       const characterAssets = await prisma.asset.findMany({
@@ -100,37 +99,55 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       // 生成
       const imageClient = await getImageClient()
       console.log('[CONCEPT-BG] 调用 generateConceptScene, prompt:', promptItem.englishPrompt?.slice(0, 60))
-      const result = await imageClient.generateConceptScene(
-        params.id,
-        promptItem.englishPrompt,
-        styleRefUrl,
-        '',
-        characterImageUrls,
-        undefined,
-        aspectRatio,
-        imageModel
-      )
+      let result: { url: string; storageKey: string; metadata: any }
+      try {
+        result = await imageClient.generateConceptScene(
+          params.id,
+          promptItem.englishPrompt,
+          styleRefUrl,
+          '',
+          characterImageUrls,
+          undefined,
+          aspectRatio,
+          imageModel
+        )
+      } catch (genErr: any) {
+        console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 生成失败:`, genErr?.message)
+        return
+      }
 
-      // 保存 asset
-      await prisma.asset.create({
-        data: {
-          projectId: params.id,
-          stepId: step.id,
-          type: 'IMAGE',
-          mimeType: 'image/png',
-          storageKey: result.storageKey,
-          url: result.url,
-          metadata: {
-            actNumber: promptItem.actNumber,
-            sceneIndex,
-            llmPrompt: promptItem.englishPrompt,
-            prompt: promptItem.englishPrompt,
-            aspectRatio,
-            imageModel: imageModel || IMAGE_MODELS.primary,
-          },
-        },
-      })
-      console.log(`[CONCEPT-BG] 完成 sceneIndex=${sceneIndex}，isLast=${sceneIndex + 1 >= totalScenes}`)
+      // 保存 asset（带重试，防止函数超时导致写入被中断）
+      let saved = false
+      for (let retry = 0; retry < 3 && !saved; retry++) {
+        try {
+          await prisma.asset.create({
+            data: {
+              projectId: params.id,
+              stepId: step.id,
+              type: 'IMAGE',
+              mimeType: 'image/png',
+              storageKey: result.storageKey,
+              url: result.url,
+              metadata: {
+                actNumber: promptItem.actNumber,
+                sceneIndex,
+                llmPrompt: promptItem.englishPrompt,
+                prompt: promptItem.englishPrompt,
+                aspectRatio,
+                imageModel: imageModel || IMAGE_MODELS.primary,
+              },
+            },
+          })
+          saved = true
+          console.log(`[CONCEPT-BG] 完成 sceneIndex=${sceneIndex}，已保存到 DB`)
+        } catch (saveErr: any) {
+          console.warn(`[CONCEPT-BG] sceneIndex=${sceneIndex} 保存失败，重试 ${retry + 1}/3:`, saveErr?.message)
+          if (retry < 2) await new Promise((r) => setTimeout(r, 1000))
+        }
+      }
+      if (!saved) {
+        console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 多次保存失败，跳过`)
+      }
 
       // 最后一张标记完成
       if (sceneIndex + 1 >= totalScenes) {
