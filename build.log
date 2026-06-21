@@ -1,0 +1,621 @@
+
+> ai-film-flow@1.0.0 build
+> next build
+
+  ▲ Next.js 14.2.35
+  - Environments: .env.local
+
+   Creating an optimized production build ...
+Failed to compile.
+
+../app/_not-found/page.js from Terser
+  x A numeric separator is only allowed between two digits
+     ,-[392:1]
+ 392 | /* harmony export */ });
+ 393 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 394 | 
+ 395 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 396 | 
+ 397 | 
+ 398 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[406:1]
+ 406 | /* harmony export */ });
+ 407 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 408 | 
+ 409 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 410 | 
+ 411 | 
+ 412 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[577:1]
+ 577 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 578 | 
+ 579 | 
+ 580 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+     :                                                                                                                                                             ^
+ 581 | 
+ 582 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[579:1]
+ 579 | 
+ 580 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 581 | 
+ 582 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     :                                                                                                                                                             ^
+ 583 | 
+ 584 | 
+ 585 | /***/ }),
+     `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+Error: 
+  x A numeric separator is only allowed between two digits
+     ,-[392:1]
+ 392 | /* harmony export */ });
+ 393 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 394 | 
+ 395 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 396 | 
+ 397 | 
+ 398 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[406:1]
+ 406 | /* harmony export */ });
+ 407 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 408 | 
+ 409 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 410 | 
+ 411 | 
+ 412 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[577:1]
+ 577 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 578 | 
+ 579 | 
+ 580 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+     :                                                                                                                                                             ^
+ 581 | 
+ 582 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[579:1]
+ 579 | 
+ 580 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 581 | 
+ 582 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     :                                                                                                                                                             ^
+ 583 | 
+ 584 | 
+ 585 | /***/ }),
+     `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+
+../app/register/page.js from Terser
+  x A numeric separator is only allowed between two digits
+     ,-[673:1]
+ 673 | /* harmony export */ });
+ 674 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 675 | 
+ 676 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 677 | 
+ 678 | 
+ 679 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[687:1]
+ 687 | /* harmony export */ });
+ 688 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 689 | 
+ 690 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 691 | 
+ 692 | 
+ 693 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[796:1]
+ 796 | /* harmony export */ });
+ 797 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 798 | 
+ 799 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\register\page.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 800 | 
+ 801 | 
+ 802 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[873:1]
+ 873 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 874 | 
+ 875 | 
+ 876 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+     :                                                                                                                                                             ^
+ 877 | 
+ 878 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[875:1]
+ 875 | 
+ 876 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 877 | 
+ 878 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     :                                                                                                                                                             ^
+ 879 | 
+ 880 | 
+ 881 | /***/ }),
+     `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+Error: 
+  x A numeric separator is only allowed between two digits
+     ,-[673:1]
+ 673 | /* harmony export */ });
+ 674 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 675 | 
+ 676 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 677 | 
+ 678 | 
+ 679 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[687:1]
+ 687 | /* harmony export */ });
+ 688 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 689 | 
+ 690 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 691 | 
+ 692 | 
+ 693 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[796:1]
+ 796 | /* harmony export */ });
+ 797 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 798 | 
+ 799 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\register\page.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 800 | 
+ 801 | 
+ 802 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[873:1]
+ 873 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 874 | 
+ 875 | 
+ 876 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+     :                                                                                                                                                             ^
+ 877 | 
+ 878 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[875:1]
+ 875 | 
+ 876 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 877 | 
+ 878 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     :                                                                                                                                                             ^
+ 879 | 
+ 880 | 
+ 881 | /***/ }),
+     `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+
+../app/page.js from Terser
+  x A numeric separator is only allowed between two digits
+     ,-[416:1]
+ 416 | /* harmony export */ });
+ 417 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 418 | 
+ 419 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 420 | 
+ 421 | 
+ 422 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[430:1]
+ 430 | /* harmony export */ });
+ 431 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 432 | 
+ 433 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 434 | 
+ 435 | 
+ 436 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[696:1]
+ 696 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 697 | 
+ 698 | 
+ 699 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+     :                                                                                                                                                             ^
+ 700 | 
+ 701 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[698:1]
+ 698 | 
+ 699 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 700 | 
+ 701 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     :                                                                                                                                                             ^
+ 702 | 
+ 703 | 
+ 704 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[956:1]
+ 956 | var module_proxy = __webpack_require__(68570);
+ 957 | ;// CONCATENATED MODULE: ./node_modules/lucide-react/dist/esm/Icon.mjs
+ 958 | 
+ 959 | /* harmony default export */ const Icon = ((0,module_proxy.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\node_modules\lucide-react\dist\esm\Icon.mjs#default`));
+     :                                                                                                             ^
+ 960 | 
+ 961 | ;// CONCATENATED MODULE: ./node_modules/lucide-react/dist/esm/createLucideIcon.mjs
+ 962 | /**
+     `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+Error: 
+  x A numeric separator is only allowed between two digits
+     ,-[416:1]
+ 416 | /* harmony export */ });
+ 417 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 418 | 
+ 419 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 420 | 
+ 421 | 
+ 422 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[430:1]
+ 430 | /* harmony export */ });
+ 431 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 432 | 
+ 433 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 434 | 
+ 435 | 
+ 436 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[696:1]
+ 696 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 697 | 
+ 698 | 
+ 699 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+     :                                                                                                                                                             ^
+ 700 | 
+ 701 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[698:1]
+ 698 | 
+ 699 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 700 | 
+ 701 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     :                                                                                                                                                             ^
+ 702 | 
+ 703 | 
+ 704 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[956:1]
+ 956 | var module_proxy = __webpack_require__(68570);
+ 957 | ;// CONCATENATED MODULE: ./node_modules/lucide-react/dist/esm/Icon.mjs
+ 958 | 
+ 959 | /* harmony default export */ const Icon = ((0,module_proxy.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\node_modules\lucide-react\dist\esm\Icon.mjs#default`));
+     :                                                                                                             ^
+ 960 | 
+ 961 | ;// CONCATENATED MODULE: ./node_modules/lucide-react/dist/esm/createLucideIcon.mjs
+ 962 | /**
+     `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+
+../app/login/page.js from Terser
+  x A numeric separator is only allowed between two digits
+     ,-[724:1]
+ 724 | /* harmony export */ });
+ 725 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 726 | 
+ 727 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 728 | 
+ 729 | 
+ 730 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[738:1]
+ 738 | /* harmony export */ });
+ 739 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 740 | 
+ 741 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 742 | 
+ 743 | 
+ 744 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[858:1]
+ 858 | var module_proxy = __webpack_require__(68570);
+ 859 | ;// CONCATENATED MODULE: ./app/login/login-form.tsx
+ 860 | 
+ 861 | /* harmony default export */ const login_form = ((0,module_proxy.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\login\login-form.tsx#default`));
+     :                                                                                                                   ^
+ 862 | 
+ 863 | ;// CONCATENATED MODULE: ./app/login/page.tsx
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[982:1]
+ 982 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 983 | 
+ 984 | 
+ 985 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+     :                                                                                                                                                             ^
+ 986 | 
+ 987 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[984:1]
+ 984 | 
+ 985 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 986 | 
+ 987 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     :                                                                                                                                                             ^
+ 988 | 
+ 989 | 
+ 990 | /***/ }),
+     `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+Error: 
+  x A numeric separator is only allowed between two digits
+     ,-[724:1]
+ 724 | /* harmony export */ });
+ 725 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 726 | 
+ 727 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 728 | 
+ 729 | 
+ 730 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[738:1]
+ 738 | /* harmony export */ });
+ 739 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 740 | 
+ 741 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 742 | 
+ 743 | 
+ 744 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[858:1]
+ 858 | var module_proxy = __webpack_require__(68570);
+ 859 | ;// CONCATENATED MODULE: ./app/login/login-form.tsx
+ 860 | 
+ 861 | /* harmony default export */ const login_form = ((0,module_proxy.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\login\login-form.tsx#default`));
+     :                                                                                                                   ^
+ 862 | 
+ 863 | ;// CONCATENATED MODULE: ./app/login/page.tsx
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[982:1]
+ 982 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 983 | 
+ 984 | 
+ 985 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+     :                                                                                                                                                             ^
+ 986 | 
+ 987 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[984:1]
+ 984 | 
+ 985 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 986 | 
+ 987 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+     :                                                                                                                                                             ^
+ 988 | 
+ 989 | 
+ 990 | /***/ }),
+     `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+
+../app/admin/recharges/page.js from Terser
+  x A numeric separator is only allowed between two digits
+     ,-[876:1]
+ 876 | /* harmony export */ });
+ 877 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 878 | 
+ 879 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\admin\recharges\page.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 880 | 
+ 881 | 
+ 882 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[891:1]
+ 891 | /* harmony export */ });
+ 892 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 893 | 
+ 894 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 895 | 
+ 896 | 
+ 897 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[905:1]
+ 905 | /* harmony export */ });
+ 906 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 907 | 
+ 908 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 909 | 
+ 910 | 
+ 911 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+      ,-[1076:1]
+ 1076 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 1077 | 
+ 1078 | 
+ 1079 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+      :                                                                                                                                                             ^
+ 1080 | 
+ 1081 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+      `----
+
+  x A numeric separator is only allowed between two digits
+      ,-[1078:1]
+ 1078 | 
+ 1079 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 1080 | 
+ 1081 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+      :                                                                                                                                                             ^
+ 1082 | 
+ 1083 | 
+ 1084 | /***/ }),
+      `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+Error: 
+  x A numeric separator is only allowed between two digits
+     ,-[876:1]
+ 876 | /* harmony export */ });
+ 877 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 878 | 
+ 879 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\admin\recharges\page.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 880 | 
+ 881 | 
+ 882 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[891:1]
+ 891 | /* harmony export */ });
+ 892 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 893 | 
+ 894 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 895 | 
+ 896 | 
+ 897 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+     ,-[905:1]
+ 905 | /* harmony export */ });
+ 906 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 907 | 
+ 908 | /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\app\global-error.tsx#default`));
+     :                                                                                                                                                                                                                   ^
+ 909 | 
+ 910 | 
+ 911 | /***/ }),
+     `----
+
+  x A numeric separator is only allowed between two digits
+      ,-[1076:1]
+ 1076 | /* harmony import */ var next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(68570);
+ 1077 | 
+ 1078 | 
+ 1079 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+      :                                                                                                                                                             ^
+ 1080 | 
+ 1081 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+      `----
+
+  x A numeric separator is only allowed between two digits
+      ,-[1078:1]
+ 1078 | 
+ 1079 | const e0 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#AuthProvider`);
+ 1080 | 
+ 1081 | const e1 = (0,next_dist_build_webpack_loaders_next_flight_loader_module_proxy__WEBPACK_IMPORTED_MODULE_0__.createProxy)(String.raw`D:\.pogget\user_storage\u_461180\b9b8b\lib\auth-context.tsx#useAuth`);
+      :                                                                                                                                                             ^
+ 1082 | 
+ 1083 | 
+ 1084 | /***/ }),
+      `----
+
+Caused by:
+    0: failed to parse input file
+    1: Syntax Error
+
+
+> Build failed because of webpack errors

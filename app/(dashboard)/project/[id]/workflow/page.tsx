@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, useImperativeHandle, forwardRef } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -90,6 +90,8 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   const [storyboardMode, setStoryboardMode] = useState<'reference' | 'keyframe'>('keyframe')
   // 工作指令.txt（2026-06-02 卡死修复）：跟踪 PROCESSING 步骤的超时检测
   const processingStartRef = useRef<Record<string, number>>({})
+  // CONCEPT 重试用 ref（暴露子组件的 retry 方法）
+  const conceptPanelRef = useRef<{ retry: (totalScenes: number, aspectRatio: string, imageModel: string) => void } | null>(null)
   const [timeoutError, setTimeoutError] = useState<string | null>(null)
   // 提升到 WorkflowPage 级别，供 executeStep 和 StepContent 共享
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
@@ -393,7 +395,17 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             onRetry={() => {
               if (currentStep.stepType === 'FRAMEWORK') {
                 executeStep('FRAMEWORK', { regenerate: true })
-              } else if (['STYLE', 'CHARACTER', 'CONCEPT', 'STORYBOARD', 'KEYFRAMES'].includes(currentStep.stepType)) {
+              } else if (currentStep.stepType === 'CONCEPT') {
+                // CONCEPT：走新的异步生成路径（202 + 轮询），避免 504 超时
+                const hasPrompts = (currentStep.outputData?.prompts?.length || 0) > 0
+                if (hasPrompts) {
+                  const defaultRatio = currentStep.outputData?.aspectRatio || '16:9'
+                  const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
+                  conceptPanelRef.current?.retry(currentStep.outputData.prompts.length, defaultRatio, defaultModel)
+                } else {
+                  executeStep('CONCEPT', { action: 'generate-prompts' })
+                }
+              } else if (['STYLE', 'CHARACTER', 'STORYBOARD', 'KEYFRAMES'].includes(currentStep.stepType)) {
                 // 工作指令.txt（2026-06-07）：重试必须走完整流程，不能跳过提示词生成
                 const hasPrompts = currentStep.outputData?.prompts?.length > 0
                 if (hasPrompts) {
@@ -811,6 +823,7 @@ function StepContent({
     case 'CONCEPT':
       return (
         <ConceptPanel
+          ref={conceptPanelRef}
           step={step}
           projectId={project.id}
           executing={executing}
@@ -3188,7 +3201,7 @@ function CharacterPanel({
   )
 }
 
-function ConceptPanel({
+const ConceptPanel = forwardRef(({
   step,
   projectId,
   executing,
@@ -3206,7 +3219,7 @@ function ConceptPanel({
   mutate: () => Promise<any>
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
   readOnly?: boolean
-}) {
+}, ref) => {
   const assets = step.resultAssets || []
   const isExecuting = executing === step.stepType
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
@@ -3301,6 +3314,9 @@ function ConceptPanel({
     // 开始轮询
     startPolling(totalScenes)
   }
+
+  // 暴露 retry 方法给父组件（通过 ref 调用）
+  useImperativeHandle(ref, () => ({ retry: startGeneration }), [startGeneration])
 
   // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
@@ -3497,7 +3513,7 @@ function ConceptPanel({
       )}
     </div>
   )
-}
+}));
 
 /* ============================================================
    分镜 Mock 占位图（纯 HTML/CSS，避免 Canvas 字体方块问题）
