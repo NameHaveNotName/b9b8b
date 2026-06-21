@@ -3214,7 +3214,9 @@ function ConceptPanel({
   const [ratios, setRatios] = useState<Record<string, number>>({})
   // 前端驱动分批生成状态
   const [generatingIndex, setGeneratingIndex] = useState<number | null>(null)
-  const [localAssets, setLocalAssets] = useState<any[]>([])
+  const [localAssets, setLocalAssets] = useState<any[]>(() =>
+    step.status === 'PROCESSING' ? (step.resultAssets || []) : []
+  )
 
   if (step.status === 'PROCESSING' || isExecuting) {
     console.log('[CONCEPT-PANEL] PROCESSING state, generatingIndex:', generatingIndex, 'localAssets:', localAssets.length)
