@@ -1,7 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['bullmq'],
+    // 标记重型模块为外部依赖，不打包进 serverless function
+    serverExternalPackages: [
+      'bullmq',
+      'sharp',
+      '@img/sharp-libvips-linux-x64',
+      'lucide-react',
+      'xlsx',
+    ],
   },
   images: {
     unoptimized: true,
