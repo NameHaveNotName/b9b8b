@@ -3235,7 +3235,6 @@ function ConceptPanel({
     step.status === 'PROCESSING' ? (step.resultAssets || []) : []
   )
 
-：单次调用，后台并行生成全部图片
   const startGeneration = async (totalScenes: number, aspectRatio: string, imageModel: string) => {
     const outputData = (step.outputData as any) || {}
     const prompts: any[] = outputData.prompts || []
