@@ -3235,34 +3235,7 @@ function ConceptPanel({
     step.status === 'PROCESSING' ? (step.resultAssets || []) : []
   )
 
-  // 轮询状态直到全部完成
-  const startPolling = (totalScenes: number) => {
-    let pollCount = 0
-    const interval = setInterval(async () => {
-      pollCount++
-      try {
-        const res = await fetch(`/api/projects/${projectId}/steps/concept/status`)
-        if (!res.ok) return
-        const data = await res.json()
-        // 用 polling 返回的 assets 更新本地状态（去重合并）
-        const newAssets: any[] = data.assets || []
-        setLocalAssets(newAssets)
-        if (data.status === 'COMPLETED' || data.completedCount >= totalScenes) {
-          clearInterval(interval)
-          setGeneratingIndex(null)
-          await mutate()
-          setToast?.({ kind: 'success', message: '概念图生成完成' })
-        }
-        // 超过 5 分钟（100 次 * 3s）自动停止
-        if (pollCount > 100) {
-          clearInterval(interval)
-          setGeneratingIndex(null)
-        }
-      } catch {}
-    }, 3000)
-  }
-
-  // 点击生成：单次调用，后台并行生成全部图片
+：单次调用，后台并行生成全部图片
   const startGeneration = async (totalScenes: number, aspectRatio: string, imageModel: string) => {
     const outputData = (step.outputData as any) || {}
     const prompts: any[] = outputData.prompts || []
@@ -3279,7 +3252,7 @@ function ConceptPanel({
         body: JSON.stringify({ actNumber, aspectRatio, imageModel }),
       }).catch(() => {})
     }
-    startPolling(totalScenes)
+    setToast?.({ kind: 'info', message: '概念图生成中，稍后刷新页面查看进度' })
   }
 
   // 挂载时注册到 window，供父组件 StepHeader 调用
@@ -3290,41 +3263,23 @@ function ConceptPanel({
   }, [])
 
   if (step.status === 'PROCESSING' || isExecuting) {
-    console.log('[CONCEPT-PANEL] PROCESSING state, generatingIndex:', generatingIndex, 'localAssets:', localAssets.length)
-    const totalScenes = (step.outputData as any)?.totalScenes || '?'
-    const doneCount = localAssets.length
-
     return (
-      <div className="space-y-6">
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
-          {generatingIndex !== null
-            ? `生成中... 已完成 ${doneCount}/${totalScenes} 张`
-            : `已生成 ${doneCount}/${totalScenes} 张`}
+      <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
+        <LoaderCircle className="h-10 w-10 animate-spin text-blue-400" />
+        <div>
+          <p className="text-sm font-medium text-stone-600">概念图生成中</p>
+          <p className="mt-1 text-xs text-stone-400">每幕预计 2-5 分钟，请稍后刷新页面查看进度</p>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {localAssets.map((asset: any) => (
-            <div key={asset.id} className="overflow-hidden rounded-lg border border-stone-200">
-              <div className="relative w-full bg-stone-100" style={{ aspectRatio: '1.78' }}>
-                <img src={asset.url} alt={asset.metadata?.sceneDesc} className="absolute inset-0 h-full w-full object-cover" />
-              </div>
-              <p className="p-3 text-xs text-stone-500">{asset.metadata?.sceneDesc || asset.metadata?.llmPrompt?.slice(0, 60)}</p>
-            </div>
-          ))}
-          {generatingIndex !== null && (
-            <div className="overflow-hidden rounded-lg border border-blue-300 bg-stone-100">
-              <div className="flex h-48 w-full items-center justify-center">
-                <LoaderCircle className="h-8 w-8 animate-spin text-blue-400" />
-              </div>
-              <p className="p-3 text-center text-xs text-stone-400">生成中...</p>
-            </div>
-          )}
-        </div>
+        <button
+          onClick={() => mutate()}
+          className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600 transition hover:bg-stone-50"
+        >
+          刷新查看
+        </button>
       </div>
     )
   }
-
-  // 轮询状态直到全部完成
-  // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
+    // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
     const defaultRatio = step.outputData?.aspectRatio || '16:9'
     const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
