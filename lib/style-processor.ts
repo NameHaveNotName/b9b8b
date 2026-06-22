@@ -37,7 +37,7 @@ export async function processStyleGeneration(
   try {
     // 工作指令.txt（2026-05-24）：3 张风格图分别由 3 个不同模型生成
     // 每张图根据 styleOption.modelNo 查找对应模型，单独调用 API
-    // 工作指令.txt（2026-06-07 卡死排查）：为每个 generateImage 调用添加 200s 超时，防止 Promise.all 永久挂起
+    // 工作指令.txt（2026-06-07 卡死排查）：为每个 generateImage 调用添加 300s 超时，防止 Promise.all 永久挂起（官转渠道实测耗时 240s+）
     const generateWithTimeout = (opt: StyleOption, idx: number) => {
       return Promise.race([
         (async () => {
@@ -111,7 +111,7 @@ export async function processStyleGeneration(
           }
         })(),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`STYLE_TIMEOUT: 风格 ${idx + 1} 生成超时（200s），可能卡在供应商调用`)), 200000)
+          setTimeout(() => reject(new Error(`STYLE_TIMEOUT: 风格 ${idx + 1} 生成超时（300s），可能卡在供应商调用`)), 300000)
         )
       ])
     }
