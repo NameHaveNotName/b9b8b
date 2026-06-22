@@ -91,30 +91,32 @@ async function _generateAct(
     return
   }
 
-  console.log(`[CONCEPT-BG] 开始生成 act ${actNumber}，共 ${actPrompts.length} 个场景`)
+  console.log(`[CONCEPT-BG] 开始生成 act ${actNumber}，共 ${actPrompts.length} 个场景，outputData prompts count: ${prompts.length}`)
 
   // 串行生成（CPU 时间可控）
   for (const promptItem of actPrompts) {
     await _generateOne(paramsId, stepId, promptItem._idx, promptItem, aspectRatio, imageModel)
   }
 
-  // 该 act 全部完成，标记为 COMPLETED
-  const actProgress: Record<string, string> = outputData.actProgress || {}
-  actProgress[String(actNumber)] = 'COMPLETED'
+  // 有任意 act 完成即标记 CONCEPT 为 COMPLETED
+  // 注意：必须 re-read 最新 step，避免用旧快照覆盖已有 actProgress
+  const currentStep = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  const currentOutputData = (currentStep?.outputData as any) || {}
+  const actProgress: Record<string, string> = { ...(currentOutputData.actProgress || {}), [String(actNumber)]: 'COMPLETED' }
 
-  // 有任意 act 完成即标记 CONCEPT 为 COMPLETED（不再等所有幕）
+  console.log(`[CONCEPT-BG] act ${actNumber} 完成，标记 CONCEPT 为 COMPLETED，actProgress:`, actProgress)
   await prisma.workflowStep
     .update({
       where: { id: stepId },
       data: {
         status: 'COMPLETED',
         errorMessage: null,
-        outputData: { ...outputData, actProgress },
+        outputData: { ...currentOutputData, actProgress },
       },
     })
     .catch(() => {})
+  console.log(`[CONCEPT-BG] CONCEPT 步骤已更新为 COMPLETED`)
 
-  console.log(`[CONCEPT-BG] act ${actNumber} 完成，actProgress:`, actProgress)
 }
 
 /** 生成并保存单张图片 */
