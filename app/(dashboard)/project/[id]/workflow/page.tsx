@@ -2954,6 +2954,7 @@ function CharacterPanel({
   const isExecuting = executing === step.stepType
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
+  const [generatingAct, setGeneratingAct] = useState<number | null>(null)
   const [ratios, setRatios] = useState<Record<string, number>>({})
   const [expandedPromptIds, setExpandedPromptIds] = useState<Set<string>>(new Set())
   const promptSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -3231,6 +3232,7 @@ function ConceptPanel({
   const [ratios, setRatios] = useState<Record<string, number>>({})
   // 前端驱动分批生成状态
   const [generatingIndex, setGeneratingIndex] = useState<number | null>(null)
+  const [generatingAct, setGeneratingAct] = useState<number | null>(null)
   const [localAssets, setLocalAssets] = useState<any[]>(() =>
     step.status === 'PROCESSING' ? (step.resultAssets || []) : []
   )
@@ -3252,7 +3254,25 @@ function ConceptPanel({
         body: JSON.stringify({ actNumber, aspectRatio, imageModel }),
       }).catch(() => {})
     }
-    setToast?.({ kind: 'info', message: '概念图生成中，稍后刷新页面查看进度' })
+    setToast?.({ kind: 'success', message: '概念图生成中，稍后刷新页面查看进度' })
+  }
+
+  // 触发单个幕的生成（按钮专用，不影响其他幕）
+  async function triggerActGenerate(actNumber: number, aspectRatio: string, imageModel: string) {
+    setGeneratingAct(actNumber)
+    setToast?.({ kind: 'success', message: `第 ${actNumber} 幕生成中` })
+    try {
+      await fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actNumber, aspectRatio, imageModel }),
+      })
+      await mutate()
+    } catch (e: any) {
+      onError?.(`第 ${actNumber} 幕生成失败：` + e?.message)
+    } finally {
+      setGeneratingAct(null)
+    }
   }
 
   // 挂载时注册到 window，供父组件 StepHeader 调用
@@ -3385,50 +3405,99 @@ function ConceptPanel({
     // 立即触发新生成
     startGeneration(totalScenes, defaultRatio, defaultModel)
   }
+  // 从 prompts 按 actNumber 分组，展示每幕的生成状态和按钮
+  const outputData = (step.outputData as any) || {}
+  const prompts: any[] = (outputData.prompts || []).map((p: any, i: number) => ({ ...p, _idx: i }))
+  const actNumberSet = new Set(prompts.map((p: any) => p.actNumber))
+  const actNumbers = Array.from(actNumberSet).sort((a, b) => a - b)
+
+  // 提取每幕已有图片（按 sceneIndex 索引）
+  const assetIndexMap: Record<number, Record<number, any>> = {}
+  for (const asset of assets) {
+    const act = asset.metadata?.actNumber ?? 0
+    const idx = asset.metadata?.sceneIndex ?? 0
+    if (!assetIndexMap[act]) assetIndexMap[act] = {}
+    assetIndexMap[act][idx] = asset
+  }
+
+  const defaultRatio = outputData.aspectRatio || '16:9'
+  const defaultModel = outputData.imageModel || IMAGE_MODELS.primary
 
   return (
     <div className="space-y-6">
-      {Object.entries(grouped).map(([actNumber, actAssets]: [string, any]) => (
-        <div key={actNumber}>
-          <h3 className="mb-3 text-sm font-semibold text-stone-700">
-            第 {actNumber} 幕
-          </h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {actAssets.map((asset: any) => {
-              const isRegenerating = regeneratingId === asset.id
-              const cardRatio = asset.metadata?.aspectRatio || '16:9'
-              const cardModel = asset.metadata?.imageModel || IMAGE_MODELS.primary
-              return (
-                <div
-                  key={asset.id}
-                  className="group relative overflow-hidden rounded-lg border border-stone-200"
-                >
-                  <div
-                    className="relative w-full bg-stone-100 transition-all duration-300"
-                    style={{ aspectRatio: ratios[asset.id] || 1.78 }}
-                  >
-                    <HoverImageBadge
-                      src={asset.url}
-                      alt={asset.metadata?.sceneDesc}
-                      aspectRatio={cardRatio}
-                      imageModel={cardModel}
-                      isMock={!!asset.metadata?.isMock}
-                      onRegenerate={(ar, model) => handleRegenerate(asset.id, ar, model)}
-                      isRegenerating={isRegenerating}
-                      anyRegenerating={!!regeneratingId}
-                      onLoad={(w, h) => setRatios(prev => ({ ...prev, [asset.id]: w / h }))}
-                      wrapperClassName="absolute inset-0"
-                    />
+      {actNumbers.map((actNumber: number) => {
+        const actImages = assetIndexMap[actNumber] || {}
+        const actPrompts = prompts.filter((p: any) => p.actNumber === actNumber)
+        const isGeneratingThisAct = generatingAct === actNumber
+        const hasAnyImage = Object.keys(actImages).length > 0
+        return (
+          <div key={actNumber}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-stone-700">
+                第 {actNumber} 幕
+              </h3>
+              <button
+                onClick={() => triggerActGenerate(actNumber, defaultRatio, defaultModel)}
+                disabled={isGeneratingThisAct || isExecuting}
+                className="flex items-center gap-1.5 rounded-md bg-stone-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-700 disabled:opacity-50"
+              >
+                {isGeneratingThisAct ? (
+                  <>
+                    <LoaderCircle className="h-3 w-3 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-3 w-3" />
+                    {hasAnyImage ? '追加生成' : '生成'}
+                  </>
+                )}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {actPrompts.map((promptItem: any) => {
+                const asset = actImages[promptItem._idx]
+                if (!asset) {
+                  return (
+                    <div key={promptItem._idx} className="group relative overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50">
+                      <div className="relative flex w-full flex-col items-center justify-center" style={{ aspectRatio: defaultRatio }}>
+                        <span className="text-xs text-stone-400">待生成</span>
+                        <span className="mt-1 max-w-[90%] truncate px-2 text-xs text-stone-400">
+                          {promptItem.sceneDesc?.slice(0, 50) || promptItem.englishPrompt?.slice(0, 50)}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                }
+                const isRegenerating = regeneratingId === asset.id
+                const cardRatio = asset.metadata?.aspectRatio || '16:9'
+                const cardModel = asset.metadata?.imageModel || IMAGE_MODELS.primary
+                return (
+                  <div key={asset.id} className="group relative overflow-hidden rounded-lg border border-stone-200">
+                    <div className="relative w-full bg-stone-100 transition-all duration-300" style={{ aspectRatio: ratios[asset.id] || 1.78 }}>
+                      <HoverImageBadge
+                        src={asset.url}
+                        alt={asset.metadata?.sceneDesc}
+                        aspectRatio={cardRatio}
+                        imageModel={cardModel}
+                        isMock={!!asset.metadata?.isMock}
+                        onRegenerate={(ar, model) => handleRegenerate(asset.id, ar, model)}
+                        isRegenerating={isRegenerating}
+                        anyRegenerating={!!regeneratingId}
+                        onLoad={(w, h) => setRatios(prev => ({ ...prev, [asset.id]: w / h }))}
+                        wrapperClassName="absolute inset-0"
+                      />
+                    </div>
+                    <p className="p-3 text-xs text-stone-500">
+                      {asset.metadata?.sceneDesc || asset.metadata?.llmPrompt?.slice(0, 60)}
+                    </p>
                   </div>
-                  <p className="p-3 text-xs text-stone-500">
-                    {asset.metadata?.sceneDesc || asset.metadata?.llmPrompt?.slice(0, 60)}
-                  </p>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
 
       {/* 整体重做 */}
       {step.status === 'COMPLETED' && assets.length > 0 && (
@@ -3482,10 +3551,6 @@ function ConceptPanel({
     </div>
   );
 }
-
-/* ============================================================
-   分镜 Mock 占位图（纯 HTML/CSS，避免 Canvas 字体方块问题）
-   ============================================================ */
 function StoryboardMockImage({ shot }: { shot: any }) {
   return (
     <div
