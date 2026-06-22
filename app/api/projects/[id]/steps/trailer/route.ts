@@ -4,16 +4,11 @@ import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
-import { createQueue } from '@/lib/queue'
 import { startStep, completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
-import { generateSegmentPrompts, generateOneVideoSegment, composeVideo } from '@/lib/video-segment-utils'
-import { generateTrailerBgm } from '@/lib/bgm-generator'
-
-const videoQueue = createQueue('video-generation')
 
 // ============================================================
-// 向后兼容：旧版一键生成宣传片（保留 processTrailerInline）
+// 向后兼容：旧版一键生成宣传片
 // ============================================================
 async function processTrailerInline(
   stepId: string,
@@ -74,7 +69,7 @@ async function processTrailerInline(
 // 新版：分镜卡片式逐段生成
 // ============================================================
 
-/** 获取 storyboard shots（无分镜时返回空数组，generateSegmentPrompts 会从框架 acts 兜底） */
+/** 获取 storyboard shots（无分镜时返回空数组） */
 async function getStoryboardShots(projectId: string) {
   const storyboardStep = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId, stepType: 'STORYBOARD' } },
@@ -96,6 +91,7 @@ async function backgroundGenerateSegment(
 ) {
   try {
     console.log(`[SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
+    const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
     const result = await generateOneVideoSegment({
       segmentId,
       projectId,
@@ -164,6 +160,7 @@ async function backgroundComposeVideo(
       throw new Error('没有已完成的片段可合成')
     }
 
+    const { composeVideo } = await import('@/lib/video-segment-utils')
     const result = await composeVideo({
       projectId,
       stepName,
@@ -186,12 +183,9 @@ async function backgroundComposeVideo(
 // ============================================================
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   console.log(`[TRAILER-POST] 收到请求 projectId=${params.id} t=${new Date().toISOString()}`)
-  let userId: string | null = null
-  let pointsCheck: any = null
-  let stepIdForLog: string | undefined
 
   try {
-    userId = await getCurrentUserId()
+    const userId = await getCurrentUserId()
     if (!userId) {
       console.warn('[TRAILER-POST] 未登录，401 返回')
       return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -216,7 +210,6 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const step = await prisma.workflowStep.findUnique({
       where: { projectId_stepType: { projectId: params.id, stepType: 'TRAILER' } }
     })
-    stepIdForLog = step?.id
     if (!step) {
       console.warn('[TRAILER-POST] 找不到 TRAILER 步骤，拒绝执行')
       return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
@@ -230,12 +223,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // -------------------- 向后兼容：旧版一键生成 --------------------
     if (action === 'legacy') {
-      return handleLegacyTrailer(params.id, step.id, body, force)
+      return handleLegacyTrailer(params.id, step.id, force, userId)
     }
 
     // -------------------- 新版：生成 Segment Prompts --------------------
     if (action === 'generate-segment-prompts') {
-      return handleGeneratePrompts(params.id, step.id)
+      return handleGeneratePrompts(params.id, step.id, userId)
     }
 
     // -------------------- 新版：单段生成 --------------------
@@ -260,11 +253,6 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     return NextResponse.json({ error: 'UNKNOWN_ACTION', message: `未知 action: ${action}` }, { status: 400 })
   } catch (err: any) {
-    try {
-      if (userId && pointsCheck) {
-        await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: stepIdForLog, success: false, errorMessage: err?.message })
-      }
-    } catch {}
     console.error('[TRAILER-ERROR]', err)
     return NextResponse.json(
       { error: err?.message || 'trailer POST failed', detail: (err?.stack || '').toString().slice(0, 200) },
@@ -281,8 +269,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 async function handleLegacyTrailer(
   projectId: string,
   stepId: string,
-  body: any,
-  force: boolean
+  force: boolean,
+  userId: string
 ) {
   const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
   if (!step) {
@@ -328,7 +316,7 @@ async function handleLegacyTrailer(
   const conceptAssets = conceptStep
     ? await prisma.asset.findMany({
         where: { projectId, stepId: conceptStep.id, type: 'IMAGE' },
-        orderBy: [{ metadata: 'asc' }, { createdAt: 'asc' }], // 按 actNumber + sceneIndex 排序
+        orderBy: [{ metadata: 'asc' }, { createdAt: 'asc' }],
       })
     : []
   const filteredAssets = conceptAssets.slice(0, 6)
@@ -338,11 +326,13 @@ async function handleLegacyTrailer(
   }
 
   const conceptImageKeys = filteredAssets.map((a) => a.storageKey)
-  const useQueue = process.env.TRAILER_USE_QUEUE === '1'
-  let queued = false
 
-  if (useQueue) {
+  // 尝试使用 BullMQ 队列（可选）
+  let queued = false
+  if (process.env.TRAILER_USE_QUEUE === '1') {
     try {
+      const { createQueue } = await import('@/lib/queue')
+      const videoQueue = createQueue('video-generation')
       const job = await videoQueue.add('generate-trailer', {
         stepId: step.id,
         projectId,
@@ -351,7 +341,7 @@ async function handleLegacyTrailer(
       queued = true
       console.log(`[TRAILER-POST] 入队成功 job.id=${job.id}`)
     } catch (queueErr: any) {
-      console.warn('[TRAILER-POST] BullMQ queue failed, fallback to after():', queueErr.message)
+      console.warn('[TRAILER-POST] BullMQ queue failed, fallback to waitUntil:', queueErr.message)
     }
   }
 
@@ -370,18 +360,19 @@ async function handleLegacyTrailer(
 }
 
 /** 生成 Segment Prompts */
-async function handleGeneratePrompts(projectId: string, stepId: string) {
+async function handleGeneratePrompts(projectId: string, stepId: string, userId: string) {
   try {
     const shots = await getStoryboardShots(projectId)
+    const { generateSegmentPrompts } = await import('@/lib/video-segment-utils')
     const segments = await generateSegmentPrompts(projectId, 'TRAILER', shots)
 
     // 无分镜数据或 VideoSegment 表不存在时，降级走 legacy 路径
     if (!segments || segments.length === 0) {
       console.warn('[TRAILER-PROMPTS] 无分镜数据（shots=[]），降级走 legacy 路径直接读概念图')
-      return handleLegacyTrailer(projectId, stepId, {}, false)
+      return handleLegacyTrailer(projectId, stepId, false, userId)
     }
 
-    // 更新 step 状态为 PENDING（提示词已准备好，等待用户确认生成）
+    // 更新 step 状态为 PENDING
     await prisma.workflowStep.update({
       where: { id: stepId },
       data: {
@@ -401,10 +392,10 @@ async function handleGeneratePrompts(projectId: string, stepId: string) {
       message: `已生成 ${segments.length} 个分镜的视频提示词`,
     })
   } catch (e: any) {
-    // VideoSegment 表不存在时，降级走 legacy 路径（直接读概念图生成视频）
+    // VideoSegment 表不存在时，降级走 legacy 路径
     if (e.code === 'P2021' || (e.cause && String(e.cause).includes('does not exist'))) {
       console.warn('[TRAILER-PROMPTS] VideoSegment 表不存在，降级走 legacy 路径')
-      return handleLegacyTrailer(projectId, stepId, {}, false)
+      return handleLegacyTrailer(projectId, stepId, false, userId)
     }
     console.error('[TRAILER-PROMPTS] 失败:', e)
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
@@ -574,6 +565,7 @@ async function handleGenerateBgm(projectId: string, stepId: string) {
   const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
   const acts = Array.isArray(fw.acts) ? fw.acts : []
 
+  const { generateTrailerBgm } = await import('@/lib/bgm-generator')
   const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
     tempDir: '/tmp',
     durationSec: totalDuration,
@@ -589,7 +581,7 @@ async function handleGenerateBgm(projectId: string, stepId: string) {
   let musicUrl: string | null = null
   try {
     await uploadFile(bgmKey, bgmBuf, bgmMime)
-    musicUrl = await getSignedFileUrl(bgmKey, 3600 * 24 * 7) // 7天有效期
+    musicUrl = await getSignedFileUrl(bgmKey, 3600 * 24 * 7)
     console.log(`[BGM] 上传完成 key=${bgmKey}`)
   } catch (err: any) {
     console.warn(`[BGM] 上传失败: ${err?.message}`)
@@ -630,10 +622,16 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     where: { stepId: step.id, type: 'VIDEO' }
   })
 
-  const segments = await prisma.videoSegment.findMany({
-    where: { projectId: params.id, stepName: 'TRAILER' },
-    orderBy: { sequence: 'asc' },
-  })
+  let segments: any[] = []
+  try {
+    segments = await prisma.videoSegment.findMany({
+      where: { projectId: params.id, stepName: 'TRAILER' },
+      orderBy: { sequence: 'asc' },
+    })
+  } catch (e: any) {
+    // VideoSegment 表不存在，忽略
+    if (e.code !== 'P2021') console.warn('[TRAILER-GET] VideoSegment 查询失败:', e?.message)
+  }
 
   const out = (step.outputData as any) || {}
   return NextResponse.json({
@@ -644,7 +642,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     segments: Array.isArray(out.segments) ? out.segments : [],
     musicUrl: out.musicUrl ?? null,
     musicIsMock: out.musicIsMock ?? true,
-    // 新增：VideoSegment 数据
     videoSegments: segments,
     segmentPromptsGenerated: out.segmentPromptsGenerated || false,
   })
