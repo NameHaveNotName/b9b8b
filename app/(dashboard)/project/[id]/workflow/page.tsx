@@ -3238,7 +3238,8 @@ function ConceptPanel({
   const startGeneration = async (totalScenes: number, aspectRatio: string, imageModel: string) => {
     const outputData = (step.outputData as any) || {}
     const prompts: any[] = outputData.prompts || []
-    const actNumbers = [...new Set(prompts.map((p: any) => p.actNumber).filter(Boolean)).sort()]
+    const actNumberSet = new Set(prompts.map((p: any) => p.actNumber))
+    const actNumbers = Array.from(actNumberSet).sort()
     if (actNumbers.length === 0) return
 
     setGeneratingIndex(0)
