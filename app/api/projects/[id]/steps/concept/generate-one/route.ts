@@ -15,6 +15,7 @@ import { IMAGE_MODELS } from '@/lib/models-config'
  * Response: 200 { status: 'COMPLETED', actNumber } | 500 { error: ... }
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
+  console.log('[CONCEPT-GEN] POST /generate-one called, params.id:', params.id)
   const userId = await getCurrentUserId()
   if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
 
@@ -25,6 +26,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const body = await req.json().catch(() => ({}))
   const actNumber = Number(body.actNumber)
+  console.log('[CONCEPT-GEN] body:', JSON.stringify(body), 'actNumber:', actNumber)
   if (isNaN(actNumber) || actNumber < 0) {
     return NextResponse.json({ error: 'VALID_001', message: 'actNumber 无效' }, { status: 400 })
   }
@@ -34,14 +36,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'CONCEPT' } },
   })
+  console.log('[CONCEPT-GEN] step found:', !!step, 'stepId:', step?.id, 'status:', step?.status)
   if (!step) return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
 
   const outputData = (step.outputData as any) || {}
   const prompts: any[] = outputData.prompts || []
+  console.log('[CONCEPT-GEN] outputData prompts count:', prompts.length, 'actProgress:', JSON.stringify(outputData.actProgress))
 
   // 标记该 act 为 PROCESSING
   const actProgress: Record<string, string> = outputData.actProgress || {}
   actProgress[String(actNumber)] = 'PROCESSING'
+  console.log('[CONCEPT-GEN] updating step to PROCESSING, actProgress:', JSON.stringify(actProgress))
 
   await prisma.workflowStep
     .update({
@@ -52,7 +57,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         outputData: { ...outputData, actProgress },
       },
     })
-    .catch(() => {})
+    .catch((e) => console.error('[CONCEPT-GEN] PROCESSING update failed:', e?.message))
+  console.log('[CONCEPT-GEN] PROCESSING update done, starting _generateAct')
 
   // 同步执行：串行生成该 act 的所有场景（每幕 1-2 张，CPU ~10-20s）
   try {
