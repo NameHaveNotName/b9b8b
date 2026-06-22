@@ -3296,25 +3296,16 @@ function ConceptPanel({
     }, 3000)
   }
 
-  // 发送 202 请求触发后台生成，不等待结果
-  const triggerGenerate = async (sceneIndex: number, aspectRatio: string, imageModel: string) => {
-    try {
-      await fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sceneIndex, aspectRatio, imageModel }),
-      })
-    } catch {}
-  }
-
-  // 点击生成：发送全部 6 个 202 请求，然后轮询状态
+  // 点击生成：单次调用，后台并行生成全部图片
   const startGeneration = async (totalScenes: number, aspectRatio: string, imageModel: string) => {
     setGeneratingIndex(0)
     setLocalAssets([])
-    // 发送全部生成请求（立即返回 202）
-    for (let i = 0; i < totalScenes; i++) {
-      triggerGenerate(i, aspectRatio, imageModel)
-    }
+    // 单次 POST，后端 Promise.allSettled 并行生成
+    fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ totalScenes, aspectRatio, imageModel }),
+    }).catch(() => {})
     // 开始轮询
     startPolling(totalScenes)
   }

@@ -10,141 +10,137 @@ import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 
 /**
- * 概念图单张生成：立即返回 202，后台异步执行生成。
+ * 概念图批量生成：立即返回 202，后台并行生成全部图片。
  * 前端通过轮询 GET /concept/status 获取进度。
  *
- * Body: { sceneIndex: number, aspectRatio?: string, imageModel?: string }
- * Response: 202 { status: 'ACCEPTED', sceneIndex }
+ * Body: { totalScenes: number, aspectRatio?: string, imageModel?: string }
+ * Response: 202 { status: 'ACCEPTED' }
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
-  if (!userId) {
-    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  }
+  if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
 
   const project = await prisma.project.findUnique({ where: { id: params.id } })
-  if (!project) {
-    return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
-  }
+  if (!project) return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
-  }
+  if (!access.allowed) return access.response
 
   const body = await req.json().catch(() => ({}))
-  const sceneIndex = Number(body.sceneIndex)
-  if (isNaN(sceneIndex) || sceneIndex < 0) {
-    return NextResponse.json({ error: 'VALID_001', message: 'sceneIndex 无效' }, { status: 400 })
-  }
-
+  const totalScenes = Number(body.totalScenes)
   const aspectRatio = body.aspectRatio || '16:9'
   const imageModel = body.imageModel
 
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'CONCEPT' } },
   })
-  if (!step) {
-    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
-  }
+  if (!step) return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
 
   const outputData = (step.outputData as any) || {}
   const prompts: any[] = outputData.prompts || []
-  const totalScenes = prompts.length
 
-  // 立即返回 202，后台异步执行
+  // 立即设置 PROCESSING 并返回 202（不等后台完成）
+  await prisma.workflowStep
+    .update({
+      where: { id: step.id },
+      data: { status: 'PROCESSING', errorMessage: null },
+    })
+    .catch(() => {})
+
+  // 后台：并行生成全部图片
   waitUntil(
-    _bgGenerate(params.id, step.id, outputData, sceneIndex, totalScenes, aspectRatio, imageModel).catch(
-      (err: any) => {
-        console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 背景任务失败:`, err?.message)
-        // 标记该 step 为失败（仅最后一张）
-        if (sceneIndex + 1 >= totalScenes) {
-          prisma.workflowStep
-            .update({
-              where: { id: step.id },
-              data: { status: 'FAILED', errorMessage: err.message || '生成失败' },
-            })
-            .catch(() => {})
-        }
-      }
-    )
+    _generateAll(params.id, step.id, outputData, totalScenes, aspectRatio, imageModel).catch((err) => {
+      console.error('[CONCEPT-BG] 全部生成异常:', err?.message)
+      prisma.workflowStep
+        .update({
+          where: { id: step.id },
+          data: { status: 'FAILED', errorMessage: err.message || '生成失败' },
+        })
+        .catch(() => {})
+    })
   )
 
-  return NextResponse.json({ status: 'ACCEPTED', sceneIndex, totalScenes }, { status: 202 })
+  return NextResponse.json({ status: 'ACCEPTED', totalScenes }, { status: 202 })
 }
 
-/** 后台生成逻辑（被 waitUntil 包装执行，不受 HTTP 请求生命周期限制） */
-async function _bgGenerate(
+/** 并行生成全部图片（Promise.allSettled） */
+async function _generateAll(
   paramsId: string,
   stepId: string,
   outputData: any,
-  sceneIndex: number,
   totalScenes: number,
   aspectRatio: string,
   imageModel?: string
 ): Promise<void> {
-  console.log(`[CONCEPT-BG] 开始生成第 ${sceneIndex + 1}/${totalScenes} 张`)
-
-  // 首张：重置状态（清除 CANCELLED / FAILED + errorMessage）
-  if (sceneIndex === 0) {
-    try {
-      await prisma.workflowStep.update({
-        where: { id: stepId },
-        data: { status: 'PROCESSING', errorMessage: null },
-      })
-    } catch (e: any) {
-      console.warn('[CONCEPT-BG] 状态重置失败:', e?.message)
-    }
-  }
-
   const prompts: any[] = outputData.prompts || []
-  const promptItem = prompts[sceneIndex]
-  if (!promptItem) {
-    console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 无对应 prompt`)
-    return
-  }
 
-  // 去重检查（已有则跳过）
-  try {
-    const existingAssets = await prisma.asset.findMany({
-      where: { projectId: paramsId, stepId },
+  // 并行生成全部场景（每张独立 Promise）
+  const tasks = prompts.map((promptItem, i) =>
+    _generateOne(paramsId, stepId, i, promptItem, aspectRatio, imageModel)
+  )
+
+  // 等待全部完成（无论成功/失败）
+  const results = await Promise.allSettled(tasks)
+
+  // 统计结果
+  const fulfilled = results.filter((r) => r.status === 'fulfilled').length
+  const rejected = results.filter((r) => r.status === 'rejected').length
+  console.log(`[CONCEPT-BG] 完成：成功 ${fulfilled}/${totalScenes}，失败 ${rejected}`)
+
+  // 更新 step 状态
+  await prisma.workflowStep
+    .update({
+      where: { id: stepId },
+      data: {
+        status: 'COMPLETED',
+        errorMessage: null,
+        outputData: { ...outputData, totalScenes, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary },
+      },
     })
-    const existing = existingAssets.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)
+    .catch(() => {})
+}
+
+/** 生成并保存单张图片 */
+async function _generateOne(
+  paramsId: string,
+  stepId: string,
+  sceneIndex: number,
+  promptItem: any,
+  aspectRatio: string,
+  imageModel?: string
+): Promise<void> {
+  // 去重检查（用 JS filter 避免 Prisma JSON path 兼容性问题）
+  try {
+    const allAssets = await prisma.asset.findMany({ where: { projectId: paramsId, stepId } })
+    const existing = allAssets.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)
     if (existing) {
       console.log(`[CONCEPT-BG] sceneIndex=${sceneIndex} 已存在，跳过`)
       return
     }
   } catch (e: any) {
-    console.warn('[CONCEPT-BG] 去重检查失败:', e?.message)
+    console.warn(`[CONCEPT-BG] sceneIndex=${sceneIndex} 去重检查失败:`, e?.message)
   }
 
-  // 获取风格图（失败不阻止生成）
+  // 风格图
   let styleRefUrl = ''
   try {
     const ref = await getStyleRefUrl(paramsId)
     styleRefUrl = ref.styleRefUrl || ''
-  } catch (refErr: any) {
-    console.warn('[CONCEPT-BG] 风格图提取失败，继续生成:', refErr?.message)
+  } catch (e: any) {
+    console.warn(`[CONCEPT-BG] sceneIndex=${sceneIndex} 风格图提取失败:`, e?.message)
   }
 
-  // 获取角色图
+  // 角色图
   let characterImageUrls: string[] = []
   try {
-    const characterAssets = await prisma.asset.findMany({
-      where: { projectId: paramsId, step: { stepType: 'CHARACTER' } },
-    })
-    characterImageUrls = characterAssets
-      .map((a) => a.url)
-      .filter((u) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u))
-  } catch (e: any) {
-    console.warn('[CONCEPT-BG] 角色图获取失败:', e?.message)
-  }
+    const chars = await prisma.asset.findMany({ where: { projectId: paramsId, step: { stepType: 'CHARACTER' } } })
+    characterImageUrls = chars.map((a) => a.url).filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u))
+  } catch (e: any) {}
 
-  // 生成图片
-  const imageClient = await getImageClient()
-  console.log('[CONCEPT-BG] 调用 generateConceptScene, prompt:', promptItem.englishPrompt?.slice(0, 60))
-  let result: { url: string; storageKey: string; metadata: any }
+  // 生成
+  let result: { url: string; storageKey: string }
   try {
-    result = await imageClient.generateConceptScene(
+    const client = await getImageClient()
+    result = await client.generateConceptScene(
       paramsId,
       promptItem.englishPrompt,
       styleRefUrl,
@@ -156,12 +152,11 @@ async function _bgGenerate(
     )
   } catch (genErr: any) {
     console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 生成失败:`, genErr?.message)
-    return // 单张失败不阻止其他
+    throw genErr // 抛出让 Promise.allSettled 捕获
   }
 
-  // 保存到 DB（带重试，防止写入被中断）
-  let saved = false
-  for (let retry = 0; retry < 3 && !saved; retry++) {
+  // 保存（最多 3 次重试）
+  for (let retry = 0; retry < 3; retry++) {
     try {
       await prisma.asset.create({
         data: {
@@ -181,32 +176,12 @@ async function _bgGenerate(
           },
         },
       })
-      saved = true
-      console.log(`[CONCEPT-BG] 完成 sceneIndex=${sceneIndex}，已保存到 DB`)
+      console.log(`[CONCEPT-BG] sceneIndex=${sceneIndex} 已保存`)
+      return
     } catch (saveErr: any) {
       console.warn(`[CONCEPT-BG] sceneIndex=${sceneIndex} 保存失败，重试 ${retry + 1}/3:`, saveErr?.message)
       if (retry < 2) await new Promise((r) => setTimeout(r, 1000))
     }
   }
-  if (!saved) {
-    console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 多次保存失败，跳过`)
-    return
-  }
-
-  // 最后一张：标记 COMPLETED
-  if (sceneIndex + 1 >= totalScenes) {
-    try {
-      await prisma.workflowStep.update({
-        where: { id: stepId },
-        data: {
-          status: 'COMPLETED',
-          errorMessage: null,
-          outputData: { ...outputData, totalScenes, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary },
-        },
-      })
-      console.log('[CONCEPT-BG] 全部完成，step 已标记 COMPLETED')
-    } catch (e: any) {
-      console.error('[CONCEPT-BG] 标记 COMPLETED 失败:', e?.message)
-    }
-  }
+  throw new Error(`sceneIndex=${sceneIndex} 多次保存失败`)
 }
