@@ -102,14 +102,12 @@ async function _generateAct(
   const actProgress: Record<string, string> = outputData.actProgress || {}
   actProgress[String(actNumber)] = 'COMPLETED'
 
-  // 检查是否所有 act 都完成
-  const allDone = Object.values(actProgress).every((s) => s === 'COMPLETED')
-
+  // 有任意 act 完成即标记 CONCEPT 为 COMPLETED（不再等所有幕）
   await prisma.workflowStep
     .update({
       where: { id: stepId },
       data: {
-        status: allDone ? 'COMPLETED' : 'PROCESSING',
+        status: 'COMPLETED',
         errorMessage: null,
         outputData: { ...outputData, actProgress },
       },

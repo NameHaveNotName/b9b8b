@@ -119,14 +119,14 @@ export const STEP_CONFIG: Record<StepId, StepConfig> = {
   },
   concept: {
     unlockCondition: (p) => p.stepCharacterDone,
-    hideCondition: (p) => p.stepTrailerDone,
+    hideCondition: (p) => p.stepConceptDone,
   },
   storyboard: {
     unlockCondition: (p) => p.stepFrameworkDone,
     hideCondition: (p) => p.stepEndingDone || p.stepDirectDone,
   },
   trailer: {
-    unlockCondition: (p) => p.stepConceptDone,
+    unlockCondition: (p) => p.stepFrameworkDone,
     hideCondition: () => false,
   },
   ending: {
