@@ -113,7 +113,7 @@ async function generateVideoPromptForShot(args: {
  */
 export async function generateSegmentPrompts(
   projectId: string,
-  stepName: 'TRAILER' | 'VIDEO_DIRECT' | 'VIDEO_RENDER',
+  stepName: 'VIDEO_DIRECT' | 'VIDEO_RENDER',
   shots: any[]
 ): Promise<any[]> {
   // 读取框架数据
@@ -160,6 +160,120 @@ export async function generateSegmentPrompts(
   )
 
   console.log(`[SEGMENT-PROMPTS] 生成 ${segments.length} 段提示词 stepName=${stepName}`)
+  return segments
+}
+
+/** 为单个概念图生成视频提示词 */
+async function generateVideoPromptForConcept(args: {
+  storyBrief: string
+  acts: any[]
+  conceptImage: any
+  index: number
+  segCount: number
+}): Promise<{ videoPrompt: string; cameraMotion: string; caption: string }> {
+  const { storyBrief, acts, conceptImage, index, segCount } = args
+  const meta = (conceptImage?.metadata as any) || {}
+  const actNum = meta.actNumber || 1
+  const sceneIndex = meta.sceneIndex || index
+  const act = acts.find((a: any) => a?.actNumber === actNum || a?.actNo === actNum)
+  const mood = act?.mood || act?.tone || 'cinematic'
+  const duration = 5
+
+  // 优先使用概念图生成时的英文提示词，回退到 asset.url 或占位描述
+  const imagePrompt =
+    meta.llmPrompt || meta.prompt || conceptImage?.prompt || `Concept act${actNum} scene${sceneIndex + 1}`
+
+  const promptTemplate = [
+    `基于以下影视项目信息，为第${actNum}幕第${sceneIndex + 1}张概念图生成一段视频生成提示词。`,
+    `该视频将作为宣传片的第${index + 1}个共${segCount}个${duration}秒片段。`,
+    ``,
+    `故事梗概：${(storyBrief || '').slice(0, 400)}`,
+    `概念图画面描述：${String(imagePrompt).slice(0, 500)}`,
+    `场景氛围：${mood}`,
+    ``,
+    `要求：`,
+    `- 提示词必须用英文`,
+    `- 必须描述镜头运动（如 slow push-in / gentle pan / static with subtle light change / dolly forward）`,
+    `- 必须描述画面动态（如 character breathing / smoke drifting / water rippling / hair moving in wind）`,
+    `- 严格输出 JSON（不要任何额外解释）：{"videoPrompt": "英文提示词", "cameraMotion": "镜头运动描述"}`,
+  ].join('\n')
+
+  let txt = ''
+  try {
+    txt = await generateText(promptTemplate, TEXT_MODELS.TRAILER_PROMPT, 1024)
+  } catch (err: any) {
+    console.warn(`[CONCEPT-SEGMENT-PROMPT] primary 模型失败，回退 fallback。err=${err?.message}`)
+    try {
+      txt = await generateText(promptTemplate, TEXT_MODELS.TRAILER_PROMPT_FALLBACK, 1024)
+    } catch (err2: any) {
+      console.warn(`[CONCEPT-SEGMENT-PROMPT] fallback 也失败，使用默认英文提示词。err=${err2?.message}`)
+    }
+  }
+
+  const parsed = safeExtractJson<{ videoPrompt?: string; cameraMotion?: string }>(txt)
+  const videoPrompt =
+    parsed?.videoPrompt ||
+    `Cinematic ${mood} shot, slow push-in, subtle light shifting, atmospheric depth, 35mm film, scene: ${String(imagePrompt).slice(0, 200)}`
+  const finalCameraMotion = parsed?.cameraMotion || 'slow push-in'
+
+  return { videoPrompt, cameraMotion: finalCameraMotion, caption: imagePrompt }
+}
+
+/**
+ * 为项目的所有概念图生成 VideoSegment 提示词（宣传片专用）。
+ *
+ * 每个概念图对应一个 segment；shotId 存 concept asset id，方便前端匹配缩略图。
+ */
+export async function generateConceptSegmentPrompts(
+  projectId: string,
+  stepName: 'TRAILER',
+  conceptImages: any[]
+): Promise<any[]> {
+  // 读取框架数据
+  const fwStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
+  })
+  const fw = (fwStep?.outputData as any) || {}
+  const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
+  const acts = Array.isArray(fw.acts) ? fw.acts : []
+
+  // 删除旧的 VideoSegment
+  try {
+    await prisma.videoSegment.deleteMany({
+      where: { projectId, stepName },
+    })
+  } catch (e: any) {
+    if (e.code !== 'P2021') throw e
+  }
+
+  // 并行生成提示词
+  const promptResults = await Promise.all(
+    conceptImages.map((conceptImage, index) =>
+      generateVideoPromptForConcept({ storyBrief, acts, conceptImage, index, segCount: conceptImages.length })
+    )
+  )
+
+  // 批量创建 VideoSegment
+  const segments = await Promise.all(
+    promptResults.map((result, index) => {
+      const conceptImage = conceptImages[index]
+      return prisma.videoSegment.create({
+        data: {
+          projectId,
+          // shotId 复用为 concept asset id，video-segments API 可据此匹配图片 URL
+          shotId: conceptImage.id || `concept_${index + 1}`,
+          stepName,
+          prompt: result.videoPrompt,
+          caption: result.caption,
+          status: 'pending',
+          sequence: index,
+          duration: 5,
+        },
+      })
+    })
+  )
+
+  console.log(`[CONCEPT-SEGMENT-PROMPTS] 生成 ${segments.length} 段提示词 stepName=${stepName}`)
   return segments
 }
 

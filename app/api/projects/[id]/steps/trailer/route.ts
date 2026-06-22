@@ -69,14 +69,17 @@ async function processTrailerInline(
 // 新版：分镜卡片式逐段生成
 // ============================================================
 
-/** 获取 storyboard shots（无分镜时返回空数组） */
-async function getStoryboardShots(projectId: string) {
-  const storyboardStep = await prisma.workflowStep.findUnique({
-    where: { projectId_stepType: { projectId, stepType: 'STORYBOARD' } },
+/** 获取 CONCEPT 步骤生成的概念图（宣传片数据源） */
+async function getConceptImages(projectId: string) {
+  const conceptStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType: 'CONCEPT' } },
   })
-  const shots = (storyboardStep?.outputData as any)?.shots || []
-  if (!Array.isArray(shots)) return []
-  return shots
+  if (!conceptStep) return []
+  const conceptAssets = await prisma.asset.findMany({
+    where: { projectId, stepId: conceptStep.id, type: 'IMAGE' },
+    orderBy: [{ metadata: 'asc' }, { createdAt: 'asc' }],
+  })
+  return conceptAssets.slice(0, 6)
 }
 
 /** 后台生成单个 segment */
@@ -359,20 +362,19 @@ async function handleLegacyTrailer(
   })
 }
 
-/** 生成 Segment Prompts */
+/** 生成 Segment Prompts（基于 CONCEPT 概念图） */
 async function handleGeneratePrompts(projectId: string, stepId: string, callerUserId: string) {
   // 防御性保存：避免某些 minifier/运行时对 catch 块中参数引用的异常行为
   const userId = callerUserId
   try {
-    const shots = await getStoryboardShots(projectId)
-    const { generateSegmentPrompts } = await import('@/lib/video-segment-utils')
-    const segments = await generateSegmentPrompts(projectId, 'TRAILER', shots)
-
-    // 无分镜数据或 VideoSegment 表不存在时，降级走 legacy 路径
-    if (!segments || segments.length === 0) {
-      console.warn('[TRAILER-PROMPTS] 无分镜数据（shots=[]），降级走 legacy 路径直接读概念图')
+    const conceptImages = await getConceptImages(projectId)
+    if (conceptImages.length === 0) {
+      console.warn('[TRAILER-PROMPTS] 未找到概念图，降级走 legacy 路径')
       return handleLegacyTrailer(projectId, stepId, false, userId)
     }
+
+    const { generateConceptSegmentPrompts } = await import('@/lib/video-segment-utils')
+    const segments = await generateConceptSegmentPrompts(projectId, 'TRAILER', conceptImages)
 
     // 更新 step 状态为 PENDING
     await prisma.workflowStep.update({
@@ -391,7 +393,7 @@ async function handleGeneratePrompts(projectId: string, stepId: string, callerUs
       success: true,
       status: 'PROMPT_READY',
       segments,
-      message: `已生成 ${segments.length} 个分镜的视频提示词`,
+      message: `已生成 ${segments.length} 个概念图的视频提示词`,
     })
   } catch (e: any) {
     // VideoSegment 表不存在时，降级走 legacy 路径
@@ -426,12 +428,12 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
     return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
   }
 
-  // 获取 shot 的首帧 URL
-  const shots = await getStoryboardShots(projectId)
-  const shot = shots.find((s: any) => s.shotId === segment.shotId)
-  const imageUrl = shot?.firstFrameUrl || shot?.referenceImageUrl || ''
+  // 获取概念图 URL（shotId 复用为 concept asset id）
+  const conceptImages = await getConceptImages(projectId)
+  const conceptImage = conceptImages.find((img: any) => img.id === segment.shotId)
+  const imageUrl = conceptImage?.url || ''
   if (!imageUrl) {
-    return NextResponse.json({ error: 'NO_IMAGE', message: '该分镜没有可用的参考图片' }, { status: 400 })
+    return NextResponse.json({ error: 'NO_IMAGE', message: '该片段没有可用的概念图' }, { status: 400 })
   }
 
   // 更新状态
@@ -470,7 +472,7 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
     return NextResponse.json({ success: true, message: '没有待生成的片段', count: 0 })
   }
 
-  const shots = await getStoryboardShots(projectId)
+  const conceptImages = await getConceptImages(projectId)
 
   // 批量更新为 generating
   await Promise.all(
@@ -485,12 +487,12 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
   // 后台逐个生成
   waitUntil((async () => {
     for (const segment of pendingSegments) {
-      const shot = shots.find((s: any) => s.shotId === segment.shotId)
-      const imageUrl = shot?.firstFrameUrl || shot?.referenceImageUrl || ''
+      const conceptImage = conceptImages.find((img: any) => img.id === segment.shotId)
+      const imageUrl = conceptImage?.url || ''
       if (!imageUrl) {
         await prisma.videoSegment.update({
           where: { id: segment.id },
-          data: { status: 'failed', errorMessage: '没有可用的参考图片' },
+          data: { status: 'failed', errorMessage: '没有可用的概念图' },
         })
         continue
       }

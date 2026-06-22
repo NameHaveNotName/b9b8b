@@ -44,13 +44,36 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     throw err
   }
 
+  let conceptImageMap = new Map<string, string>()
+  if (stepName === 'TRAILER') {
+    try {
+      const conceptStep = await prisma.workflowStep.findUnique({
+        where: { projectId_stepType: { projectId: params.id, stepType: 'CONCEPT' } },
+      })
+      if (conceptStep) {
+        const conceptAssets = await prisma.asset.findMany({
+          where: { projectId: params.id, stepId: conceptStep.id, type: 'IMAGE' },
+        })
+        for (const asset of conceptAssets) {
+          conceptImageMap.set(asset.id, asset.url)
+        }
+      }
+    } catch (e: any) {
+      console.warn('[VIDEO-SEGMENTS] 读取概念图失败:', e?.message)
+    }
+  }
+
+  const segmentsWithImageUrl = segments.map((s) => ({
+    ...s,
+    imageUrl: stepName === 'TRAILER' ? conceptImageMap.get(s.shotId) || null : null,
+  }))
   const allCompleted = segments.length > 0 && segments.every((s) => s.status === 'completed')
   const pendingCount = segments.filter((s) => s.status === 'pending').length
   const generatingCount = segments.filter((s) => s.status === 'generating').length
   const failedCount = segments.filter((s) => s.status === 'failed').length
 
   return NextResponse.json({
-    segments,
+    segments: segmentsWithImageUrl,
     summary: {
       total: segments.length,
       pending: pendingCount,

@@ -158,7 +158,7 @@ export default function TrailerPanel({
         </div>
 
         <div>
-          <h3 className="mb-3 text-sm font-semibold text-stone-700">分镜片段</h3>
+          <h3 className="mb-3 text-sm font-semibold text-stone-700">片段 ({segments.length})</h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {segments.map((segment: any, index: number) => (
               <div
@@ -178,6 +178,12 @@ export default function TrailerPanel({
                       playsInline
                       className="h-full w-full object-cover"
                       preload="metadata"
+                    />
+                  ) : segment.imageUrl ? (
+                    <img
+                      src={segment.imageUrl}
+                      alt={segment.caption || '概念图'}
+                      className="h-full w-full object-cover"
                     />
                   ) : (
                     <div className="flex h-full flex-col items-center justify-center">
@@ -312,11 +318,18 @@ export default function TrailerPanel({
                     )}
                   </div>
                 ) : (
-                  <div className="flex h-full flex-col items-center justify-center">
-                    <span className="font-mono text-sm font-bold text-stone-400">
-                      {segment.shotId}
-                    </span>
-                    <span className="mt-1 text-xs text-stone-400">待生成</span>
+                  <div className="flex h-full flex-col items-center justify-center bg-stone-50">
+                    {segment.imageUrl ? (
+                      <img
+                        src={segment.imageUrl}
+                        alt={segment.caption || '概念图'}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="font-mono text-sm font-bold text-stone-400">
+                        {segment.shotId}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -390,7 +403,7 @@ export default function TrailerPanel({
         <div className="space-y-4">
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
             <p className="text-sm text-amber-800">
-              检测到旧版宣传片。新版支持分镜卡片式逐段生成，是否重新生成？
+              检测到旧版宣传片。新版支持概念图卡片式逐段生成，是否重新生成？
             </p>
           </div>
           <div className="flex justify-center gap-3">
