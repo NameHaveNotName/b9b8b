@@ -8,6 +8,13 @@ const nextConfig = {
       '@img/sharp-libvips-linux-x64',
       'lucide-react',
       'xlsx',
+      '@aws-sdk/client-s3',
+      '@aws-sdk/s3-request-presigner',
+      'docx',
+      'recharts',
+      'ffmpeg-static',
+      'fluent-ffmpeg',
+      'ioredis',
     ],
   },
   images: {

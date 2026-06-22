@@ -21,6 +21,12 @@
     },
     "app/api/projects/[id]/steps/keyframes/route.ts": {
       "maxDuration": 300
+    },
+    "app/api/projects/[id]/steps/trailer/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/projects/[id]/steps/video-direct/route.ts": {
+      "maxDuration": 300
     }
   }
 }

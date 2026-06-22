@@ -4,13 +4,8 @@ import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
-import { createQueue } from '@/lib/queue'
 import { startStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
-import { generateSegmentPrompts, generateOneVideoSegment, composeVideo } from '@/lib/video-segment-utils'
-import { generateTrailerBgm } from '@/lib/bgm-generator'
-
-const videoQueue = createQueue('video-generation')
 
 /** 获取 storyboard shots 和 keyframes */
 async function getStoryboardAndKeyframes(projectId: string) {
@@ -40,6 +35,7 @@ async function backgroundGenerateDirectSegment(
 ) {
   try {
     console.log(`[DIRECT-SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
+    const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
     const result = await generateOneVideoSegment({
       segmentId,
       projectId,
@@ -103,6 +99,7 @@ async function backgroundComposeDirectVideo(projectId: string) {
       throw new Error('没有已完成的片段可合成')
     }
 
+    const { composeVideo } = await import('@/lib/video-segment-utils')
     const result = await composeVideo({
       projectId,
       stepName: 'VIDEO_DIRECT',
@@ -150,15 +147,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const body = await req.json().catch(() => ({}))
-  const action = body?.action || 'legacy'
+  const action = body?.action || 'generate-segment-prompts'
   const videoModel = body?.videoModel
 
   console.log(`[VIDEO-DIRECT-POST] action=${action} projectId=${params.id}`)
-
-  // -------------------- 向后兼容：旧版批量入队 --------------------
-  if (action === 'legacy') {
-    return handleLegacyDirect(params.id, step.id, body)
-  }
 
   // -------------------- 新版：生成 Segment Prompts --------------------
   if (action === 'generate-segment-prompts') {
@@ -192,77 +184,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 // 各 action 处理函数
 // ============================================================
 
-/** 旧版批量入队（向后兼容） */
-async function handleLegacyDirect(projectId: string, stepId: string, body: any) {
-  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
-  if (!step) {
-    return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
-  }
-
-  if (step.status === 'COMPLETED' && step.outputData) {
-    return NextResponse.json({ success: true, data: step.outputData, cached: true })
-  }
-
-  const videoModel = body?.videoModel
-
-  const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
-  if (shots.length === 0) {
-    return NextResponse.json(
-      { error: 'WORKFLOW_006', message: '请先完成分镜设计' },
-      { status: 400 }
-    )
-  }
-
-  const firstFrames = shots.filter((s: any) => s.firstFrameUrl)
-  if (firstFrames.length === 0) {
-    return NextResponse.json(
-      { error: 'WORKFLOW_006', message: '请先完成分镜设计的视频生成模式，生成起始帧' },
-      { status: 400 }
-    )
-  }
-
-  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
-  if (!pointsCheck.ok) {
-    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
-  }
-
-  await startStep(stepId)
-
-  try {
-    const jobs = []
-    for (const shot of firstFrames) {
-      const shotId = shot.shotId
-      const firstFrameUrl = shot.firstFrameUrl
-      const kf = keyframes.find((k: any) => k.shotId === shotId)
-      const lastFrameUrl = kf?.lastFrameUrl || null
-      const shotStrategy = lastFrameUrl ? 'first-last' : 'first-only'
-
-      const job = await videoQueue.add('generate-direct', {
-        stepId,
-        projectId,
-        shotId,
-        firstFrameUrl,
-        lastFrameUrl,
-        strategy: shotStrategy,
-        type: 'direct',
-        videoModel,
-      })
-      jobs.push({ shotId, jobId: job.id, strategy: shotStrategy })
-    }
-
-    await deductPointsAndLog(step.projectId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
-    return NextResponse.json({
-      success: true,
-      taskId: stepId,
-      status: 'queued',
-      jobs,
-    })
-  } catch (e: any) {
-    await deductPointsAndLog(step.projectId, pointsCheck.cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: e.message })
-    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
-  }
-}
-
 /** 生成 Segment Prompts */
 async function handleGenerateDirectPrompts(projectId: string, stepId: string) {
   try {
@@ -271,6 +192,7 @@ async function handleGenerateDirectPrompts(projectId: string, stepId: string) {
       return NextResponse.json({ error: 'NO_STORYBOARD', message: '未找到分镜数据' }, { status: 400 })
     }
 
+    const { generateSegmentPrompts } = await import('@/lib/video-segment-utils')
     const segments = await generateSegmentPrompts(projectId, 'VIDEO_DIRECT', shots)
 
     await prisma.workflowStep.update({
@@ -324,6 +246,8 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
   if (!firstFrameUrl) {
     return NextResponse.json({ error: 'NO_IMAGE', message: '该分镜没有可用的首帧' }, { status: 400 })
   }
+  const kf = keyframes.find((k: any) => k.shotId === segment.shotId)
+  const lastFrameUrl = kf?.lastFrameUrl || null
 
   await prisma.videoSegment.update({
     where: { id: segmentId },
@@ -335,7 +259,7 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
     projectId,
     segment.prompt,
     firstFrameUrl,
-    null,
+    lastFrameUrl,
     segment.duration || 5,
     body?.videoModel
   ))
@@ -359,7 +283,7 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
     return NextResponse.json({ success: true, message: '没有待生成的片段', count: 0 })
   }
 
-  const { shots } = await getStoryboardAndKeyframes(projectId)
+  const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
 
   await Promise.all(
     pendingSegments.map((seg) =>
@@ -381,12 +305,14 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
         })
         continue
       }
+      const kf = keyframes.find((k: any) => k.shotId === segment.shotId)
+      const lastFrameUrl = kf?.lastFrameUrl || null
       await backgroundGenerateDirectSegment(
         segment.id,
         projectId,
         segment.prompt,
         firstFrameUrl,
-        null,
+        lastFrameUrl,
         segment.duration || 5,
         body?.videoModel
       )
@@ -451,6 +377,7 @@ async function handleGenerateDirectBgm(projectId: string, stepId: string) {
   const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
   const acts = Array.isArray(fw.acts) ? fw.acts : []
 
+  const { generateTrailerBgm } = await import('@/lib/bgm-generator')
   const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
     tempDir: '/tmp',
     durationSec: totalDuration,
@@ -521,7 +448,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       url: a.url,
       duration: (a.metadata as any)?.duration,
     })),
-    // 新增
     videoSegments: segments,
     segmentPromptsGenerated: out.segmentPromptsGenerated || false,
   })
