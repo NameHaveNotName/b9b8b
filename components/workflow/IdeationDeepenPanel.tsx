@@ -329,7 +329,7 @@ export default function IdeationDeepenPanel({
           </div>
         ) : (
           <button
-            onClick={runEvaluation}
+            onClick={() => runEvaluation()}
             className="rounded-md border border-stone-200 px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-50"
           >
             开始评估

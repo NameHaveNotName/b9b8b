@@ -11,26 +11,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const ALLOWED_TYPES = ['text/plain', 'text/markdown', 'application/octet-stream']
 const ALLOWED_EXTS = ['.txt', '.md']
 
-function saveUploadedFile(file: File): { filePath: string; publicUrl: string } {
-  const bytes = file.arrayBufferSync ? file.arrayBufferSync() : undefined
-  if (!bytes) throw new Error('无法读取文件内容')
-
-  const buffer = Buffer.from(bytes as ArrayBuffer)
-  const ext = path.extname(file.name) || '.txt'
-  const filename = `framework_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
-  const dir = path.join(process.cwd(), 'public', 'mock-storage', 'framework-imports')
-
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-
-  const filePath = path.join(dir, filename)
-  fs.writeFileSync(filePath, buffer)
-  const publicUrl = `/mock-storage/framework-imports/${filename}`
-  return { filePath, publicUrl }
-}
-
-async function readTextFile(file: File, filePath: string): Promise<string> {
+async function readTextFile(filePath: string): Promise<string> {
   const buffer = fs.readFileSync(filePath)
   return buffer.toString('utf-8')
 }

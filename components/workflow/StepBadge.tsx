@@ -1,5 +1,5 @@
 interface StepBadgeProps {
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'SKIPPED'
 }
 
 const STYLES: Record<string, string> = {
@@ -7,6 +7,7 @@ const STYLES: Record<string, string> = {
   PROCESSING: 'bg-blue-50 text-blue-600 border-blue-200',
   COMPLETED: 'bg-green-50 text-green-600 border-green-200',
   FAILED: 'bg-red-50 text-red-600 border-red-200',
+  SKIPPED: 'bg-stone-100 text-stone-400 border-stone-200',
 }
 
 const LABELS: Record<string, string> = {
@@ -14,6 +15,7 @@ const LABELS: Record<string, string> = {
   PROCESSING: '进行中',
   COMPLETED: '已完成',
   FAILED: '失败',
+  SKIPPED: '已跳过',
 }
 
 export default function StepBadge({ status }: StepBadgeProps) {

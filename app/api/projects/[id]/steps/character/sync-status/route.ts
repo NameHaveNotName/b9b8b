@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { completeStep } from '@/lib/workflow-executor'
 

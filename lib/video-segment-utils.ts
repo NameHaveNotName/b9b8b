@@ -304,6 +304,7 @@ export async function composeVideo(args: {
   segments: Array<{ id: string; storageKey?: string | null; videoUrl?: string | null; duration?: number | null }>
 }): Promise<{ videoUrl: string; storageKey: string; duration: number; musicUrl?: string | null; musicIsMock?: boolean }> {
   const { projectId, stepName, segments } = args
+  const isTrailer = stepName === 'TRAILER'
   const tempDir = makeTempDir(`compose-${projectId}-`)
   await ensureDir(tempDir)
 
@@ -330,7 +331,6 @@ export async function composeVideo(args: {
     const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
     console.log(`[COMPOSE] concat 完成 ${segments.length} 段，总时长 ${totalDuration}s`)
 
-    const isTrailer = stepName === 'TRAILER'
     let finalPath = concatPath
     let musicUrl: string | null = null
     let musicIsMock = true
@@ -369,9 +369,8 @@ export async function composeVideo(args: {
         bgmPath = bgmResult.bgmPath
         bgmExt = bgmResult.bgmExt
         bgmMime = bgmResult.bgmMime
-        bgmIsMock = bgmResult.bgmIsMock
-        musicIsMock = bgmIsMock
-        console.log(`[COMPOSE] 新生成 BGM isMock=${bgmIsMock} ext=${bgmExt}`)
+        musicIsMock = bgmResult.bgmIsMock
+        console.log(`[COMPOSE] 新生成 BGM isMock=${musicIsMock} ext=${bgmExt}`)
       }
 
       // 将 BGM 裁剪到总时长

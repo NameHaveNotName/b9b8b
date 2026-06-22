@@ -33,6 +33,7 @@ interface WorkflowStep {
   order: number
   startedAt?: string | null
   completedAt?: string | null
+  errorMessage?: string | null
 }
 
 interface QueueMonitorProps {

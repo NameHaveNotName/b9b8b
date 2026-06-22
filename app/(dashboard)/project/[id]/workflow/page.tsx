@@ -773,8 +773,8 @@ function StepContent({
   storyboardMode?: 'reference' | 'keyframe'
   setStoryboardMode?: (mode: 'reference' | 'keyframe') => void
   readOnly?: boolean
-  selectedIdx?: number | null
-  setSelectedIdx?: (idx: number | null) => void
+  selectedIdx: number | null
+  setSelectedIdx: (idx: number | null) => void
 }) {
   switch (step.stepType) {
     case 'IDEATION':
@@ -973,8 +973,8 @@ function IdeationPanel({
   projectId: string
   mutate: () => Promise<any>
   readOnly?: boolean
-  selectedIdx?: number | null
-  setSelectedIdx?: (idx: number | null) => void
+  selectedIdx: number | null
+  setSelectedIdx: (idx: number | null) => void
 }) {
   const [localDirections, setLocalDirections] = useState<any[]>(step.outputData?.directions || [])
   const [localStoryLength, setLocalStoryLength] = useState<string>(
@@ -1210,7 +1210,7 @@ function IdeationPanel({
   }
 
   if (step.status === 'COMPLETED' && directions.length > 0) {
-    const selectedDirection = selectedIdx !== null ? displayDirections[selectedIdx] : null
+    const selectedDirection = typeof selectedIdx === 'number' ? displayDirections[selectedIdx] : null
 
     // 深化模式
     if (deepenMode && selectedDirection) {
@@ -3274,7 +3274,7 @@ function ConceptPanel({
         throw new Error(`HTTP ${res.status}: ${data?.error || data?.message || '未知错误'}`)
       }
       // 强制 revalidate，绕过 SWR 缓存直接拉最新数据
-      await mutate(`/api/projects/${projectId}`, undefined, { revalidate: true })
+      await mutate()
       setToast?.({ kind: 'success', message: `第 ${actNumber} 幕已生成` })
     } catch (e: any) {
       console.error('[triggerActGenerate] failed:', e?.message)

@@ -21,26 +21,26 @@ const blockIdeationRead = (path: any) => {
 }
 
 // 拦截 fs.readFile
-fsSync.readFile = function (...args: any[]) {
+fsSync.readFile = function (this: typeof fsSync, ...args: any[]) {
   blockIdeationRead(args[0])
   return _origReadFile.apply(this, args as any)
 } as any
 
 // 拦截 fs.readFileSync
-fsSync.readFileSync = function (...args: any[]) {
+fsSync.readFileSync = function (this: typeof fsSync, ...args: any[]) {
   blockIdeationRead(args[0])
   return _origReadFileSync.apply(this, args as any)
 } as any
 
 // 拦截 fs.open
-fsSync.open = function (...args: any[]) {
+fsSync.open = function (this: typeof fsSync, ...args: any[]) {
   blockIdeationRead(args[0])
   return _origOpen.apply(this, args as any)
 } as any
 
 // 拦截 fs.openSync
 if (_origOpenSync) {
-  (fsSync as any).openSync = function (...args: any[]) {
+  (fsSync as any).openSync = function (this: typeof fsSync, ...args: any[]) {
     blockIdeationRead(args[0])
     return _origOpenSync.apply(this, args)
   }
@@ -48,7 +48,7 @@ if (_origOpenSync) {
 
 // 拦截 fs.promises.open
 if (_origPromisesOpen) {
-  fsSync.promises.open = function (...args: any[]) {
+  fsSync.promises.open = function (this: typeof fsSync.promises, ...args: any[]) {
     blockIdeationRead(args[0])
     return _origPromisesOpen.apply(this, args as any)
   } as any
@@ -59,12 +59,12 @@ import fsPromises from 'fs/promises'
 const _origFsPromisesReadFile = fsPromises.readFile
 const _origFsPromisesOpen = fsPromises.open
 
-fsPromises.readFile = async function(...args: any[]) {
+fsPromises.readFile = async function (this: typeof fsPromises, ...args: any[]) {
   blockIdeationRead(args[0])
   return _origFsPromisesReadFile.apply(this, args as any)
 } as any
 
-fsPromises.open = async function(...args: any[]) {
+fsPromises.open = async function (this: typeof fsPromises, ...args: any[]) {
   blockIdeationRead(args[0])
   return _origFsPromisesOpen.apply(this, args as any)
 } as any

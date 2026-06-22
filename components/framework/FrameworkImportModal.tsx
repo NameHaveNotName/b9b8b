@@ -478,7 +478,7 @@ export default function FrameworkImportModal({ projectId, onClose, onImported }:
                         onChange={(e) => {
                           const newEnvs = [...editableFramework.environments]
                           if (typeof newEnvs[ei] === 'string') {
-                            newEnvs[ei] = e.target.value
+                            newEnvs[ei] = e.target.value as any
                           } else {
                             newEnvs[ei] = { ...newEnvs[ei], name: e.target.value }
                           }
