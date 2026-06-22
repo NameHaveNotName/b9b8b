@@ -3235,40 +3235,6 @@ function ConceptPanel({
     step.status === 'PROCESSING' ? (step.resultAssets || []) : []
   )
 
-  if (step.status === 'PROCESSING' || isExecuting) {
-    console.log('[CONCEPT-PANEL] PROCESSING state, generatingIndex:', generatingIndex, 'localAssets:', localAssets.length)
-    const totalScenes = (step.outputData as any)?.totalScenes || '?'
-    const doneCount = localAssets.length
-
-    return (
-      <div className="space-y-6">
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
-          {generatingIndex !== null
-            ? `生成中... 已完成 ${doneCount}/${totalScenes} 张`
-            : `已生成 ${doneCount}/${totalScenes} 张`}
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {localAssets.map((asset: any) => (
-            <div key={asset.id} className="overflow-hidden rounded-lg border border-stone-200">
-              <div className="relative w-full bg-stone-100" style={{ aspectRatio: '1.78' }}>
-                <img src={asset.url} alt={asset.metadata?.sceneDesc} className="absolute inset-0 h-full w-full object-cover" />
-              </div>
-              <p className="p-3 text-xs text-stone-500">{asset.metadata?.sceneDesc || asset.metadata?.llmPrompt?.slice(0, 60)}</p>
-            </div>
-          ))}
-          {generatingIndex !== null && (
-            <div className="overflow-hidden rounded-lg border border-blue-300 bg-stone-100">
-              <div className="flex h-48 w-full items-center justify-center">
-                <LoaderCircle className="h-8 w-8 animate-spin text-blue-400" />
-              </div>
-              <p className="p-3 text-center text-xs text-stone-400">生成中...</p>
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
   // 轮询状态直到全部完成
   const startPolling = (totalScenes: number) => {
     let pollCount = 0
@@ -3317,6 +3283,41 @@ function ConceptPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  if (step.status === 'PROCESSING' || isExecuting) {
+    console.log('[CONCEPT-PANEL] PROCESSING state, generatingIndex:', generatingIndex, 'localAssets:', localAssets.length)
+    const totalScenes = (step.outputData as any)?.totalScenes || '?'
+    const doneCount = localAssets.length
+
+    return (
+      <div className="space-y-6">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+          {generatingIndex !== null
+            ? `生成中... 已完成 ${doneCount}/${totalScenes} 张`
+            : `已生成 ${doneCount}/${totalScenes} 张`}
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {localAssets.map((asset: any) => (
+            <div key={asset.id} className="overflow-hidden rounded-lg border border-stone-200">
+              <div className="relative w-full bg-stone-100" style={{ aspectRatio: '1.78' }}>
+                <img src={asset.url} alt={asset.metadata?.sceneDesc} className="absolute inset-0 h-full w-full object-cover" />
+              </div>
+              <p className="p-3 text-xs text-stone-500">{asset.metadata?.sceneDesc || asset.metadata?.llmPrompt?.slice(0, 60)}</p>
+            </div>
+          ))}
+          {generatingIndex !== null && (
+            <div className="overflow-hidden rounded-lg border border-blue-300 bg-stone-100">
+              <div className="flex h-48 w-full items-center justify-center">
+                <LoaderCircle className="h-8 w-8 animate-spin text-blue-400" />
+              </div>
+              <p className="p-3 text-center text-xs text-stone-400">生成中...</p>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // 轮询状态直到全部完成
   // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
     const defaultRatio = step.outputData?.aspectRatio || '16:9'
