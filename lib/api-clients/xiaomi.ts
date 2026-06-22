@@ -2505,8 +2505,9 @@ export async function generateConceptSceneWithEdit(params: {
     throw new Error(`generateConceptSceneWithEdit: non-JSON: ${text.slice(0, 200)}`)
   }
 
-  // 响应格式: { created, background, data: { b64_json, output_format, quality, size } }
-  const b64 = data?.data?.b64_json
+  // 响应格式: { created, background, data: [{ b64_json, output_format, quality, size }] }
+  const first = Array.isArray(data?.data) ? data.data[0] : data?.data
+  const b64 = first?.b64_json
   if (!b64) {
     throw new Error(`generateConceptSceneWithEdit: 响应缺少 b64_json: ${text.slice(0, 300)}`)
   }
