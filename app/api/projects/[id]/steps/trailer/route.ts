@@ -360,7 +360,9 @@ async function handleLegacyTrailer(
 }
 
 /** 生成 Segment Prompts */
-async function handleGeneratePrompts(projectId: string, stepId: string, userId: string) {
+async function handleGeneratePrompts(projectId: string, stepId: string, callerUserId: string) {
+  // 防御性保存：避免某些 minifier/运行时对 catch 块中参数引用的异常行为
+  const userId = callerUserId
   try {
     const shots = await getStoryboardShots(projectId)
     const { generateSegmentPrompts } = await import('@/lib/video-segment-utils')

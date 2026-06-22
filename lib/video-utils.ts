@@ -119,7 +119,12 @@ async function runFfmpeg(stage: string, cmd: string, maxBuffer = 64 * 1024 * 102
 /** 在项目 .temp 目录建一个本轮专用的子目录，方便事后批量清理 */
 export function makeTempDir(prefix = 'trailer-'): string {
   // Vercel Serverless: /var/task 不可写，优先用 /tmp
-  const isVercel = process.env.VERCEL === '1' || !fsSync.existsSync(path.join(process.cwd(), '.next'))
+  // 兼容多种环境变量标记（VERCEL 主开关、VERCEL_ENV、VERCEL_REGION）
+  const isVercel =
+    process.env.VERCEL === '1' ||
+    !!process.env.VERCEL_ENV ||
+    !!process.env.VERCEL_REGION ||
+    !!process.env.AWS_LAMBDA_FUNCTION_NAME
   const tempRoot = process.env.TEMP_DIR
     ? path.resolve(process.env.TEMP_DIR)
     : isVercel
