@@ -118,8 +118,12 @@ async function runFfmpeg(stage: string, cmd: string, maxBuffer = 64 * 1024 * 102
 
 /** 在项目 .temp 目录建一个本轮专用的子目录，方便事后批量清理 */
 export function makeTempDir(prefix = 'trailer-'): string {
+  // Vercel Serverless: /var/task 不可写，优先用 /tmp
+  const isVercel = process.env.VERCEL === '1' || !fsSync.existsSync(path.join(process.cwd(), '.next'))
   const tempRoot = process.env.TEMP_DIR
     ? path.resolve(process.env.TEMP_DIR)
+    : isVercel
+    ? '/tmp'
     : path.join(process.cwd(), '.temp')
   if (!fsSync.existsSync(tempRoot)) {
     fsSync.mkdirSync(tempRoot, { recursive: true })
