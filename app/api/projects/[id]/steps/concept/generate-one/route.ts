@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
+import { markProjectStepDone } from '@/lib/workflow-executor'
 
 /**
  * 概念图分批生成：按 act 串行生成该幕的 1-2 张图片。
@@ -121,7 +122,9 @@ async function _generateAct(
       },
     })
     .catch(() => {})
-  console.log(`[CONCEPT-BG] CONCEPT 步骤已更新为 COMPLETED`)
+  // 同步更新 Project.stepConceptDone，让 TopStepper 状态机正确显示
+  await markProjectStepDone(paramsId, 'CONCEPT').catch((e) => console.error('[CONCEPT-BG] markProjectStepDone failed:', e?.message))
+  console.log(`[CONCEPT-BG] CONCEPT 步骤已更新为 COMPLETED，Project.stepConceptDone = true`)
 
 }
 
