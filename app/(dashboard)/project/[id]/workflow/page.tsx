@@ -3264,15 +3264,21 @@ function ConceptPanel({
 
   // 点击生成：单次调用，后台并行生成全部图片
   const startGeneration = async (totalScenes: number, aspectRatio: string, imageModel: string) => {
+    const outputData = (step.outputData as any) || {}
+    const prompts: any[] = outputData.prompts || []
+    const actNumbers = [...new Set(prompts.map((p: any) => p.actNumber).filter(Boolean)).sort()]
+    if (actNumbers.length === 0) return
+
     setGeneratingIndex(0)
     setLocalAssets([])
-    // 单次 POST，后端 Promise.allSettled 并行生成
-    fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ totalScenes, aspectRatio, imageModel }),
-    }).catch(() => {})
-    // 开始轮询
+
+    for (const actNumber of actNumbers) {
+      fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actNumber, aspectRatio, imageModel }),
+      }).catch(() => {})
+    }
     startPolling(totalScenes)
   }
 
