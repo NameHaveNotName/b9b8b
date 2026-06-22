@@ -3262,13 +3262,21 @@ function ConceptPanel({
     setGeneratingAct(actNumber)
     setToast?.({ kind: 'success', message: `第 ${actNumber} 幕生成中` })
     try {
-      await fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
+      const res = await fetch(`/api/projects/${projectId}/steps/concept/generate-one`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actNumber, aspectRatio, imageModel }),
       })
+      console.log('[triggerActGenerate] response status:', res.status, 'actNumber:', actNumber)
+      const data = await res.json().catch(() => ({}))
+      console.log('[triggerActGenerate] response data:', JSON.stringify(data))
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${data?.error || data?.message || '未知错误'}`)
+      }
       await mutate()
+      setToast?.({ kind: 'success', message: `第 ${actNumber} 幕已提交，正在生成` })
     } catch (e: any) {
+      console.error('[triggerActGenerate] failed:', e?.message)
       onError?.(`第 ${actNumber} 幕生成失败：` + e?.message)
     } finally {
       setGeneratingAct(null)

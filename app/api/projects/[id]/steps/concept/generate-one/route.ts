@@ -2,7 +2,6 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
-import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
@@ -10,11 +9,10 @@ import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 
 /**
- * 概念图分批生成：立即返回 202，后台按 act 串行生成该幕的 1-2 张图片。
- * 前端通过 GET /concept/status 轮询进度。
+ * 概念图分批生成：按 act 串行生成该幕的 1-2 张图片。
  *
  * Body: { actNumber: number, aspectRatio?: string, imageModel?: string }
- * Response: 202 { status: 'ACCEPTED', actNumber }
+ * Response: 200 { status: 'COMPLETED', actNumber } | 500 { error: ... }
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -41,7 +39,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const outputData = (step.outputData as any) || {}
   const prompts: any[] = outputData.prompts || []
 
-  // 立即标记该 act 为 PROCESSING（不改变整个 step 的 status）
+  // 标记该 act 为 PROCESSING
   const actProgress: Record<string, string> = outputData.actProgress || {}
   actProgress[String(actNumber)] = 'PROCESSING'
 
@@ -56,23 +54,21 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     })
     .catch(() => {})
 
-  // 后台：串行生成该 act 的所有场景
-  waitUntil(
-    _generateAct(params.id, step.id, outputData, actNumber, aspectRatio, imageModel).catch((err) => {
-      console.error('[CONCEPT-BG] act', actNumber, '生成异常:', err?.message)
-      const failProgress = { ...actProgress, [String(actNumber)]: 'FAILED' }
-      prisma.workflowStep
-        .update({
-          where: { id: step.id },
-          data: {
-            outputData: { ...outputData, actProgress: failProgress },
-          },
-        })
-        .catch(() => {})
-    })
-  )
-
-  return NextResponse.json({ status: 'ACCEPTED', actNumber }, { status: 202 })
+  // 同步执行：串行生成该 act 的所有场景（每幕 1-2 张，CPU ~10-20s）
+  try {
+    await _generateAct(params.id, step.id, outputData, actNumber, aspectRatio, imageModel)
+    return NextResponse.json({ status: 'COMPLETED', actNumber })
+  } catch (err: any) {
+    console.error('[CONCEPT-GEN] act', actNumber, '生成异常:', err?.message)
+    const failProgress = { ...actProgress, [String(actNumber)]: 'FAILED' }
+    await prisma.workflowStep
+      .update({
+        where: { id: step.id },
+        data: { outputData: { ...outputData, actProgress: failProgress } },
+      })
+      .catch(() => {})
+    return NextResponse.json({ error: 'GEN_001', message: err?.message }, { status: 500 })
+  }
 }
 
 /** 按幕串行生成所有场景（每个场景 CPU 时间约 5-10s，总时间 = scenes × 10s，远低于 Vercel CPU 上限） */
