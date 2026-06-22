@@ -53,115 +53,160 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   // 立即返回 202，后台异步执行
   waitUntil(
-    (async () => {
-      console.log(`[CONCEPT-BG] 开始生成第 ${sceneIndex + 1}/${totalScenes} 张`)
-
-      // 首张设置 PROCESSING
-      if (sceneIndex === 0) {
-        await prisma.workflowStep.update({
-          where: { id: step.id },
-          data: { status: 'PROCESSING' as any },
-        }).catch(() => {})
-      }
-
-      const promptItem = prompts[sceneIndex]
-      if (!promptItem) {
-        console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 无对应 prompt`)
-        return
-      }
-
-      // 去重检查
-      const existingAssets = await prisma.asset.findMany({
-        where: { projectId: params.id, stepId: step.id },
-      })
-      const existing = existingAssets.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)
-      if (existing) {
-        console.log(`[CONCEPT-BG] sceneIndex=${sceneIndex} 已存在，跳过`)
-        return
-      }
-
-      // 获取参考图（失败不阻止生成，继续用空字符串）
-      let styleRefUrl = ''
-      try {
-        const ref = await getStyleRefUrl(params.id)
-        styleRefUrl = ref.styleRefUrl || ''
-      } catch (refErr: any) {
-        console.warn('[CONCEPT-BG] 风格图提取失败，继续生成:', refErr?.message)
-      }
-
-      const characterAssets = await prisma.asset.findMany({
-        where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
-      })
-      const characterImageUrls = characterAssets
-        .map((a) => a.url)
-        .filter((u) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u))
-
-      // 生成
-      const imageClient = await getImageClient()
-      console.log('[CONCEPT-BG] 调用 generateConceptScene, prompt:', promptItem.englishPrompt?.slice(0, 60))
-      let result: { url: string; storageKey: string; metadata: any }
-      try {
-        result = await imageClient.generateConceptScene(
-          params.id,
-          promptItem.englishPrompt,
-          styleRefUrl,
-          '',
-          characterImageUrls,
-          undefined,
-          aspectRatio,
-          imageModel
-        )
-      } catch (genErr: any) {
-        console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 生成失败:`, genErr?.message)
-        return
-      }
-
-      // 保存 asset（带重试，防止函数超时导致写入被中断）
-      let saved = false
-      for (let retry = 0; retry < 3 && !saved; retry++) {
-        try {
-          await prisma.asset.create({
-            data: {
-              projectId: params.id,
-              stepId: step.id,
-              type: 'IMAGE',
-              mimeType: 'image/png',
-              storageKey: result.storageKey,
-              url: result.url,
-              metadata: {
-                actNumber: promptItem.actNumber,
-                sceneIndex,
-                llmPrompt: promptItem.englishPrompt,
-                prompt: promptItem.englishPrompt,
-                aspectRatio,
-                imageModel: imageModel || IMAGE_MODELS.primary,
-              },
-            },
-          })
-          saved = true
-          console.log(`[CONCEPT-BG] 完成 sceneIndex=${sceneIndex}，已保存到 DB`)
-        } catch (saveErr: any) {
-          console.warn(`[CONCEPT-BG] sceneIndex=${sceneIndex} 保存失败，重试 ${retry + 1}/3:`, saveErr?.message)
-          if (retry < 2) await new Promise((r) => setTimeout(r, 1000))
+    _bgGenerate(params.id, step.id, outputData, sceneIndex, totalScenes, aspectRatio, imageModel).catch(
+      (err: any) => {
+        console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 背景任务失败:`, err?.message)
+        // 标记该 step 为失败（仅最后一张）
+        if (sceneIndex + 1 >= totalScenes) {
+          prisma.workflowStep
+            .update({
+              where: { id: step.id },
+              data: { status: 'FAILED', errorMessage: err.message || '生成失败' },
+            })
+            .catch(() => {})
         }
       }
-      if (!saved) {
-        console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 多次保存失败，跳过`)
-      }
-
-      // 最后一张标记完成
-      if (sceneIndex + 1 >= totalScenes) {
-        await prisma.workflowStep.update({
-          where: { id: step.id },
-          data: {
-            status: 'COMPLETED' as any,
-            outputData: { ...outputData, totalScenes, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary },
-          },
-        }).catch(() => {})
-        console.log('[CONCEPT-BG] 全部完成，step 已标记 COMPLETED')
-      }
-    })()
+    )
   )
 
   return NextResponse.json({ status: 'ACCEPTED', sceneIndex, totalScenes }, { status: 202 })
+}
+
+/** 后台生成逻辑（被 waitUntil 包装执行，不受 HTTP 请求生命周期限制） */
+async function _bgGenerate(
+  paramsId: string,
+  stepId: string,
+  outputData: any,
+  sceneIndex: number,
+  totalScenes: number,
+  aspectRatio: string,
+  imageModel?: string
+): Promise<void> {
+  console.log(`[CONCEPT-BG] 开始生成第 ${sceneIndex + 1}/${totalScenes} 张`)
+
+  // 首张：重置状态（清除 CANCELLED / FAILED + errorMessage）
+  if (sceneIndex === 0) {
+    try {
+      await prisma.workflowStep.update({
+        where: { id: stepId },
+        data: { status: 'PROCESSING', errorMessage: null },
+      })
+    } catch (e: any) {
+      console.warn('[CONCEPT-BG] 状态重置失败:', e?.message)
+    }
+  }
+
+  const prompts: any[] = outputData.prompts || []
+  const promptItem = prompts[sceneIndex]
+  if (!promptItem) {
+    console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 无对应 prompt`)
+    return
+  }
+
+  // 去重检查（已有则跳过）
+  try {
+    const existingAssets = await prisma.asset.findMany({
+      where: { projectId: paramsId, stepId },
+    })
+    const existing = existingAssets.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)
+    if (existing) {
+      console.log(`[CONCEPT-BG] sceneIndex=${sceneIndex} 已存在，跳过`)
+      return
+    }
+  } catch (e: any) {
+    console.warn('[CONCEPT-BG] 去重检查失败:', e?.message)
+  }
+
+  // 获取风格图（失败不阻止生成）
+  let styleRefUrl = ''
+  try {
+    const ref = await getStyleRefUrl(paramsId)
+    styleRefUrl = ref.styleRefUrl || ''
+  } catch (refErr: any) {
+    console.warn('[CONCEPT-BG] 风格图提取失败，继续生成:', refErr?.message)
+  }
+
+  // 获取角色图
+  let characterImageUrls: string[] = []
+  try {
+    const characterAssets = await prisma.asset.findMany({
+      where: { projectId: paramsId, step: { stepType: 'CHARACTER' } },
+    })
+    characterImageUrls = characterAssets
+      .map((a) => a.url)
+      .filter((u) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u))
+  } catch (e: any) {
+    console.warn('[CONCEPT-BG] 角色图获取失败:', e?.message)
+  }
+
+  // 生成图片
+  const imageClient = await getImageClient()
+  console.log('[CONCEPT-BG] 调用 generateConceptScene, prompt:', promptItem.englishPrompt?.slice(0, 60))
+  let result: { url: string; storageKey: string; metadata: any }
+  try {
+    result = await imageClient.generateConceptScene(
+      paramsId,
+      promptItem.englishPrompt,
+      styleRefUrl,
+      '',
+      characterImageUrls,
+      undefined,
+      aspectRatio,
+      imageModel
+    )
+  } catch (genErr: any) {
+    console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 生成失败:`, genErr?.message)
+    return // 单张失败不阻止其他
+  }
+
+  // 保存到 DB（带重试，防止写入被中断）
+  let saved = false
+  for (let retry = 0; retry < 3 && !saved; retry++) {
+    try {
+      await prisma.asset.create({
+        data: {
+          projectId: paramsId,
+          stepId,
+          type: 'IMAGE',
+          mimeType: 'image/png',
+          storageKey: result.storageKey,
+          url: result.url,
+          metadata: {
+            actNumber: promptItem.actNumber,
+            sceneIndex,
+            llmPrompt: promptItem.englishPrompt,
+            prompt: promptItem.englishPrompt,
+            aspectRatio,
+            imageModel: imageModel || IMAGE_MODELS.primary,
+          },
+        },
+      })
+      saved = true
+      console.log(`[CONCEPT-BG] 完成 sceneIndex=${sceneIndex}，已保存到 DB`)
+    } catch (saveErr: any) {
+      console.warn(`[CONCEPT-BG] sceneIndex=${sceneIndex} 保存失败，重试 ${retry + 1}/3:`, saveErr?.message)
+      if (retry < 2) await new Promise((r) => setTimeout(r, 1000))
+    }
+  }
+  if (!saved) {
+    console.error(`[CONCEPT-BG] sceneIndex=${sceneIndex} 多次保存失败，跳过`)
+    return
+  }
+
+  // 最后一张：标记 COMPLETED
+  if (sceneIndex + 1 >= totalScenes) {
+    try {
+      await prisma.workflowStep.update({
+        where: { id: stepId },
+        data: {
+          status: 'COMPLETED',
+          errorMessage: null,
+          outputData: { ...outputData, totalScenes, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary },
+        },
+      })
+      console.log('[CONCEPT-BG] 全部完成，step 已标记 COMPLETED')
+    } catch (e: any) {
+      console.error('[CONCEPT-BG] 标记 COMPLETED 失败:', e?.message)
+    }
+  }
 }
