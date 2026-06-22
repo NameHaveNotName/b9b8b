@@ -119,15 +119,21 @@ async function runFfmpeg(stage: string, cmd: string, maxBuffer = 64 * 1024 * 102
 /** 在项目 .temp 目录建一个本轮专用的子目录，方便事后批量清理 */
 export function makeTempDir(prefix = 'trailer-'): string {
   // Vercel Serverless: /var/task 不可写，优先用 /tmp
-  // 兼容多种环境变量标记（VERCEL 主开关、VERCEL_ENV、VERCEL_REGION）
-  const isVercel =
+  // 兼容多种环境变量标记（VERCEL 主开关、VERCEL_ENV、VERCEL_REGION、AWS Lambda 等）
+  // 兜底：若当前工作目录在 /var/task（Vercel Serverless 只读目录）也强制用 /tmp
+  const isServerless =
     process.env.VERCEL === '1' ||
     !!process.env.VERCEL_ENV ||
     !!process.env.VERCEL_REGION ||
-    !!process.env.AWS_LAMBDA_FUNCTION_NAME
+    !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    !!process.env.AWS_EXECUTION_ENV ||
+    !!process.env.AWS_LAMBDA_FUNCTION_VERSION ||
+    !!process.env.LAMBDA_TASK_ROOT ||
+    process.cwd().startsWith('/var/task')
+
   const tempRoot = process.env.TEMP_DIR
     ? path.resolve(process.env.TEMP_DIR)
-    : isVercel
+    : isServerless
     ? '/tmp'
     : path.join(process.cwd(), '.temp')
   if (!fsSync.existsSync(tempRoot)) {
