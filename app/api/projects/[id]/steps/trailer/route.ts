@@ -375,6 +375,12 @@ async function handleGeneratePrompts(projectId: string, stepId: string) {
     const shots = await getStoryboardShots(projectId)
     const segments = await generateSegmentPrompts(projectId, 'TRAILER', shots)
 
+    // 无分镜数据或 VideoSegment 表不存在时，降级走 legacy 路径
+    if (!segments || segments.length === 0) {
+      console.warn('[TRAILER-PROMPTS] 无分镜数据（shots=[]），降级走 legacy 路径直接读概念图')
+      return handleLegacyTrailer(projectId, stepId, {}, false)
+    }
+
     // 更新 step 状态为 PENDING（提示词已准备好，等待用户确认生成）
     await prisma.workflowStep.update({
       where: { id: stepId },
