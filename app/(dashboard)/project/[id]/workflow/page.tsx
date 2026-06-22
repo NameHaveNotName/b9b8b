@@ -3262,19 +3262,26 @@ function ConceptPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // PROCESSING 时每 30s 自动刷新一次数据
+  useEffect(() => {
+    if (step.status !== 'PROCESSING') return
+    const id = setInterval(() => mutate(), 30000)
+    return () => clearInterval(id)
+  }, [step.status, mutate])
+
   if (step.status === 'PROCESSING' || isExecuting) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
         <LoaderCircle className="h-10 w-10 animate-spin text-blue-400" />
         <div>
           <p className="text-sm font-medium text-stone-600">概念图生成中</p>
-          <p className="mt-1 text-xs text-stone-400">每幕预计 2-5 分钟，请稍后刷新页面查看进度</p>
+          <p className="mt-1 text-xs text-stone-400">每幕预计 2-5 分钟，生成完成后自动更新</p>
         </div>
         <button
           onClick={() => mutate()}
           className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm text-stone-600 transition hover:bg-stone-50"
         >
-          刷新查看
+          立即刷新
         </button>
       </div>
     )
