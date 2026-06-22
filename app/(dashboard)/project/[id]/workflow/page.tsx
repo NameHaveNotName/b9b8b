@@ -3273,8 +3273,9 @@ function ConceptPanel({
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${data?.error || data?.message || '未知错误'}`)
       }
-      await mutate()
-      setToast?.({ kind: 'success', message: `第 ${actNumber} 幕已提交，正在生成` })
+      // 强制 revalidate，绕过 SWR 缓存直接拉最新数据
+      await mutate(`/api/projects/${projectId}`, undefined, { revalidate: true })
+      setToast?.({ kind: 'success', message: `第 ${actNumber} 幕已生成` })
     } catch (e: any) {
       console.error('[triggerActGenerate] failed:', e?.message)
       onError?.(`第 ${actNumber} 幕生成失败：` + e?.message)
