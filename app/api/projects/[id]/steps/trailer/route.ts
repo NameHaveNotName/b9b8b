@@ -321,16 +321,20 @@ async function handleLegacyTrailer(
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  const conceptAssets = await prisma.asset.findMany({
-    where: { projectId, type: 'IMAGE' },
-    orderBy: { createdAt: 'asc' },
+  // 读取 CONCEPT 步骤生成的图片（按 actNumber + sceneIndex 排序）
+  const conceptStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType: 'CONCEPT' } },
   })
-  const filteredAssets = conceptAssets
-    .filter((a) => a.storageKey.includes('/concepts/'))
-    .slice(0, 6)
+  const conceptAssets = conceptStep
+    ? await prisma.asset.findMany({
+        where: { projectId, stepId: conceptStep.id, type: 'IMAGE' },
+        orderBy: [{ metadata: 'asc' }, { createdAt: 'asc' }], // 按 actNumber + sceneIndex 排序
+      })
+    : []
+  const filteredAssets = conceptAssets.slice(0, 6)
 
   if (filteredAssets.length === 0) {
-    return NextResponse.json({ error: 'WORKFLOW_001', message: '未找到概念图' }, { status: 400 })
+    return NextResponse.json({ error: 'WORKFLOW_001', message: '未找到概念图，请先生成概念图' }, { status: 400 })
   }
 
   const conceptImageKeys = filteredAssets.map((a) => a.storageKey)
@@ -391,6 +395,11 @@ async function handleGeneratePrompts(projectId: string, stepId: string) {
       message: `已生成 ${segments.length} 个分镜的视频提示词`,
     })
   } catch (e: any) {
+    // VideoSegment 表不存在时，降级走 legacy 路径（直接读概念图生成视频）
+    if (e.code === 'P2021' || (e.cause && String(e.cause).includes('does not exist'))) {
+      console.warn('[TRAILER-PROMPTS] VideoSegment 表不存在，降级走 legacy 路径')
+      return handleLegacyTrailer(projectId, stepId, {}, false)
+    }
     console.error('[TRAILER-PROMPTS] 失败:', e)
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }

@@ -125,9 +125,14 @@ export async function generateSegmentPrompts(
   const acts = Array.isArray(fw.acts) ? fw.acts : []
 
   // 删除旧的 VideoSegment（同 stepName）
-  await prisma.videoSegment.deleteMany({
-    where: { projectId, stepName },
-  })
+  try {
+    await prisma.videoSegment.deleteMany({
+      where: { projectId, stepName },
+    })
+  } catch (e: any) {
+    // VideoSegment 表可能不存在（迁移未执行），忽略 P2021 错误
+    if (e.code !== 'P2021') throw e
+  }
 
   // 并行生成提示词
   const promptResults = await Promise.all(
