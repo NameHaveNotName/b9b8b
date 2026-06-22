@@ -74,15 +74,13 @@ async function processTrailerInline(
 // 新版：分镜卡片式逐段生成
 // ============================================================
 
-/** 获取 storyboard shots */
+/** 获取 storyboard shots（无分镜时返回空数组，generateSegmentPrompts 会从框架 acts 兜底） */
 async function getStoryboardShots(projectId: string) {
   const storyboardStep = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId, stepType: 'STORYBOARD' } },
   })
   const shots = (storyboardStep?.outputData as any)?.shots || []
-  if (!Array.isArray(shots) || shots.length === 0) {
-    throw new Error('未找到分镜数据，请先完成分镜设计')
-  }
+  if (!Array.isArray(shots)) return []
   return shots
 }
 
