@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import useSWR from 'swr'
 import { LoaderCircle, Play, RefreshCw, Film, Music } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 
@@ -22,6 +23,128 @@ function ProcessingBlock({ message }: { message: string }) {
     <div className="flex flex-col items-center justify-center py-16">
       <LoaderCircle className="h-8 w-8 animate-spin text-stone-400" />
       <p className="mt-3 text-sm text-stone-500">{message}</p>
+    </div>
+  )
+}
+
+interface SegmentCardProps {
+  segment: any
+  index: number
+  highlighted: boolean
+  onDoubleClick: (index: number) => void
+  onGenerate: (segmentId: string) => void
+  isExecuting: boolean
+}
+
+function SegmentCard({
+  segment,
+  index,
+  highlighted,
+  onDoubleClick,
+  onGenerate,
+  isExecuting,
+}: SegmentCardProps) {
+  const statusConfig: Record<string, { label: string; className: string }> = {
+    completed: { label: '已完成', className: 'bg-emerald-50 text-emerald-700' },
+    generating: { label: '生成中', className: 'bg-amber-50 text-amber-700' },
+    failed: { label: '失败', className: 'bg-red-50 text-red-700' },
+    pending: { label: '待生成', className: 'bg-stone-100 text-stone-500' },
+  }
+  const { label, className: badgeClass } =
+    statusConfig[segment.status] || statusConfig.pending
+
+  return (
+    <div
+      className={cn(
+        'group relative overflow-hidden rounded-lg border bg-white transition hover:shadow-md',
+        highlighted ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-stone-200'
+      )}
+      onDoubleClick={() => onDoubleClick(index)}
+    >
+      <div className="relative aspect-video overflow-hidden rounded-lg bg-stone-100">
+        {segment.status === 'completed' && segment.videoUrl ? (
+          <video
+            src={segment.videoUrl}
+            muted
+            playsInline
+            className="h-full w-full object-cover transition group-hover:scale-105"
+            preload="metadata"
+          />
+        ) : segment.status === 'generating' ? (
+          <div className="flex h-full flex-col items-center justify-center">
+            <LoaderCircle className="h-6 w-6 animate-spin text-stone-400" />
+            <span className="mt-2 text-xs text-stone-500">生成中...</span>
+          </div>
+        ) : segment.status === 'failed' ? (
+          <div className="flex h-full flex-col items-center justify-center">
+            <span className="text-xs text-red-500">生成失败</span>
+            {segment.errorMessage && (
+              <span className="mt-1 max-w-[80%] text-center text-[10px] text-red-400 line-clamp-2">
+                {segment.errorMessage}
+              </span>
+            )}
+          </div>
+        ) : segment.imageUrl ? (
+          <img
+            src={segment.imageUrl}
+            alt={segment.caption || '概念图'}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center bg-stone-50">
+            <span className="font-mono text-sm font-bold text-stone-400">
+              {segment.shotId}
+            </span>
+            <span className="mt-1 text-xs text-stone-400">待生成</span>
+          </div>
+        )}
+
+        <span
+          className={cn(
+            'absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-medium',
+            badgeClass
+          )}
+        >
+          {label}
+        </span>
+      </div>
+
+      <div className="p-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded bg-stone-800 px-2 py-0.5 font-mono text-xs font-medium text-white">
+            {segment.shotId}
+          </span>
+          <span className="text-sm font-medium text-stone-800 line-clamp-1">
+            {segment.caption || '无描述'}
+          </span>
+        </div>
+        <p className="mt-1.5 text-[11px] text-stone-400 line-clamp-2">
+          {segment.prompt?.slice(0, 80)}...
+        </p>
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-xs text-stone-400">{segment.duration || 5}s</span>
+          {segment.status === 'pending' && (
+            <button
+              onClick={() => onGenerate(segment.id)}
+              disabled={isExecuting}
+              className="flex items-center gap-1 rounded bg-stone-800 px-2 py-1 text-[10px] text-white transition hover:bg-stone-700 disabled:opacity-50"
+            >
+              <Play className="h-3 w-3" />
+              生成
+            </button>
+          )}
+          {segment.status === 'failed' && (
+            <button
+              onClick={() => onGenerate(segment.id)}
+              disabled={isExecuting}
+              className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] text-white transition hover:bg-red-700 disabled:opacity-50"
+            >
+              <RefreshCw className="h-3 w-3" />
+              重试
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -97,26 +220,25 @@ export default function TrailerPanel({
     return () => video.removeEventListener('timeupdate', handler)
   }, [segments])
 
-  const handleDoubleClick = useCallback((segmentIndex: number) => {
-    const video = videoRef.current
-    if (!video || !combinedVideoUrl) return
-    const startTime = segments
-      .slice(0, segmentIndex)
-      .reduce((sum: number, s: any) => sum + (s.duration || 5), 0)
-    video.currentTime = startTime
-    video.play()
-  }, [segments, combinedVideoUrl])
-
-  const hasSegments = segments.length > 0
-  const allCompleted = summary?.allCompleted || false
-  const isProcessing = combinedVideoStatus === 'processing' || isComposing
-
-  const handleGeneratePrompts = () => {
-    onExecute('TRAILER', { action: 'generate-segment-prompts' })
-  }
+  const handleDoubleClick = useCallback(
+    (segmentIndex: number) => {
+      const video = videoRef.current
+      if (!video || !combinedVideoUrl) return
+      const startTime = segments
+        .slice(0, segmentIndex)
+        .reduce((sum: number, s: any) => sum + (s.duration || 5), 0)
+      video.currentTime = startTime
+      video.play()
+    },
+    [segments, combinedVideoUrl]
+  )
 
   const handleGenerateSegment = (segmentId: string) => {
     onExecute('TRAILER', { action: 'generate-segment-video', segmentId })
+  }
+
+  const handleGeneratePrompts = () => {
+    onExecute('TRAILER', { action: 'generate-segment-prompts' })
   }
 
   const handleGenerateAll = () => {
@@ -134,16 +256,20 @@ export default function TrailerPanel({
     return `${m}:${String(s).padStart(2, '0')}`
   }
 
+  const hasSegments = segments.length > 0
+  const allCompleted = summary?.allCompleted || false
+  const isProcessing = combinedVideoStatus === 'processing' || isComposing
+
   if (combinedVideoUrl) {
     return (
-      <div className="space-y-6">
-        <div className="sticky top-0 z-10 bg-white pb-4 pt-2">
+      <div className="flex flex-col h-[calc(100vh-16rem)]">
+        {/* 上半部分：常驻播放区 */}
+        <div className="shrink-0 bg-white pb-4 pt-2">
           <video
             ref={videoRef}
             src={combinedVideoUrl}
             controls
-            className="w-full rounded-lg"
-            style={{ maxHeight: '24rem' }}
+            className="w-full rounded-lg max-h-[min(50vh,24rem)]"
           />
           <div className="mt-2 flex items-center justify-between text-sm text-stone-500">
             <span>总时长: {formatTime(totalDuration)}</span>
@@ -151,64 +277,30 @@ export default function TrailerPanel({
           </div>
           {musicUrl && (
             <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
-              <span className="text-xs text-stone-500">背景音乐 {musicIsMock ? '(静音)' : ''}</span>
+              <span className="text-xs text-stone-500">
+                背景音乐 {musicIsMock ? '(静音)' : ''}
+              </span>
               <audio src={musicUrl} controls className="mt-1 w-full" />
             </div>
           )}
         </div>
 
-        <div>
-          <h3 className="mb-3 text-sm font-semibold text-stone-700">片段 ({segments.length})</h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {/* 下半部分：独立滚动分镜区 */}
+        <div className="flex-1 overflow-y-auto min-h-0 pt-2">
+          <h3 className="mb-3 text-sm font-semibold text-stone-700">
+            片段 ({segments.length})
+          </h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {segments.map((segment: any, index: number) => (
-              <div
+              <SegmentCard
                 key={segment.id}
-                className={`overflow-hidden rounded-lg border ${
-                  highlightedSegmentId === segment.id
-                    ? 'border-emerald-400 ring-2 ring-emerald-100'
-                    : 'border-stone-200'
-                } bg-white transition cursor-pointer`}
-                onDoubleClick={() => handleDoubleClick(index)}
-              >
-                <div className="relative aspect-video bg-stone-100">
-                  {segment.videoUrl ? (
-                    <video
-                      src={segment.videoUrl}
-                      muted
-                      playsInline
-                      className="h-full w-full object-cover"
-                      preload="metadata"
-                    />
-                  ) : segment.imageUrl ? (
-                    <img
-                      src={segment.imageUrl}
-                      alt={segment.caption || '概念图'}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full flex-col items-center justify-center">
-                      <span className="font-mono text-sm font-bold text-stone-400">
-                        {segment.shotId}
-                      </span>
-                      <span className="mt-1 text-xs text-stone-400">待生成</span>
-                    </div>
-                  )}
-                </div>
-                <div className="p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs text-stone-500">{segment.shotId}</span>
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">
-                      已完成
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm font-medium text-stone-800 line-clamp-1">
-                    {segment.caption || '无描述'}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-stone-400 line-clamp-2">
-                    {segment.prompt?.slice(0, 80)}...
-                  </p>
-                </div>
-              </div>
+                segment={segment}
+                index={index}
+                highlighted={highlightedSegmentId === segment.id}
+                onDoubleClick={handleDoubleClick}
+                onGenerate={handleGenerateSegment}
+                isExecuting={isExecuting}
+              />
             ))}
           </div>
         </div>
@@ -222,18 +314,19 @@ export default function TrailerPanel({
 
   if (hasSegments) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="flex flex-col h-[calc(100vh-16rem)]">
+        {/* 上半部分：操作区 */}
+        <div className="shrink-0 flex items-center justify-between pb-4">
           <div>
             <h3 className="text-sm font-semibold text-stone-700">
               分镜片段 ({segments.length})
             </h3>
             <p className="text-xs text-stone-500">
-              {summary?.completed || 0} 已完成 · {summary?.pending || 0} 待生成 · {summary?.generating || 0} 生成中 · {summary?.failed || 0} 失败
+              {summary?.completed || 0} 已完成 · {summary?.pending || 0} 待生成 ·{' '}
+              {summary?.generating || 0} 生成中 · {summary?.failed || 0} 失败
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* 生成背景音乐 */}
             {musicUrl ? (
               <button
                 disabled
@@ -274,107 +367,21 @@ export default function TrailerPanel({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {segments.map((segment: any) => (
-            <div
-              key={segment.id}
-              className="overflow-hidden rounded-lg border border-stone-200 bg-white transition hover:shadow-sm"
-            >
-              <div className="relative aspect-video bg-stone-100">
-                {segment.status === 'completed' && segment.videoUrl ? (
-                  <video
-                    src={segment.videoUrl}
-                    muted
-                    playsInline
-                    className="h-full w-full object-cover"
-                    preload="metadata"
-                  />
-                ) : segment.status === 'generating' ? (
-                  <div className="flex h-full flex-col items-center justify-center">
-                    <LoaderCircle className="h-6 w-6 animate-spin text-stone-400" />
-                    <span className="mt-2 text-xs text-stone-500">生成中...</span>
-                  </div>
-                ) : segment.status === 'failed' ? (
-                  <div className="flex h-full flex-col items-center justify-center">
-                    <span className="text-xs text-red-500">生成失败</span>
-                    {segment.errorMessage && (
-                      <span className="mt-1 max-w-[80%] text-center text-[10px] text-red-400 line-clamp-2">
-                        {segment.errorMessage}
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center bg-stone-50">
-                    {segment.imageUrl ? (
-                      <img
-                        src={segment.imageUrl}
-                        alt={segment.caption || '概念图'}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <span className="font-mono text-sm font-bold text-stone-400">
-                        {segment.shotId}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-stone-500">{segment.shotId}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] ${
-                      segment.status === 'completed'
-                        ? 'bg-emerald-50 text-emerald-700'
-                        : segment.status === 'generating'
-                        ? 'bg-amber-50 text-amber-700'
-                        : segment.status === 'failed'
-                        ? 'bg-red-50 text-red-700'
-                        : 'bg-stone-100 text-stone-500'
-                    }`}
-                  >
-                    {segment.status === 'completed'
-                      ? '已完成'
-                      : segment.status === 'generating'
-                      ? '生成中'
-                      : segment.status === 'failed'
-                      ? '失败'
-                      : '待生成'}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm font-medium text-stone-800 line-clamp-1">
-                  {segment.caption || '无描述'}
-                </p>
-                <p className="mt-0.5 text-[11px] text-stone-400 line-clamp-2">
-                  {segment.prompt?.slice(0, 80)}...
-                </p>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-stone-400">{segment.duration || 5}s</span>
-                  {segment.status === 'pending' && (
-                    <button
-                      onClick={() => handleGenerateSegment(segment.id)}
-                      disabled={isExecuting}
-                      className="flex items-center gap-1 rounded bg-stone-800 px-2 py-1 text-[10px] text-white transition hover:bg-stone-700 disabled:opacity-50"
-                    >
-                      <Play className="h-3 w-3" />
-                      生成
-                    </button>
-                  )}
-                  {segment.status === 'failed' && (
-                    <button
-                      onClick={() => handleGenerateSegment(segment.id)}
-                      disabled={isExecuting}
-                      className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] text-white transition hover:bg-red-700 disabled:opacity-50"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      重试
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
+        {/* 下半部分：独立滚动分镜区 */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {segments.map((segment: any, index: number) => (
+              <SegmentCard
+                key={segment.id}
+                segment={segment}
+                index={index}
+                highlighted={false}
+                onDoubleClick={() => {}}
+                onGenerate={handleGenerateSegment}
+                isExecuting={isExecuting}
+              />
+            ))}
+          </div>
         </div>
       </div>
     )
