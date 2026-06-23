@@ -594,8 +594,24 @@ const globalForPrisma = globalThis as unknown as {
 
 const useMock = isPlaceholderUrl(process.env.DATABASE_URL)
 
+function normalizeDatabaseUrl(url: string): string {
+  if (!url) return url
+  try {
+    const u = new URL(url)
+    if (!u.port) {
+      // 未指定端口时默认使用 Supabase 连接池端口 6543
+      // （应用运行时应使用连接池，而非直连 5432）
+      u.port = '6543'
+      console.warn('[PRISMA] DATABASE_URL 未指定端口，已自动使用 6543')
+      return u.toString()
+    }
+  } catch {}
+  return url
+}
+
 function createRealPrisma(): PrismaClient {
-  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! })
+  const connectionString = normalizeDatabaseUrl(process.env.DATABASE_URL!)
+  const adapter = new PrismaPg({ connectionString })
   return new PrismaClient({ adapter })
 }
 
