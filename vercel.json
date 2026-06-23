@@ -24,11 +24,17 @@
     },
     "app/api/projects/[id]/steps/trailer/route.ts": {
       "maxDuration": 300,
-      "includeFiles": "ffmpeg"
+      "includeFiles": [
+        "ffmpeg",
+        "public/ffmpeg"
+      ]
     },
     "app/api/projects/[id]/steps/video-direct/route.ts": {
       "maxDuration": 300,
-      "includeFiles": "ffmpeg"
+      "includeFiles": [
+        "ffmpeg",
+        "public/ffmpeg"
+      ]
     }
   }
 }

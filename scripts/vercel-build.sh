@@ -5,6 +5,7 @@
 # 尝试定位 ffmpeg-static 提供的二进制；若缺失则下载 johnvansickle 静态构建
 ensure_ffmpeg() {
   echo "[BUILD] Ensuring ffmpeg binary is available..."
+  mkdir -p public
 
   # 1. 尝试 node_modules/ffmpeg-static 的二进制（npm install 时根据平台下载）
   FFMPEG_CANDIDATE=""
@@ -16,8 +17,10 @@ ensure_ffmpeg() {
 
   if [ -n "$FFMPEG_CANDIDATE" ] && [ -x "$FFMPEG_CANDIDATE" ]; then
     echo "[BUILD] Found ffmpeg-static binary: $FFMPEG_CANDIDATE"
+    mkdir -p public
     cp "$FFMPEG_CANDIDATE" ./ffmpeg
-    chmod +x ./ffmpeg
+    cp "$FFMPEG_CANDIDATE" public/ffmpeg
+    chmod +x ./ffmpeg public/ffmpeg
     ./ffmpeg -version | head -1
     return 0
   fi
@@ -57,7 +60,8 @@ download_ffmpeg() {
   fi
 
   cp "$FFMPEG_BIN" ./ffmpeg
-  chmod +x ./ffmpeg
+  cp "$FFMPEG_BIN" public/ffmpeg
+  chmod +x ./ffmpeg public/ffmpeg
   echo "[BUILD] Downloaded static ffmpeg:"
   ./ffmpeg -version | head -1
   return 0
@@ -69,7 +73,8 @@ download_ffmpeg_github() {
   # ffmpeg-static b5.0 linux x64
   if curl -fsSL --max-time 120 -o /tmp/ffmpeg-github "https://github.com/eugeneware/ffmpeg-static/releases/download/b5.0/ffmpeg-linux-x64"; then
     cp /tmp/ffmpeg-github ./ffmpeg
-    chmod +x ./ffmpeg
+    cp /tmp/ffmpeg-github public/ffmpeg
+    chmod +x ./ffmpeg public/ffmpeg
     echo "[BUILD] Downloaded GitHub ffmpeg:"
     ./ffmpeg -version | head -1
     return 0

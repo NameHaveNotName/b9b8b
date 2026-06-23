@@ -1,9 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
-    // Vercel 构建脚本会把静态 ffmpeg 下载到项目根目录 ./ffmpeg
-    // 运行时 cwd 为 /var/task，所以相对路径 ./ffmpeg 指向 /var/task/ffmpeg
-    FFMPEG_PATH: './ffmpeg',
+    // Vercel 构建脚本会把静态 ffmpeg 下载到 public/ffmpeg
+    // Next.js 运行时被部署到 /var/task，public 文件位于 /var/task/public/ffmpeg
+    FFMPEG_PATH: './public/ffmpeg',
   },
   experimental: {
     // 标记重型模块为外部依赖，不打包进 serverless function

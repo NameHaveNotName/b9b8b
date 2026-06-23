@@ -43,10 +43,19 @@ function resolveFfmpegPath(): string {
     console.log('[FFMPEG] 环境变量 FFMPEG_PATH 文件不存在:', envPath)
   }
 
-  // 1. 构建脚本复制到项目根目录的静态 ffmpeg（Vercel 最可靠）
+  // 1. 构建脚本复制到 public/ffmpeg 的静态 ffmpeg（Vercel 最可靠）
+  // Next.js 会把 public 目录打包进部署产物，运行时位于 /var/task/public
   const buildDownloadedCandidates = [
+    path.join(process.cwd(), 'public', 'ffmpeg'),
+    path.join(process.cwd(), 'public', 'ffmpeg.exe'),
+    path.join(process.cwd(), '.next', 'public', 'ffmpeg'),
+    path.join(process.cwd(), '.next', 'public', 'ffmpeg.exe'),
     path.join(process.cwd(), 'ffmpeg'),
     path.join(process.cwd(), 'ffmpeg.exe'),
+    '/var/task/public/ffmpeg',
+    '/var/task/public/ffmpeg.exe',
+    '/var/task/.next/public/ffmpeg',
+    '/var/task/.next/public/ffmpeg.exe',
     '/var/task/ffmpeg',
     '/var/task/ffmpeg.exe',
     '/tmp/ffmpeg',
@@ -72,16 +81,20 @@ function resolveFfmpegPath(): string {
   try {
     const resolvedPath = require.resolve('ffmpeg-static')
     console.log('[FFMPEG] require.resolve(ffmpeg-static)=', resolvedPath)
-    const dir = path.dirname(resolvedPath)
-    const candidates = [
-      path.join(dir, 'ffmpeg'),
-      path.join(dir, 'ffmpeg.exe'),
-      resolvedPath,
-    ]
-    for (const c of candidates) {
-      if (fsSync.existsSync(c)) {
-        console.log('[FFMPEG] 使用 node_modules 候选路径:', c)
-        return c
+    if (typeof resolvedPath !== 'string') {
+      console.log('[FFMPEG] require.resolve 返回非字符串，跳过 node_modules 候选')
+    } else {
+      const dir = path.dirname(resolvedPath)
+      const candidates = [
+        path.join(dir, 'ffmpeg'),
+        path.join(dir, 'ffmpeg.exe'),
+        resolvedPath,
+      ]
+      for (const c of candidates) {
+        if (fsSync.existsSync(c)) {
+          console.log('[FFMPEG] 使用 node_modules 候选路径:', c)
+          return c
+        }
       }
     }
   } catch (err: any) {
