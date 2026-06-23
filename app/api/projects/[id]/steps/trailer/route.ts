@@ -439,11 +439,18 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
     return NextResponse.json({ error: 'NO_IMAGE', message: '该片段没有可用的概念图' }, { status: 400 })
   }
 
-  // 更新状态
-  await prisma.videoSegment.update({
-    where: { id: segmentId },
+  // 原子更新：只有状态为 pending/failed 时才设置为 generating，防止并发重复生成
+  const updated = await prisma.videoSegment.updateMany({
+    where: {
+      id: segmentId,
+      status: { in: ['pending', 'failed'] },
+    },
     data: { status: 'generating', errorMessage: null },
   })
+
+  if (updated.count === 0) {
+    return NextResponse.json({ success: true, message: '该片段正在生成中或已完成', status: 'generating' })
+  }
 
   // 后台生成
   waitUntil(backgroundGenerateSegment(

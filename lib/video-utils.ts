@@ -94,10 +94,12 @@ function resolveFfmpegPath(): string {
   const localCandidates = [
     path.join(process.cwd(), 'ffmpeg'),
     path.join(process.cwd(), 'ffmpeg.exe'),
+    '/var/task/ffmpeg',
+    '/tmp/ffmpeg',
   ]
   for (const localPath of localCandidates) {
     if (fsSync.existsSync(localPath)) {
-      console.log('[FFMPEG] 使用项目根目录路径:', localPath)
+      console.log('[FFMPEG] 使用项目根目录/系统兜底路径:', localPath)
       return localPath
     }
   }
@@ -110,9 +112,23 @@ function resolveFfmpegPath(): string {
       console.log('[FFMPEG] 使用系统 PATH 路径:', sysPath)
       return sysPath
     }
-  } catch {}
+  } catch (err: any) {
+    console.log('[FFMPEG] 系统 PATH 查找失败:', err?.message)
+  }
 
-  // 6. 最终兜底：直接调用 ffmpeg（依赖系统 PATH）
+  // 6. 尝试 require('ffmpeg-static') 的 CJS 导出（有时和 ESM import 不同）
+  try {
+    const cjsStatic = require('ffmpeg-static')
+    console.log('[FFMPEG] require(ffmpeg-static)=', cjsStatic)
+    if (cjsStatic && fsSync.existsSync(cjsStatic)) {
+      console.log('[FFMPEG] 使用 require(ffmpeg-static) 路径:', cjsStatic)
+      return cjsStatic
+    }
+  } catch (err: any) {
+    console.log('[FFMPEG] require(ffmpeg-static) 失败:', err?.message)
+  }
+
+  // 7. 最终兜底：直接调用 ffmpeg（依赖系统 PATH）
   console.warn('[FFMPEG] 未找到 ffmpeg 可执行文件，尝试直接调用系统 PATH 中的 ffmpeg')
   return 'ffmpeg'
 }
