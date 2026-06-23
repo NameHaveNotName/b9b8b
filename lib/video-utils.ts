@@ -116,26 +116,43 @@ async function runFfmpeg(stage: string, cmd: string, maxBuffer = 64 * 1024 * 102
   }
 }
 
+let _writableTempRoot: string | undefined
+
+function detectWritableTempRoot(): string {
+  if (_writableTempRoot) return _writableTempRoot
+
+  if (process.env.TEMP_DIR) {
+    const root = path.resolve(process.env.TEMP_DIR)
+    _writableTempRoot = root
+    return root
+  }
+
+  // 运行时测试 /tmp 是否可写（Vercel Serverless / Lambda / Docker 等）
+  try {
+    const testDir = path.join('/tmp', `write-test-${Date.now()}`)
+    fsSync.mkdirSync(testDir, { recursive: true })
+    fsSync.rmdirSync(testDir)
+    _writableTempRoot = '/tmp'
+    console.log('[TEMP] 使用 /tmp 作为临时目录根')
+    return '/tmp'
+  } catch {}
+
+  // 本地开发兜底
+  const localRoot = path.join(process.cwd(), '.temp')
+  try {
+    fsSync.mkdirSync(localRoot, { recursive: true })
+    _writableTempRoot = localRoot
+    return localRoot
+  } catch {}
+
+  // 最终兜底
+  _writableTempRoot = '/tmp'
+  return '/tmp'
+}
+
 /** 在项目 .temp 目录建一个本轮专用的子目录，方便事后批量清理 */
 export function makeTempDir(prefix = 'trailer-'): string {
-  // Vercel Serverless: /var/task 不可写，优先用 /tmp
-  // 兼容多种环境变量标记（VERCEL 主开关、VERCEL_ENV、VERCEL_REGION、AWS Lambda 等）
-  // 兜底：若当前工作目录在 /var/task（Vercel Serverless 只读目录）也强制用 /tmp
-  const isServerless =
-    process.env.VERCEL === '1' ||
-    !!process.env.VERCEL_ENV ||
-    !!process.env.VERCEL_REGION ||
-    !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
-    !!process.env.AWS_EXECUTION_ENV ||
-    !!process.env.AWS_LAMBDA_FUNCTION_VERSION ||
-    !!process.env.LAMBDA_TASK_ROOT ||
-    process.cwd().startsWith('/var/task')
-
-  const tempRoot = process.env.TEMP_DIR
-    ? path.resolve(process.env.TEMP_DIR)
-    : isServerless
-    ? '/tmp'
-    : path.join(process.cwd(), '.temp')
+  const tempRoot = detectWritableTempRoot()
   if (!fsSync.existsSync(tempRoot)) {
     fsSync.mkdirSync(tempRoot, { recursive: true })
   }
