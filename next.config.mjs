@@ -2,16 +2,15 @@
 const nextConfig = {
   experimental: {
     // 标记重型模块为外部依赖，不打包进 serverless function
+    // 注意：lucide-react / recharts 不能同时出现在 transpilePackages 和本列表中，故移除
     serverComponentsExternalPackages: [
       'bullmq',
       'sharp',
       '@img/sharp-libvips-linux-x64',
-      'lucide-react',
       'xlsx',
       '@aws-sdk/client-s3',
       '@aws-sdk/s3-request-presigner',
       'docx',
-      'recharts',
       'ffmpeg-static',
       'fluent-ffmpeg',
       'ioredis',
