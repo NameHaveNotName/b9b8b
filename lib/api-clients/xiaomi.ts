@@ -1070,6 +1070,21 @@ export async function generateVideoFromImage(
   const pollIntervalMs = params.pollIntervalMs ?? 5000
   const m = (params.model || '').toLowerCase()
 
+  // 2026-06-24: 通义万象图生视频（已验证可用）
+  if (m.includes('wan')) {
+    const { videoUrl, taskId } = await generateWanVideo({
+      prompt: params.prompt,
+      imageUrl: params.imageUrl,
+      model: params.model,
+      resolution: '480P',
+      promptExtend: true,
+      audio: true,
+      pollTimeoutSec,
+      pollIntervalMs,
+    })
+    return { videoUrl, model: params.model, taskId }
+  }
+
   // 工作指令.txt（2026-05-17 Phase 1）：新版 Veo 走 /v1/video/create
   // 兼容多种 model id 写法：veo3-fast-frames / veo3-fast / veo-3-frames 等
   if (m.startsWith('veo3') || m.startsWith('veo-3') || m === 'veo3-fast-frames') {
@@ -1422,6 +1437,155 @@ export async function pollHailuoTask(
     }
   }
   throw new Error(`Hailuo task ${taskId} timeout after ${pollTimeoutSec}s`)
+}
+
+// ==================== 通义万象 Wan 视频生成（2026-06-24 新增）====================
+//
+// Endpoint:  POST /alibailian/api/v1/services/aigc/video-generation/video-synthesis
+// Query:     GET  /alibailian/api/v1/tasks/{task_id}
+// Body:      { model, input: { prompt, img_url }, parameters: { resolution, prompt_extend, audio } }
+// Response:  { request_id, output: { task_id, task_status } }
+
+export interface WanSubmitParams {
+  prompt: string
+  imageUrl: string        // 首帧图（http(s) URL 或 data: base64 URL）
+  model?: string          // 默认 'wan2.5-i2v-preview'
+  resolution?: string     // 默认 '480P'
+  promptExtend?: boolean  // 默认 true
+  audio?: boolean         // 默认 true
+}
+
+/** 提交通义万象图生视频任务 */
+export async function submitWanVideo(params: WanSubmitParams): Promise<SubmitTaskResult> {
+  if (!API_KEY) throw new Error('XIAOMI_API_KEY not configured')
+
+  let imageRef = params.imageUrl
+  if (
+    imageRef.includes('localhost') ||
+    imageRef.includes('127.0.0.1') ||
+    imageRef.startsWith('/mock-storage/')
+  ) {
+    try {
+      imageRef = await resolveImageToBase64(imageRef)
+      console.log('[WAN] localhost/本地 URL 已转 Base64,长度:', imageRef.length)
+    } catch (err: any) {
+      console.warn('[WAN] Base64 转换失败,尝试原 URL:', err?.message)
+    }
+  }
+
+  const body = JSON.stringify({
+    model: params.model || 'wan2.5-i2v-preview',
+    input: {
+      prompt: (params.prompt || '').slice(0, PROMPT_MAX_LEN),
+      img_url: imageRef,
+    },
+    parameters: {
+      resolution: params.resolution || '480P',
+      prompt_extend: params.promptExtend ?? true,
+      audio: params.audio ?? true,
+    },
+  })
+
+  console.log('[WAN-SUBMIT] →', body.length > 500 ? body.slice(0, 500) + '...(Base64 已截断)' : body)
+  console.log('[WAN-SUBMIT] URL:', `${BASE_URL}/alibailian/api/v1/services/aigc/video-generation/video-synthesis`)
+
+  const res = await fetch(`${BASE_URL}/alibailian/api/v1/services/aigc/video-generation/video-synthesis`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body,
+    signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
+  })
+
+  const text = await res.text()
+  console.log('[WAN-SUBMIT] ←', res.status, text.slice(0, 500))
+
+  if (!res.ok) throw new XiaomiHttpError(res.status, text)
+
+  let data: any
+  try {
+    data = JSON.parse(text)
+  } catch {
+    throw new Error(`submitWanVideo: non-JSON response: ${text.slice(0, 200)}`)
+  }
+
+  const taskId: string | undefined = data?.output?.task_id || data?.task_id
+  if (!taskId) {
+    throw new Error(`submitWanVideo: 响应缺少 task_id: ${text.slice(0, 200)}`)
+  }
+
+  return { taskId, status: data?.output?.task_status || data?.task_status || 'pending' }
+}
+
+/** 轮询通义万象视频任务 */
+export async function pollWanTask(
+  taskId: string,
+  pollTimeoutSec = 300,
+  pollIntervalMs = 5000
+): Promise<string> {
+  const deadline = Date.now() + pollTimeoutSec * 1000
+  let lastSnapshot = ''
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollIntervalMs))
+    try {
+      const url = `${BASE_URL}/alibailian/api/v1/tasks/${encodeURIComponent(taskId)}`
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${API_KEY}` },
+        signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
+      })
+      const text = await res.text()
+      if (!res.ok) {
+        console.warn(`[WAN-POLL] taskId=${taskId} HTTP ${res.status}: ${text.slice(0, 200)}`)
+        continue
+      }
+
+      let data: any
+      try {
+        data = JSON.parse(text)
+      } catch {
+        console.warn(`[WAN-POLL] taskId=${taskId} non-JSON: ${text.slice(0, 200)}`)
+        continue
+      }
+
+      const status: string = (data?.output?.task_status || data?.task_status || '').toLowerCase()
+      const videoUrl: string | undefined = data?.output?.video_url || data?.video_url
+
+      const snapshot = `status=${status} hasUrl=${!!videoUrl}`
+      if (snapshot !== lastSnapshot) {
+        console.log(`[WAN-POLL] taskId=${taskId} ${snapshot}`)
+        lastSnapshot = snapshot
+      }
+
+      if (videoUrl && status === 'succeeded') {
+        return videoUrl
+      }
+
+      if (status === 'failed' || status === 'error') {
+        throw new Error(`Wan task ${taskId} failed: ${JSON.stringify(data).slice(0, 300)}`)
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('Wan task') && err?.message?.includes('failed')) {
+        throw err
+      }
+      console.warn(`[WAN-POLL] taskId=${taskId} 轮询异常:`, err?.message)
+    }
+  }
+  throw new Error(`Wan task ${taskId} timeout after ${pollTimeoutSec}s`)
+}
+
+/** 通义万象高层接口：submit + poll 一气呵成 */
+export async function generateWanVideo(params: WanSubmitParams & { pollTimeoutSec?: number; pollIntervalMs?: number }): Promise<{ videoUrl: string; taskId: string }> {
+  const { taskId } = await submitWanVideo(params)
+  console.log(`[WAN] 任务入队成功 taskId=${taskId}`)
+  const videoUrl = await pollWanTask(
+    taskId,
+    params.pollTimeoutSec ?? 300,
+    params.pollIntervalMs ?? 5000
+  )
+  return { videoUrl, taskId }
 }
 
 // ==================== Veo 视频生成（2026-05-17 替代 Hailuo）====================
@@ -2282,6 +2446,25 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
   const hasLastFrame = !!lastFrameUrl
 
   console.log(`[VIDEO-DIRECT] 生成直生视频 model=${model} hasLastFrame=${hasLastFrame} aspectRatio=${aspectRatio}`)
+
+  // 0) 通义万象：图生视频（已验证可用）
+  if (m.includes('wan')) {
+    // 通义万象当前仅支持单首帧，尾帧忽略
+    if (hasLastFrame) {
+      console.warn('[VIDEO-DIRECT] Wan 仅支持首帧，忽略尾帧')
+    }
+    const { videoUrl, taskId } = await generateWanVideo({
+      prompt,
+      imageUrl: firstFrameUrl,
+      model,
+      resolution: '480P',
+      promptExtend: true,
+      audio: true,
+      pollTimeoutSec,
+      pollIntervalMs,
+    })
+    return { videoUrl, model, taskId }
+  }
 
   // 1) Hailuo：支持 first_frame_image + last_frame_image
   if (m.includes('hailuo') || m.includes('minimax')) {

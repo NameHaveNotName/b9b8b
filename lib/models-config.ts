@@ -220,29 +220,36 @@ export const TEXT_MODELS = {
 }
 
 export const VIDEO_MODELS = {
-  // 工作指令.txt（2026-05-17 Phase 1）：宣传片切换为 Veo 替代 Hailuo。
-  //   primary  → Veo veo3-fast-frames（POST /v1/video/create，首帧图生视频，5s 片段）
-  //   fallback → 即梦 jimeng-video（POST /jimeng/submit/videos，作为备选）
+  // 2026-06-24: 通义万象 wan2.5-i2v-preview 已验证可用（yunwu.ai /alibailian/...）
+  //   primary  → 通义万象 wan2.5-i2v-preview（POST /alibailian/api/v1/services/aigc/video-generation/video-synthesis）
+  //   fallback → Veo veo3-fast-frames（当前 503 无渠道，保留待恢复）
   //   mockMode 保留，作为最后兜底（Ken Burns）。
-  //
-  // 历史背景（Round 8）：原 primary=jimeng-video / fallback=minimax-hailuo,
-  // 因 Hailuo 代理返回 file_id 但无下载端点（503）改用 Veo。
   trailer: {
-    primary: 'veo3-fast-frames',
-    fallback: 'jimeng-video',
-    mockMode: false,           // Phase 1 起切到 Veo;Veo/Jimeng 全部失败时 generateOneSegment 仍兜底 Ken Burns
-    duration: 5,               // 每段 5 秒
+    primary: 'wan2.5-i2v-preview',
+    fallback: 'veo3-fast-frames',
+    mockMode: false,
+    duration: 5,
     aspectRatio: '16:9',
   },
 
-  // 工作指令.txt（2026-05-26 Phase 4 / 修正版）：直生视频模型配置
+  // 2026-06-24: 直生视频同步接入通义万象
   // 基于供应商代理实际支持的端点配置
+  //   - Wan: /alibailian/api/v1/services/aigc/video-generation/video-synthesis ✅ 已验证
   //   - Hailuo: /minimax/v1/video_generation，支持 first_frame_image + last_frame_image ✅ 已验证
   //   - Veo: 503 渠道未开通，暂不配置
   //   - Jimeng: 503 渠道未开通，暂不配置
   direct: {
-    primary: 'minimax-hailuo-2.3',
+    primary: 'wan2.5-i2v-preview',
     available: [
+      {
+        id: 'wan2.5-i2v-preview',
+        label: '通义万象 Wan 2.5 I2V · 阿里',
+        short: '万象',
+        provider: 'Alibaba',
+        price: 0.5,
+        tags: ['图生视频', '已验证', '音频'],
+        supportedModes: ['first-frame'],
+      },
       {
         id: 'minimax-hailuo-2.3',
         label: '海螺 Hailuo 2.3 · MiniMax',
@@ -264,6 +271,7 @@ export type VideoModelId = typeof VIDEO_MODELS.direct.available[number]['id'];
 
 /** 视频模型简称映射 */
 export const VIDEO_MODEL_SHORT_NAME: Record<string, string> = {
+  'wan2.5-i2v-preview': '万象',
   'minimax-hailuo-2.3': '海螺',
 };
 
