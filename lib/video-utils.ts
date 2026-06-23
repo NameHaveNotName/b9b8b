@@ -29,55 +29,88 @@ const execAsync = promisify(exec)
  * 需要多层兜底确保找到有效的 ffmpeg 可执行文件。
  */
 function resolveFfmpegPath(): string {
-  // 0. 环境变量最高优先级（Docker 内可覆盖）
-  if (process.env.FFMPEG_PATH && fsSync.existsSync(process.env.FFMPEG_PATH)) {
-    console.log('[FFMPEG] 使用环境变量 FFMPEG_PATH:', process.env.FFMPEG_PATH)
-    return process.env.FFMPEG_PATH
-  }
+  console.log('[FFMPEG] resolveFfmpegPath cwd=', process.cwd(), 'platform=', process.platform)
+
+  // 0. 环境变量最高优先级（Docker/Vercel 内可覆盖）
   if (process.env.FFMPEG_PATH) {
-    console.log('[FFMPEG] 使用环境变量 FFMPEG_PATH（未校验存在）:', process.env.FFMPEG_PATH)
-    return process.env.FFMPEG_PATH
+    const envPath = path.isAbsolute(process.env.FFMPEG_PATH)
+      ? process.env.FFMPEG_PATH
+      : path.join(process.cwd(), process.env.FFMPEG_PATH)
+    if (fsSync.existsSync(envPath)) {
+      console.log('[FFMPEG] 使用环境变量 FFMPEG_PATH:', envPath)
+      return envPath
+    }
+    console.log('[FFMPEG] 环境变量 FFMPEG_PATH 文件不存在:', envPath)
   }
 
   // 1. ffmpeg-static 直接返回的路径（开发模式正常）
-  if (ffmpegStatic && fsSync.existsSync(ffmpegStatic)) {
-    console.log('[FFMPEG] 使用 ffmpeg-static 路径:', ffmpegStatic)
-    return ffmpegStatic
+  console.log('[FFMPEG] ffmpeg-static import value:', ffmpegStatic)
+  if (ffmpegStatic) {
+    if (fsSync.existsSync(ffmpegStatic)) {
+      console.log('[FFMPEG] 使用 ffmpeg-static 路径:', ffmpegStatic)
+      return ffmpegStatic
+    }
+    console.log('[FFMPEG] ffmpeg-static 路径文件不存在:', ffmpegStatic)
   }
 
   // 2. 尝试 require.resolve 获取 node_modules 中的真实路径
   try {
     const resolvedPath = require.resolve('ffmpeg-static')
+    console.log('[FFMPEG] require.resolve(ffmpeg-static)=', resolvedPath)
     if (fsSync.existsSync(resolvedPath)) {
-      console.log('[FFMPEG] 使用 require.resolve 路径:', resolvedPath)
-      return resolvedPath
+      // resolvedPath 通常是 index.js，同目录下应该有 ffmpeg 可执行文件
+      const dir = path.dirname(resolvedPath)
+      const candidates = [
+        path.join(dir, 'ffmpeg'),
+        path.join(dir, 'ffmpeg.exe'),
+        resolvedPath,
+      ]
+      for (const c of candidates) {
+        if (fsSync.existsSync(c)) {
+          console.log('[FFMPEG] 使用 node_modules 候选路径:', c)
+          return c
+        }
+      }
+    }
+  } catch (err: any) {
+    console.log('[FFMPEG] require.resolve(ffmpeg-static) 失败:', err?.message)
+  }
+
+  // 3. 直接尝试 node_modules/ffmpeg-static/ffmpeg 或 ffmpeg.exe
+  try {
+    const nmPaths = [
+      path.join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg'),
+      path.join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe'),
+    ]
+    for (const nmPath of nmPaths) {
+      if (fsSync.existsSync(nmPath)) {
+        console.log('[FFMPEG] 使用 node_modules 直接路径:', nmPath)
+        return nmPath
+      }
     }
   } catch {}
 
-  // 3. 直接尝试 node_modules/ffmpeg-static/ffmpeg.exe
-  try {
-    const nmPath = path.join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe')
-    if (fsSync.existsSync(nmPath)) {
-      console.log('[FFMPEG] 使用 node_modules 路径:', nmPath)
-      return nmPath
+  // 4. 项目根目录兜底（构建脚本可能已下载静态 ffmpeg）
+  const localCandidates = [
+    path.join(process.cwd(), 'ffmpeg'),
+    path.join(process.cwd(), 'ffmpeg.exe'),
+  ]
+  for (const localPath of localCandidates) {
+    if (fsSync.existsSync(localPath)) {
+      console.log('[FFMPEG] 使用项目根目录路径:', localPath)
+      return localPath
     }
-  } catch {}
+  }
 
-  // 4. 系统 PATH 中的 ffmpeg
+  // 5. 系统 PATH 中的 ffmpeg（Linux 用 which，Windows 用 where）
   try {
-    const sysPath = execSync('where ffmpeg', { encoding: 'utf8' }).trim().split('\n')[0]
+    const cmd = process.platform === 'win32' ? 'where ffmpeg' : 'which ffmpeg'
+    const sysPath = execSync(cmd, { encoding: 'utf8' }).trim().split('\n')[0]
     if (sysPath && fsSync.existsSync(sysPath)) {
       console.log('[FFMPEG] 使用系统 PATH 路径:', sysPath)
       return sysPath
     }
   } catch {}
-
-  // 5. 项目根目录兜底
-  const localPath = path.join(process.cwd(), 'ffmpeg.exe')
-  if (fsSync.existsSync(localPath)) {
-    console.log('[FFMPEG] 使用项目根目录路径:', localPath)
-    return localPath
-  }
 
   // 6. 最终兜底：直接调用 ffmpeg（依赖系统 PATH）
   console.warn('[FFMPEG] 未找到 ffmpeg 可执行文件，尝试直接调用系统 PATH 中的 ffmpeg')
