@@ -2,7 +2,7 @@
 const nextConfig = {
   experimental: {
     // 标记重型模块为外部依赖，不打包进 serverless function
-    serverExternalPackages: [
+    serverComponentsExternalPackages: [
       'bullmq',
       'sharp',
       '@img/sharp-libvips-linux-x64',
