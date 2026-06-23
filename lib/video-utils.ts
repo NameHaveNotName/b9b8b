@@ -43,7 +43,22 @@ function resolveFfmpegPath(): string {
     console.log('[FFMPEG] 环境变量 FFMPEG_PATH 文件不存在:', envPath)
   }
 
-  // 1. ffmpeg-static 直接返回的路径（开发模式正常）
+  // 1. 构建脚本复制到项目根目录的静态 ffmpeg（Vercel 最可靠）
+  const buildDownloadedCandidates = [
+    path.join(process.cwd(), 'ffmpeg'),
+    path.join(process.cwd(), 'ffmpeg.exe'),
+    '/var/task/ffmpeg',
+    '/var/task/ffmpeg.exe',
+    '/tmp/ffmpeg',
+  ]
+  for (const p of buildDownloadedCandidates) {
+    if (fsSync.existsSync(p)) {
+      console.log('[FFMPEG] 使用构建脚本下载的静态 ffmpeg:', p)
+      return p
+    }
+  }
+
+  // 2. ffmpeg-static 直接返回的路径
   console.log('[FFMPEG] ffmpeg-static import value:', ffmpegStatic)
   if (ffmpegStatic) {
     if (fsSync.existsSync(ffmpegStatic)) {
@@ -53,34 +68,33 @@ function resolveFfmpegPath(): string {
     console.log('[FFMPEG] ffmpeg-static 路径文件不存在:', ffmpegStatic)
   }
 
-  // 2. 尝试 require.resolve 获取 node_modules 中的真实路径
+  // 3. 尝试 require.resolve 获取 node_modules 中的真实路径
   try {
     const resolvedPath = require.resolve('ffmpeg-static')
     console.log('[FFMPEG] require.resolve(ffmpeg-static)=', resolvedPath)
-    if (fsSync.existsSync(resolvedPath)) {
-      // resolvedPath 通常是 index.js，同目录下应该有 ffmpeg 可执行文件
-      const dir = path.dirname(resolvedPath)
-      const candidates = [
-        path.join(dir, 'ffmpeg'),
-        path.join(dir, 'ffmpeg.exe'),
-        resolvedPath,
-      ]
-      for (const c of candidates) {
-        if (fsSync.existsSync(c)) {
-          console.log('[FFMPEG] 使用 node_modules 候选路径:', c)
-          return c
-        }
+    const dir = path.dirname(resolvedPath)
+    const candidates = [
+      path.join(dir, 'ffmpeg'),
+      path.join(dir, 'ffmpeg.exe'),
+      resolvedPath,
+    ]
+    for (const c of candidates) {
+      if (fsSync.existsSync(c)) {
+        console.log('[FFMPEG] 使用 node_modules 候选路径:', c)
+        return c
       }
     }
   } catch (err: any) {
     console.log('[FFMPEG] require.resolve(ffmpeg-static) 失败:', err?.message)
   }
 
-  // 3. 直接尝试 node_modules/ffmpeg-static/ffmpeg 或 ffmpeg.exe
+  // 4. 直接尝试 node_modules/ffmpeg-static/ffmpeg 或 ffmpeg.exe
   try {
     const nmPaths = [
       path.join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg'),
       path.join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe'),
+      '/var/task/node_modules/ffmpeg-static/ffmpeg',
+      '/var/task/node_modules/ffmpeg-static/ffmpeg.exe',
     ]
     for (const nmPath of nmPaths) {
       if (fsSync.existsSync(nmPath)) {
@@ -89,20 +103,6 @@ function resolveFfmpegPath(): string {
       }
     }
   } catch {}
-
-  // 4. 项目根目录兜底（构建脚本可能已下载静态 ffmpeg）
-  const localCandidates = [
-    path.join(process.cwd(), 'ffmpeg'),
-    path.join(process.cwd(), 'ffmpeg.exe'),
-    '/var/task/ffmpeg',
-    '/tmp/ffmpeg',
-  ]
-  for (const localPath of localCandidates) {
-    if (fsSync.existsSync(localPath)) {
-      console.log('[FFMPEG] 使用项目根目录/系统兜底路径:', localPath)
-      return localPath
-    }
-  }
 
   // 5. 系统 PATH 中的 ffmpeg（Linux 用 which，Windows 用 where）
   try {

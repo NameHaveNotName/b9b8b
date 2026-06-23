@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    // Vercel 构建脚本会把静态 ffmpeg 下载到项目根目录 ./ffmpeg
+    // 运行时 cwd 为 /var/task，所以相对路径 ./ffmpeg 指向 /var/task/ffmpeg
+    FFMPEG_PATH: './ffmpeg',
+  },
   experimental: {
     // 标记重型模块为外部依赖，不打包进 serverless function
     // 注意：lucide-react / recharts 不能同时出现在 transpilePackages 和本列表中，故移除
