@@ -133,11 +133,29 @@ function resolveFfmpegPath(): string {
   return 'ffmpeg'
 }
 
+/** 验证 ffmpeg 是否可执行；不可执行时抛出诊断错误 */
+function validateFfmpegPath(binPath: string): string {
+  try {
+    const version = execSync(`"${binPath}" -version`, { encoding: 'utf8', timeout: 5000 })
+    console.log('[FFMPEG] 验证成功:', version.split('\n')[0])
+    return binPath
+  } catch (err: any) {
+    console.error(`[FFMPEG] 验证失败 (${binPath}):`, err?.message)
+    throw new Error(
+      `ffmpeg 不可执行: ${binPath}\n` +
+        `cwd=${process.cwd()} platform=${process.platform}\n` +
+        `FFMPEG_PATH=${process.env.FFMPEG_PATH || '(unset)'}\n` +
+        `请检查 Vercel Build Logs 中 [BUILD] 是否成功下载 ffmpeg。`
+    )
+  }
+}
+
 // ffmpeg 二进制路径改为懒解析，避免构建阶段执行系统探测命令
 let _FFMPEG_BIN: string | undefined;
 function getFfmpegBin(): string {
   if (!_FFMPEG_BIN) {
-    _FFMPEG_BIN = resolveFfmpegPath();
+    const resolved = resolveFfmpegPath();
+    _FFMPEG_BIN = validateFfmpegPath(resolved);
   }
   return _FFMPEG_BIN;
 }
