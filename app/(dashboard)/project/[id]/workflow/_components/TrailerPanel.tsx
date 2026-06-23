@@ -233,20 +233,6 @@ export default function TrailerPanel({
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {summary?.pending > 0 && (
-              <button
-                onClick={handleGenerateAll}
-                disabled={isExecuting}
-                className="flex items-center gap-1 rounded-md bg-stone-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-              >
-                {isExecuting ? (
-                  <LoaderCircle className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Play className="h-3 w-3" />
-                )}
-                批量生成
-              </button>
-            )}
             {/* 生成背景音乐 */}
             {musicUrl ? (
               <button
