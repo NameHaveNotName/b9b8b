@@ -127,25 +127,13 @@ function detectWritableTempRoot(): string {
     return root
   }
 
-  // 运行时测试 /tmp 是否可写（Vercel Serverless / Lambda / Docker 等）
-  try {
-    const testDir = path.join('/tmp', `write-test-${Date.now()}`)
-    fsSync.mkdirSync(testDir, { recursive: true })
-    fsSync.rmdirSync(testDir)
-    _writableTempRoot = '/tmp'
-    console.log('[TEMP] 使用 /tmp 作为临时目录根')
-    return '/tmp'
-  } catch {}
+  // Linux/macOS Serverless (Vercel/Lambda/Docker): /tmp 可写
+  // Windows 本地开发: 回退到项目 .temp
+  if (process.platform === 'win32') {
+    _writableTempRoot = path.join(process.cwd(), '.temp')
+    return _writableTempRoot
+  }
 
-  // 本地开发兜底
-  const localRoot = path.join(process.cwd(), '.temp')
-  try {
-    fsSync.mkdirSync(localRoot, { recursive: true })
-    _writableTempRoot = localRoot
-    return localRoot
-  } catch {}
-
-  // 最终兜底
   _writableTempRoot = '/tmp'
   return '/tmp'
 }
@@ -157,6 +145,7 @@ export function makeTempDir(prefix = 'trailer-'): string {
     fsSync.mkdirSync(tempRoot, { recursive: true })
   }
   const dir = path.join(tempRoot, `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  console.log(`[TEMP] makeTempDir: ${dir}`)
   return dir
 }
 
