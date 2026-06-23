@@ -23,10 +23,12 @@
       "maxDuration": 300
     },
     "app/api/projects/[id]/steps/trailer/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "ffmpeg"
     },
     "app/api/projects/[id]/steps/video-direct/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "ffmpeg"
     }
   }
 }
