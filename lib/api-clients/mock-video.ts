@@ -100,7 +100,6 @@ import { generateText, generateVideoFromImage, generateMusic, generateMusicMinim
 import { generateMusicQwen } from './dashscope'
 import { TEXT_MODELS, VIDEO_MODELS, MUSIC_MODELS } from '../models-config'
 import {
-  makeTempDir,
   ensureDir,
   removeDir,
   downloadUrlToTemp,
@@ -111,6 +110,7 @@ import {
   trimAudio,
   trimVideo,
 } from '../video-utils'
+import { makeTempDir } from '../temp-utils'
 
 /**
  * 工作指令.txt（Phase 2 修复）：ffmpeg 路径解析 + 兜底逻辑（与 video-utils.ts 一致）。

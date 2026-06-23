@@ -116,38 +116,8 @@ async function runFfmpeg(stage: string, cmd: string, maxBuffer = 64 * 1024 * 102
   }
 }
 
-let _writableTempRoot: string | undefined
-
-function detectWritableTempRoot(): string {
-  if (_writableTempRoot) return _writableTempRoot
-
-  if (process.env.TEMP_DIR) {
-    const root = path.resolve(process.env.TEMP_DIR)
-    _writableTempRoot = root
-    return root
-  }
-
-  // Linux/macOS Serverless (Vercel/Lambda/Docker): /tmp 可写
-  // Windows 本地开发: 回退到项目 .temp
-  if (process.platform === 'win32') {
-    _writableTempRoot = path.join(process.cwd(), '.temp')
-    return _writableTempRoot
-  }
-
-  _writableTempRoot = '/tmp'
-  return '/tmp'
-}
-
-/** 在项目 .temp 目录建一个本轮专用的子目录，方便事后批量清理 */
-export function makeTempDir(prefix = 'trailer-'): string {
-  const tempRoot = detectWritableTempRoot()
-  if (!fsSync.existsSync(tempRoot)) {
-    fsSync.mkdirSync(tempRoot, { recursive: true })
-  }
-  const dir = path.join(tempRoot, `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-  console.log(`[TEMP] makeTempDir: ${dir}`)
-  return dir
-}
+import { makeTempDir } from './temp-utils'
+export { makeTempDir }
 
 export async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true })

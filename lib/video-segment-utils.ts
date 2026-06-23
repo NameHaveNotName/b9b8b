@@ -12,8 +12,8 @@ import { generateText, generateVideoFromImage, generateDirectVideo as generateDi
 import { TEXT_MODELS, VIDEO_MODELS } from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
 import { generateTrailerBgm } from './bgm-generator'
+import { makeTempDir } from './temp-utils'
 import {
-  makeTempDir,
   ensureDir,
   removeDir,
   downloadUrlToTemp,
