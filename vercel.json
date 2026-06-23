@@ -1,5 +1,5 @@
 {
-  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then echo 'Running prisma migrate deploy...' && timeout 180 npx prisma migrate deploy; fi && next build",
+  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then if [ -z \"$DIRECT_URL\" ]; then echo 'Error: DIRECT_URL is not set. Please set it to your Supabase direct connection URL (port 5432).'; exit 1; fi; echo 'Running prisma migrate deploy...' && timeout 180 npx prisma migrate deploy; fi && next build",
   "outputDirectory": ".next",
   "installCommand": "npm install",
   "framework": "nextjs",
