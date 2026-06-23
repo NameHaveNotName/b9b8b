@@ -1,5 +1,8 @@
 export const dynamic = 'force-dynamic'
 
+// Vercel Serverless 强制使用 /tmp 作为临时目录，防止构建缓存导致旧 makeTempDir 回退到 /var/task/.temp
+process.env.TEMP_DIR = '/tmp'
+
 import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
