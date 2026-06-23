@@ -56,12 +56,13 @@ function SegmentCard({
   return (
     <div
       className={cn(
-        'group relative overflow-hidden rounded-lg border bg-white transition hover:shadow-md',
+        'group flex items-stretch gap-4 overflow-hidden rounded-lg border bg-white transition hover:shadow-md',
         highlighted ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-stone-200'
       )}
       onDoubleClick={() => onDoubleClick(index)}
     >
-      <div className="relative aspect-video overflow-hidden rounded-lg bg-stone-100">
+      {/* 左侧媒体区 */}
+      <div className="relative shrink-0 w-48 aspect-video overflow-hidden bg-stone-100">
         {segment.status === 'completed' && segment.videoUrl ? (
           <video
             src={segment.videoUrl}
@@ -99,29 +100,32 @@ function SegmentCard({
           </div>
         )}
 
+        <span className="absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white">
+          {segment.shotId}
+        </span>
+      </div>
+
+      {/* 中间描述区 */}
+      <div className="flex min-w-0 flex-1 flex-col justify-center py-3 pr-2">
+        <p className="text-sm font-semibold text-stone-800 line-clamp-1">
+          {segment.caption || '无描述'}
+        </p>
+        <p className="mt-1 text-xs text-stone-500 line-clamp-2">
+          {segment.prompt?.slice(0, 120)}...
+        </p>
+      </div>
+
+      {/* 右侧详情区 */}
+      <div className="flex w-28 shrink-0 flex-col items-end justify-between border-l border-stone-100 py-3 pl-4 pr-4">
         <span
           className={cn(
-            'absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-medium',
+            'rounded-full px-2 py-0.5 text-[10px] font-medium',
             badgeClass
           )}
         >
           {label}
         </span>
-      </div>
-
-      <div className="p-3">
-        <div className="flex items-center gap-2">
-          <span className="rounded bg-stone-800 px-2 py-0.5 font-mono text-xs font-medium text-white">
-            {segment.shotId}
-          </span>
-          <span className="text-sm font-medium text-stone-800 line-clamp-1">
-            {segment.caption || '无描述'}
-          </span>
-        </div>
-        <p className="mt-1.5 text-[11px] text-stone-400 line-clamp-2">
-          {segment.prompt?.slice(0, 80)}...
-        </p>
-        <div className="mt-2 flex items-center justify-between">
+        <div className="flex flex-col items-end gap-1">
           <span className="text-xs text-stone-400">{segment.duration || 5}s</span>
           {segment.status === 'pending' && (
             <button
@@ -290,7 +294,7 @@ export default function TrailerPanel({
           <h3 className="mb-3 text-sm font-semibold text-stone-700">
             片段 ({segments.length})
           </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="flex flex-col gap-3">
             {segments.map((segment: any, index: number) => (
               <SegmentCard
                 key={segment.id}
@@ -369,7 +373,7 @@ export default function TrailerPanel({
 
         {/* 下半部分：独立滚动分镜区 */}
         <div className="flex-1 overflow-y-auto min-h-0">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="flex flex-col gap-3">
             {segments.map((segment: any, index: number) => (
               <SegmentCard
                 key={segment.id}
