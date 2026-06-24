@@ -266,14 +266,14 @@ export default function TrailerPanel({
 
   if (combinedVideoUrl) {
     return (
-      <div className="flex flex-col h-[calc(100vh-16rem)]">
+      <div className="flex flex-col h-[calc(100vh-8rem)]">
         {/* 上半部分：常驻播放区 */}
         <div className="shrink-0 bg-white pb-4 pt-2">
           <video
             ref={videoRef}
             src={combinedVideoUrl}
             controls
-            className="w-full rounded-lg max-h-[min(50vh,24rem)]"
+            className="w-full rounded-lg max-h-[min(35vh,20rem)]"
           />
           <div className="mt-2 flex items-center justify-between text-sm text-stone-500">
             <span>总时长: {formatTime(totalDuration)}</span>
@@ -318,7 +318,7 @@ export default function TrailerPanel({
 
   if (hasSegments) {
     return (
-      <div className="flex flex-col h-[calc(100vh-16rem)]">
+      <div className="flex flex-col h-[calc(100vh-8rem)]">
         {/* 上半部分：操作区 */}
         <div className="shrink-0 flex items-center justify-between pb-4">
           <div>
