@@ -247,29 +247,49 @@ export async function downloadUrlToTemp(url: string, outputPath: string): Promis
   return outputPath
 }
 
+function resolveKenBurnsSize(aspectRatio?: string): string {
+  switch (aspectRatio) {
+    case '9:16':
+      return '1080x1920'
+    case '1:1':
+      return '1080x1080'
+    case '4:3':
+      return '1440x1080'
+    case '3:4':
+      return '1080x1440'
+    case '21:9':
+      return '2520x1080'
+    case '16:9':
+    default:
+      return '1920x1080'
+  }
+}
+
 /**
  * 工作指令.txt（Round 7）：单图生成 5 秒 Ken Burns 视频（缓慢缩放，模拟运镜）。
  *
- * 输出参数：1920x1080 / 25fps / yuv420p / libx264，方便后续 concat 时无须再次转码。
+ * 输出参数：按 aspectRatio 决定分辨率 / 25fps / yuv420p / libx264，方便后续 concat 时无须再次转码。
  *
  * 关键参数：
  *   - zoompan z='min(zoom+0.0015,1.5)'：每帧放大 0.0015，最多 1.5 倍
  *   - d=125：125 帧（25fps × 5s）
- *   - s=1920x1080：输出尺寸
+ *   - s=<尺寸>：输出尺寸
  */
 export async function kenBurnsClipFromImage(
   imagePath: string,
   outputPath: string,
-  durationSec = 5
+  durationSec = 5,
+  aspectRatio?: string
 ): Promise<string> {
   const fps = 25
   const totalFrames = fps * durationSec
+  const size = resolveKenBurnsSize(aspectRatio)
   const filter = [
     `zoompan=z='min(zoom+0.0015,1.5)'`,
     `d=${totalFrames}`,
     `x='iw/2-(iw/zoom/2)'`,
     `y='ih/2-(ih/zoom/2)'`,
-    `s=1920x1080`,
+    `s=${size}`,
   ].join(':')
 
   const cmd = [
@@ -290,20 +310,43 @@ export async function kenBurnsClipFromImage(
   return outputPath
 }
 
+function resolveConcatSize(aspectRatio?: string): { width: number; height: number } {
+  switch (aspectRatio) {
+    case '9:16':
+      return { width: 1080, height: 1920 }
+    case '1:1':
+      return { width: 1080, height: 1080 }
+    case '4:3':
+      return { width: 1440, height: 1080 }
+    case '3:4':
+      return { width: 1080, height: 1440 }
+    case '21:9':
+      return { width: 2520, height: 1080 }
+    case '16:9':
+    default:
+      return { width: 1920, height: 1080 }
+  }
+}
+
 /**
  * 工作指令.txt（Round 7）：把多段视频拼接成 1 段。
  *
  * 用 concat demuxer + 重新编码（不能用 -c copy，因为 Veo / Ken Burns 输出参数可能不同）。
- * 输出统一为：1920x1080 / 25fps / yuv420p / libx264 / aac stereo。
+ * 输出统一为 targetAspectRatio 对应的分辨率 / 25fps / yuv420p / libx264 / aac stereo。
  *
  * 2026-06-12 改造：拼接阶段保留音频流（删除 -an），直出视频可直接使用；
  * 宣传片后续再用 mixAudioVideo 将原声与 BGM 混音。
  */
-export async function concatVideos(segmentPaths: string[], outputPath: string): Promise<string> {
+export async function concatVideos(
+  segmentPaths: string[],
+  outputPath: string,
+  targetAspectRatio?: string
+): Promise<string> {
   if (segmentPaths.length === 0) throw new Error('concatVideos: 空数组')
 
   const tempDir = path.dirname(outputPath)
   const listPath = path.join(tempDir, `concat-${Date.now()}.txt`)
+  const { width, height } = resolveConcatSize(targetAspectRatio)
 
   // concat demuxer 文件格式：file 'absolute path'
   // Windows 下需要把反斜杠转为正斜杠或转义，否则 ffmpeg 解析失败
@@ -323,7 +366,7 @@ export async function concatVideos(segmentPaths: string[], outputPath: string): 
     `-c:v libx264`,
     `-pix_fmt yuv420p`,
     `-r 25`,
-    `-vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"`,
+    `-vf "scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2"`,
     `-c:a aac`,
     `-b:a 128k`, // 保留/统一音频编码，直出视频可带原声
     `-movflags +faststart`,

@@ -93,7 +93,8 @@ async function backgroundGenerateSegment(
   prompt: string,
   imageUrl: string,
   duration: number,
-  videoModel?: string
+  videoModel?: string,
+  aspectRatio?: string
 ) {
   try {
     console.log(`[SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
@@ -106,6 +107,7 @@ async function backgroundGenerateSegment(
       imageUrl,
       duration,
       videoModel,
+      aspectRatio,
     })
 
     // 更新 VideoSegment
@@ -153,7 +155,8 @@ async function backgroundGenerateSegment(
 /** 后台合成视频 */
 async function backgroundComposeVideo(
   projectId: string,
-  stepName: 'TRAILER' | 'VIDEO_DIRECT'
+  stepName: 'TRAILER' | 'VIDEO_DIRECT',
+  aspectRatio?: string
 ) {
   try {
     console.log(`[COMPOSE-BG] 开始合成 projectId=${projectId}`)
@@ -176,6 +179,7 @@ async function backgroundComposeVideo(
         videoUrl: s.videoUrl,
         duration: s.duration,
       })),
+      aspectRatio,
     })
 
     console.log(`[COMPOSE-BG] 合成完成 videoUrl=${result.videoUrl}`)
@@ -460,7 +464,8 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
     segment.prompt,
     imageUrl,
     segment.duration || 5,
-    body?.videoModel
+    body?.videoModel,
+    body?.aspectRatio
   ))
 
   return NextResponse.json({
@@ -513,7 +518,8 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
         segment.prompt,
         imageUrl,
         segment.duration || 5,
-        body?.videoModel
+        body?.videoModel,
+        body?.aspectRatio
       )
     }
   })())
@@ -528,7 +534,7 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
 }
 
 /** 合成视频 */
-async function handleComposeVideo(projectId: string, stepId: string) {
+async function handleComposeVideo(projectId: string, stepId: string, body?: any) {
   const segments = await prisma.videoSegment.findMany({
     where: { projectId, stepName: 'TRAILER' },
     orderBy: { sequence: 'asc' },
@@ -548,7 +554,7 @@ async function handleComposeVideo(projectId: string, stepId: string) {
   }
 
   // 后台合成
-  waitUntil(backgroundComposeVideo(projectId, 'TRAILER'))
+  waitUntil(backgroundComposeVideo(projectId, 'TRAILER', body?.aspectRatio))
 
   return NextResponse.json({
     success: true,

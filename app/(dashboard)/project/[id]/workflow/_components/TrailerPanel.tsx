@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import useSWR from 'swr'
 import { LoaderCircle, Play, RefreshCw, Film, Music } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ASPECT_RATIO_OPTIONS } from '@/lib/models-config'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 
@@ -32,8 +33,9 @@ interface SegmentCardProps {
   index: number
   highlighted: boolean
   onDoubleClick: (index: number) => void
-  onGenerate: (segmentId: string) => void
+  onGenerate: (segmentId: string, aspectRatio: string) => void
   isExecuting: boolean
+  aspectRatio: string
 }
 
 function SegmentCard({
@@ -43,6 +45,7 @@ function SegmentCard({
   onDoubleClick,
   onGenerate,
   isExecuting,
+  aspectRatio,
 }: SegmentCardProps) {
   const statusConfig: Record<string, { label: string; className: string }> = {
     completed: { label: '已完成', className: 'bg-emerald-50 text-emerald-700' },
@@ -129,7 +132,7 @@ function SegmentCard({
           <span className="text-xs text-stone-400">{segment.duration || 5}s</span>
           {segment.status === 'pending' && (
             <button
-              onClick={() => onGenerate(segment.id)}
+              onClick={() => onGenerate(segment.id, aspectRatio)}
               disabled={isExecuting}
               className="flex items-center gap-1 rounded bg-stone-800 px-2 py-1 text-[10px] text-white transition hover:bg-stone-700 disabled:opacity-50"
             >
@@ -139,7 +142,7 @@ function SegmentCard({
           )}
           {segment.status === 'failed' && (
             <button
-              onClick={() => onGenerate(segment.id)}
+              onClick={() => onGenerate(segment.id, aspectRatio)}
               disabled={isExecuting}
               className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] text-white transition hover:bg-red-700 disabled:opacity-50"
             >
@@ -161,9 +164,16 @@ export default function TrailerPanel({
   readOnly,
 }: TrailerPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+
+  // 从 step.outputData 读取合成结果（video-segments API 不再返回 combinedVideoUrl/bgmUrl）
+  const stepOutput = (step?.outputData as any) || {}
+
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null)
   const [isComposing, setIsComposing] = useState(false)
   const [isGeneratingBgm, setIsGeneratingBgm] = useState(false)
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState(
+    stepOutput.aspectRatio || '16:9'
+  )
 
   const { data: segmentData } = useSWR(
     `/api/projects/${projectId}/video-segments?stepName=TRAILER`,
@@ -174,8 +184,6 @@ export default function TrailerPanel({
   const segments = segmentData?.segments || []
   const summary = segmentData?.summary
 
-  // 从 step.outputData 读取合成结果（video-segments API 不再返回 combinedVideoUrl/bgmUrl）
-  const stepOutput = (step?.outputData as any) || {}
   const combinedVideoUrl = stepOutput.combinedVideoUrl || stepOutput.videoUrl || null
   const combinedVideoStatus = stepOutput.combinedVideoStatus || null
   const musicUrl = stepOutput.musicUrl || null
@@ -237,8 +245,8 @@ export default function TrailerPanel({
     [segments, combinedVideoUrl]
   )
 
-  const handleGenerateSegment = (segmentId: string) => {
-    onExecute('TRAILER', { action: 'generate-segment-video', segmentId })
+  const handleGenerateSegment = (segmentId: string, aspectRatio: string) => {
+    onExecute('TRAILER', { action: 'generate-segment-video', segmentId, aspectRatio })
   }
 
   const handleGeneratePrompts = () => {
@@ -246,12 +254,12 @@ export default function TrailerPanel({
   }
 
   const handleGenerateAll = () => {
-    onExecute('TRAILER', { action: 'generate-all-segments' })
+    onExecute('TRAILER', { action: 'generate-all-segments', aspectRatio: selectedAspectRatio })
   }
 
   const handleCompose = () => {
     setIsComposing(true)
-    onExecute('TRAILER', { action: 'compose-video' })
+    onExecute('TRAILER', { action: 'compose-video', aspectRatio: selectedAspectRatio })
   }
 
   const formatTime = (seconds: number) => {
@@ -277,7 +285,9 @@ export default function TrailerPanel({
           />
           <div className="mt-2 flex items-center justify-between text-sm text-stone-500">
             <span>总时长: {formatTime(totalDuration)}</span>
-            <span>{segments.length} 个片段</span>
+            <span>
+              {segments.length} 个片段 · 比例: {stepOutput.aspectRatio || '16:9'}
+            </span>
           </div>
           {musicUrl && (
             <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
@@ -304,6 +314,7 @@ export default function TrailerPanel({
                 onDoubleClick={handleDoubleClick}
                 onGenerate={handleGenerateSegment}
                 isExecuting={isExecuting}
+                aspectRatio={selectedAspectRatio}
               />
             ))}
           </div>
@@ -331,6 +342,21 @@ export default function TrailerPanel({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-stone-600 whitespace-nowrap">画面比例</span>
+              <select
+                value={selectedAspectRatio}
+                onChange={(e) => setSelectedAspectRatio(e.target.value)}
+                disabled={isExecuting}
+                className="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs text-stone-700 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-50"
+              >
+                {ASPECT_RATIO_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}（{opt.width}×{opt.height}）
+                  </option>
+                ))}
+              </select>
+            </div>
             {musicUrl ? (
               <button
                 disabled
@@ -383,6 +409,7 @@ export default function TrailerPanel({
                 onDoubleClick={() => {}}
                 onGenerate={handleGenerateSegment}
                 isExecuting={isExecuting}
+                aspectRatio={selectedAspectRatio}
               />
             ))}
           </div>

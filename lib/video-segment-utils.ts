@@ -291,8 +291,9 @@ export async function generateOneVideoSegment(args: {
   imageUrl: string
   duration?: number
   videoModel?: string
+  aspectRatio?: string
 }): Promise<{ storageKey: string; url: string; duration: number; isMock: boolean }> {
-  const { segmentId, projectId, stepName, prompt, imageUrl, duration = 5, videoModel } = args
+  const { segmentId, projectId, stepName, prompt, imageUrl, duration = 5, videoModel, aspectRatio: segmentAspectRatio } = args
 
   const tempDir = makeTempDir(`segment-${projectId}-`)
   await ensureDir(tempDir)
@@ -307,7 +308,7 @@ export async function generateOneVideoSegment(args: {
       const useMockOnly: boolean = trailerCfg.mockMode === true
       const primary: string = trailerCfg.primary || 'veo_3_1-lite'
       const fallback: string = trailerCfg.fallback || ''
-      const aspectRatio: string = trailerCfg.aspectRatio || '16:9'
+      const aspectRatio: string = segmentAspectRatio || trailerCfg.aspectRatio || '16:9'
 
       const segPath = path.join(tempDir, 'segment.mp4')
 
@@ -348,7 +349,7 @@ export async function generateOneVideoSegment(args: {
       console.log(`[SEGMENT ${segmentId}] 走 Ken Burns 兜底`)
       const imgPath = path.join(tempDir, 'input.png')
       await downloadUrlToTemp(imageUrl, imgPath)
-      await kenBurnsClipFromImage(imgPath, segPath, duration)
+      await kenBurnsClipFromImage(imgPath, segPath, duration, aspectRatio)
       const buf = await fsPromises.readFile(segPath)
       const storageKey = `projects/${projectId}/segments/${segmentId}.mp4`
       await uploadFile(storageKey, buf, 'video/mp4')
@@ -416,8 +417,9 @@ export async function composeVideo(args: {
   projectId: string
   stepName: 'TRAILER' | 'VIDEO_DIRECT'
   segments: Array<{ id: string; storageKey?: string | null; videoUrl?: string | null; duration?: number | null }>
+  aspectRatio?: string
 }): Promise<{ videoUrl: string; storageKey: string; duration: number; musicUrl?: string | null; musicIsMock?: boolean }> {
-  const { projectId, stepName, segments } = args
+  const { projectId, stepName, segments, aspectRatio } = args
   const isTrailer = stepName === 'TRAILER'
   const tempDir = makeTempDir(`compose-${projectId}-`)
   await ensureDir(tempDir)
@@ -441,7 +443,7 @@ export async function composeVideo(args: {
 
     // concat 片段
     const concatPath = path.join(tempDir, 'concat.mp4')
-    await concatVideos(segmentPaths, concatPath)
+    await concatVideos(segmentPaths, concatPath, aspectRatio)
     const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
     console.log(`[COMPOSE] concat 完成 ${segments.length} 段，总时长 ${totalDuration}s`)
 

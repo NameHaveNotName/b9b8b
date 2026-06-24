@@ -269,6 +269,17 @@ export const VIDEO_MODELS = {
 
 export type VideoModelId = typeof VIDEO_MODELS.direct.available[number]['id'];
 
+// ==================== 画面比例选项（生图 / 视频生成共用）====================
+
+export const ASPECT_RATIO_OPTIONS = [
+  { label: '横屏 16:9', value: '16:9', width: 1024, height: 576 },
+  { label: '竖屏 9:16', value: '9:16', width: 576, height: 1024 },
+  { label: '方形 1:1', value: '1:1', width: 1024, height: 1024 },
+  { label: '传统 4:3', value: '4:3', width: 1024, height: 768 },
+  { label: '竖版 3:4', value: '3:4', width: 768, height: 1024 },
+  { label: '超宽 21:9', value: '21:9', width: 1344, height: 576 },
+]
+
 /** 视频模型简称映射 */
 export const VIDEO_MODEL_SHORT_NAME: Record<string, string> = {
   'wan2.5-i2v-preview': '万象',

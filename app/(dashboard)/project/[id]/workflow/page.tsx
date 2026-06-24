@@ -35,7 +35,7 @@ import IdeaAnchor from '@/components/workflow/IdeaAnchor'
 import QueueMonitor from '@/components/generation/QueueMonitor'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer'
 import { VISIBLE_STEP_TYPES } from '@/lib/workflow'
-import { IMAGE_MODELS, MODEL_SHORT_NAME, STYLE_MODEL_POOL, VIDEO_MODELS, VIDEO_MODEL_SHORT_NAME } from '@/lib/models-config'
+import { ASPECT_RATIO_OPTIONS, IMAGE_MODELS, MODEL_SHORT_NAME, STYLE_MODEL_POOL, VIDEO_MODELS, VIDEO_MODEL_SHORT_NAME } from '@/lib/models-config'
 import HoverImageBadge from '@/components/generation/HoverImageBadge'
 import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
@@ -2408,19 +2408,6 @@ function AspectAwareImage({
     </div>
   )
 }
-
-/* ============================================================
-   画面比例选项（所有生图步骤共用）
-   ============================================================ */
-
-const ASPECT_RATIO_OPTIONS = [
-  { label: '横屏 16:9', value: '16:9', width: 1024, height: 576 },
-  { label: '竖屏 9:16', value: '9:16', width: 576, height: 1024 },
-  { label: '方形 1:1', value: '1:1', width: 1024, height: 1024 },
-  { label: '传统 4:3', value: '4:3', width: 1024, height: 768 },
-  { label: '竖版 3:4', value: '3:4', width: 768, height: 1024 },
-  { label: '超宽 21:9', value: '21:9', width: 1344, height: 576 },
-]
 
 /* ============================================================
    生图模型选项（所有生图步骤共用，以 models-config.ts 实际配置为准）
