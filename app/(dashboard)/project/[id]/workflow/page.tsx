@@ -3706,13 +3706,43 @@ function StoryboardPanel({
     }
   }
 
-  async function handleRegenerate(shotId: string, aspectRatio?: string, imageModel?: string) {
+  async function handleGenerateSingleShot(actNumber: number, shotId: string) {
+    const { ratio, model } = getActSettings(actNumber)
+    setActProgress(prev => ({ ...prev, [actNumber]: { current: 0, total: 1, shotId } }))
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/storyboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'generate-act-images',
+          actNumber,
+          shotId,
+          aspectRatio: ratio,
+          imageModel: model,
+        }),
+      })
+      const result = await res.json()
+      if (!res.ok || !result.success) throw new Error(result.message || `HTTP ${res.status}`)
+      await mutate()
+      setToast({ kind: 'success', message: `镜头 ${shotId} 生成完成` })
+    } catch (e: any) {
+      onError('生图失败：' + e?.message)
+    } finally {
+      setActProgress(prev => {
+        const next = { ...prev }
+        delete next[actNumber]
+        return next
+      })
+    }
+  }
+
+  async function handleRegenerate(shotId: string, aspectRatio?: string, imageModel?: string, actNumber?: number) {
     setRegeneratingId(shotId)
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shotId, aspectRatio, imageModel }),
+        body: JSON.stringify({ shotId, actNumber, aspectRatio, imageModel }),
       })
       const data = await res.json()
       if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`)
@@ -3780,7 +3810,7 @@ function StoryboardPanel({
         {shotsByAct.map(([actNumber, actShots]) => {
           const actAssetsMap = new Map<string, any>()
           for (const shot of actShots) {
-            const asset = shotAssets.find((a: any) => a.metadata?.shotId === shot.shotId)
+            const asset = shotAssets.find((a: any) => a.metadata?.shotId === shot.shotId && a.metadata?.actNumber === actNumber)
             if (asset) actAssetsMap.set(shot.shotId, asset)
           }
           const generatedCount = actAssetsMap.size
@@ -3868,14 +3898,36 @@ function StoryboardPanel({
                               src={asset.url}
                               aspectRatio={cardRatio}
                               imageModel={cardModel}
-                              onRegenerate={(ar, m) => handleRegenerate(shot.shotId, ar, m)}
+                              onRegenerate={(ar, m) => handleRegenerate(shot.shotId, ar, m, actNumber)}
                               isRegenerating={isRegenerating}
                               anyRegenerating={!!regeneratingId}
                               wrapperClassName="absolute inset-0"
                             />
                           </div>
                         ) : (
-                          <StoryboardMockImage shot={shot} />
+                          <div className="relative flex w-full flex-col items-center justify-center overflow-hidden rounded border-2 border-dashed border-stone-300 bg-stone-100" style={{ aspectRatio: '16/9' }}>
+                            <span className="font-mono text-sm font-bold text-stone-600">{shot.shotId || ''}</span>
+                            <span className="mt-1 max-w-[90%] truncate px-2 text-xs text-stone-400">{(shot.sceneName || '').slice(0, 14)}</span>
+                            {!readOnly && (
+                              <button
+                                onClick={() => handleGenerateSingleShot(actNumber, shot.shotId)}
+                                disabled={isExecuting || !!actProgress[actNumber]}
+                                className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded bg-stone-100/80 text-xs font-medium text-stone-600 transition hover:bg-stone-200/90 hover:text-stone-800 disabled:opacity-50"
+                              >
+                                {actProgress[actNumber]?.shotId === shot.shotId ? (
+                                  <>
+                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                    生成中
+                                  </>
+                                ) : (
+                                  <>
+                                    <ImageIcon className="h-4 w-4" />
+                                    生成
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

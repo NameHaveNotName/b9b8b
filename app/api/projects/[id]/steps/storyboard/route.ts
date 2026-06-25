@@ -258,7 +258,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
             metadata: { shotId: promptItem.shotId, type: 'storyboard', characters: promptItem.characters, duration: promptItem.duration, actNumber: promptItem.actNumber, aspectRatio },
           }
         })
-        shotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url })
+        shotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url, actNumber: promptItem.actNumber })
       }
 
       // 从 project.framework 读取 acts 用于动态 actsSummary
@@ -335,7 +335,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       for (const asset of actAssets) {
         await prisma.asset.delete({ where: { id: asset.id } }).catch(() => {})
       }
-      cleanedShotAssets = existingShotAssets.filter((s: any) => !actShotIds.has(s.shotId))
+      cleanedShotAssets = existingShotAssets.filter((s: any) => !(s.actNumber === actNumber && actShotIds.has(s.shotId)))
     }
 
     try {
@@ -420,7 +420,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       let targetShotId = shotId
       if (!targetShotId) {
         for (const promptItem of actPrompts) {
-          const hasAsset = cleanedShotAssets.some((s: any) => s.shotId === promptItem.shotId)
+          const hasAsset = cleanedShotAssets.some((s: any) => s.shotId === promptItem.shotId && s.actNumber === actNumber)
           if (!hasAsset) {
             targetShotId = promptItem.shotId
             break
@@ -448,11 +448,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         return NextResponse.json({ error: 'VALIDATION_003', message: `镜头 ${targetShotId} 没有对应的提示词` }, { status: 400 })
       }
 
-      // 删除该 shot 已有的 asset（覆盖生成）
+      // 删除该 shot 已有的 asset（覆盖生成，需同时匹配 shotId 和 actNumber）
       const allAssets = await prisma.asset.findMany({
         where: { projectId: params.id, stepId: step.id }
       })
-      const oldAsset = allAssets.find((a: any) => a.metadata?.shotId === targetShotId)
+      const oldAsset = allAssets.find((a: any) => a.metadata?.shotId === targetShotId && a.metadata?.actNumber === actNumber)
       if (oldAsset) {
         await prisma.asset.delete({ where: { id: oldAsset.id } }).catch(() => {})
       }
@@ -489,7 +489,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         maxImages: 1,
       })
 
-      const storageKey = `projects/${params.id}/storyboard/${shotPrompt.shotId}_${Date.now()}.png`
+      const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.shotId}_${Date.now()}.png`
       await uploadFile(storageKey, buffer, 'image/png')
       const url = await getSignedFileUrl(storageKey, 3600)
 
@@ -516,13 +516,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       })
 
       // 合并 shotAssets
-      const newShotAsset = { shotId: shotPrompt.shotId, assetId: asset.id, url }
+      const newShotAsset = { shotId: shotPrompt.shotId, assetId: asset.id, url, actNumber }
       const mergedShotAssets = [
-        ...cleanedShotAssets.filter((s: any) => s.shotId !== shotPrompt.shotId),
+        ...cleanedShotAssets.filter((s: any) => !(s.shotId === shotPrompt.shotId && s.actNumber === actNumber)),
         newShotAsset,
       ]
 
-      const processedCount = mergedShotAssets.filter((s: any) => actShotIds.has(s.shotId)).length
+      const processedCount = mergedShotAssets.filter((s: any) => s.actNumber === actNumber && actShotIds.has(s.shotId)).length
       const remainingCount = actPrompts.length - processedCount
 
       const nextOutput = {
@@ -665,7 +665,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     const outputData = {
       shots: allShots,
-      shotAssets: shotAssets.map((s) => ({ shotId: s.shot.shotId, assetId: s.assetId })),
+      shotAssets: shotAssets.map((s) => ({ shotId: s.shot.shotId, assetId: s.assetId, actNumber: s.shot.actNumber })),
       // [WORKFLOW-FIX] 保存模式到 outputData
       mode: body?.mode || 'keyframe',
       actsSummary: acts.map((act: any) => ({

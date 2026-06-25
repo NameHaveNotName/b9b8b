@@ -25,10 +25,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const body = await req.json().catch(() => ({}))
-  const { shotId, aspectRatio, imageModel } = body
+  const { shotId, actNumber, aspectRatio, imageModel } = body
   if (!shotId || typeof shotId !== 'string') {
     return NextResponse.json({ error: 'VALIDATION_001', message: '缺少 shotId' }, { status: 400 })
   }
+  // actNumber 用于区分不同幕中相同的 shotId
+  const actNo = typeof actNumber === 'number' ? actNumber : null
   const newRatio = aspectRatio || '16:9'
   const newModel = imageModel || IMAGE_MODELS.primary
   console.log(`[REGENERATE-PARAMS] storyboard: ${shotId}, 新比例: ${newRatio}, 新模型: ${newModel}`)
@@ -44,16 +46,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const shots: any[] = outputData.shots || []
   const shotAssets: any[] = outputData.shotAssets || []
 
-  const targetIndex = shots.findIndex((s: any) => s.shotId === shotId)
+  const targetIndex = shots.findIndex((s: any) => s.shotId === shotId && (actNo == null || s.actNumber === actNo))
   if (targetIndex < 0) {
     return NextResponse.json({ error: 'NOT_FOUND', message: '未找到该分镜' }, { status: 404 })
   }
 
   const targetShot = shots[targetIndex]
-  console.log(`[STORYBOARD-REGENERATE] 重新生成分镜草图: shotId=${shotId}`)
+  const targetActNumber = targetShot.actNumber
+  console.log(`[STORYBOARD-REGENERATE] 重新生成分镜草图: shotId=${shotId}, actNumber=${targetActNumber}`)
 
-  // 删除旧 Asset
-  const oldAssetEntry = shotAssets.find((a: any) => a.shotId === shotId)
+  // 删除旧 Asset（需同时匹配 shotId 和 actNumber）
+  const oldAssetEntry = shotAssets.find((a: any) => a.shotId === shotId && a.actNumber === targetActNumber)
   if (oldAssetEntry?.assetId) {
     try {
       await prisma.asset.delete({ where: { id: oldAssetEntry.assetId } })
@@ -107,7 +110,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     `
     const buffer = await sharp(Buffer.from(svg)).png().toBuffer()
 
-    const storageKey = `projects/${params.id}/storyboard/${targetShot.shotId}.png`
+    const storageKey = `projects/${params.id}/storyboard/${targetActNumber}_${targetShot.shotId}.png`
     await uploadFile(storageKey, buffer, 'image/png')
     const url = await getSignedFileUrl(storageKey, 3600)
 
@@ -132,8 +135,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       },
     })
 
-    const newShotAssets = shotAssets.filter((a: any) => a.shotId !== shotId)
-    newShotAssets.push({ shotId: targetShot.shotId, assetId: newAsset.id })
+    const newShotAssets = shotAssets.filter((a: any) => !(a.shotId === shotId && a.actNumber === targetActNumber))
+    newShotAssets.push({ shotId: targetShot.shotId, assetId: newAsset.id, actNumber: targetActNumber })
 
     await prisma.workflowStep.update({
       where: { id: step.id },
