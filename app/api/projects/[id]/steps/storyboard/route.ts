@@ -134,9 +134,47 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const allShots = existingOutput.shots || []
     console.log('[STORYBOARD-IMAGE] existingOutput keys:', Object.keys(existingOutput))
     console.log('[STORYBOARD-IMAGE] prompts count:', prompts.length, 'shots count:', allShots.length)
+    // prompts 为空时，自动先生成分镜提示词（与 generate-prompts 逻辑相同）
+    let currentAllShots = allShots
+    let currentPrompts = prompts
     if (prompts.length === 0) {
-      console.error('[STORYBOARD-IMAGE] No prompts found. existingOutput:', JSON.stringify(existingOutput).slice(0, 500))
-      return NextResponse.json({ error: 'No prompts found. Please call generate-prompts first.' }, { status: 400 })
+      console.log('[STORYBOARD-IMAGE] No prompts found, auto-generating prompts first...')
+      const framework = project.framework as any
+      const acts = Array.isArray(framework?.acts) ? framework.acts : []
+      const textClient = await getTextClient()
+      const actResults = await Promise.all(
+        acts.map((act: any) => generateStoryboardByAct(textClient, framework, act))
+      )
+      currentAllShots = actResults.flat()
+      if (!Array.isArray(currentAllShots) || currentAllShots.length === 0) {
+        return NextResponse.json({ error: 'API_001', message: '生成分镜表失败，请稍后重试' }, { status: 500 })
+      }
+      currentPrompts = currentAllShots.map((shot, i) => ({
+        id: `prompt_${shot.shotId || i + 1}`,
+        chineseDesc: shot.description || '',
+        englishPrompt: `${shot.cameraMove || '固定'} | ${shot.duration || 5}s | ${shot.description || ''}`,
+        target: `shot_${shot.shotId || i + 1}`,
+        shotId: shot.shotId || String(i + 1),
+        actNumber: shot.actNumber,
+        cameraMove: shot.cameraMove,
+        duration: shot.duration,
+        characters: shot.characters || [],
+        sceneName: shot.sceneName,
+      }))
+      // 将生成的 prompts/shots 暂存到 step（不完成 step，保留 PENDING 状态）
+      await prisma.workflowStep.update({
+        where: { id: step.id },
+        data: {
+          status: 'PENDING' as any,
+          outputData: {
+            ...existingOutput,
+            prompts: currentPrompts,
+            shots: currentAllShots,
+            mode: body?.mode || existingOutput.mode || 'keyframe',
+          },
+        },
+      })
+      console.log(`[STORYBOARD-IMAGE] Auto-generated ${currentPrompts.length} prompts, proceeding to generate images...`)
     }
 
     if (force) {
@@ -165,8 +203,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const { w: svgW, h: svgH } = sizeMap[aspectRatio] || sizeMap['16:9']
 
       const shotAssets = []
-      for (const promptItem of prompts) {
-        const shot = allShots.find((s: any) => s.shotId === promptItem.shotId) || {}
+      for (const promptItem of currentPrompts) {
+        const shot = currentAllShots.find((s: any) => s.shotId === promptItem.shotId) || {}
         const charColors = (promptItem.characters || []).map((cid: string, idx: number) => {
           const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6']
           return { id: cid, color: colors[idx % colors.length] }
@@ -230,13 +268,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         ? fwActs.map((act: any) => ({
             actNo: act.actNo || act.actNumber,
             title: act.title || `第${act.actNo || act.actNumber}幕`,
-            shotCount: allShots.filter((s: any) => s.actNumber === (act.actNo || act.actNumber)).length,
+            shotCount: currentAllShots.filter((s: any) => s.actNumber === (act.actNo || act.actNumber)).length,
             duration: 0,
           }))
         : []
 
       const outputData = {
-        shots: allShots,
+        shots: currentAllShots,
+        prompts: currentPrompts,
         shotAssets: shotAssets,
         mode: existingOutput.mode || 'keyframe',
         aspectRatio,
@@ -246,8 +285,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
       await completeStep(step.id, outputData)
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      console.log(`[STORYBOARD-IMAGE] 用户确认，开始生图，共 ${prompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
-      return NextResponse.json({ success: true, data: { shots: allShots, count: allShots.length } })
+      console.log(`[STORYBOARD-IMAGE] 用户确认，开始生图，共 ${currentPrompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
+      return NextResponse.json({ success: true, data: { shots: currentAllShots, count: currentAllShots.length } })
     } catch (e: any) {
       await failStep(step.id, e.message)
       await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
