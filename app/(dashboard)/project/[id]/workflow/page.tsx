@@ -636,7 +636,10 @@ function StepHeader({
         )}
 
         {/* 可执行且未完成：显示开始执行按钮 */}
-        {!isHidden && isAvailable && step.status === 'PENDING' && (
+        {/* STORYBOARD PENDING 状态且无 prompts 时不显示（入口是模式选择界面） */}
+        {!isHidden && isAvailable && step.status === 'PENDING' && !(
+          step.stepType === 'STORYBOARD' && !(step.outputData?.prompts?.length > 0)
+        ) && (
           <div className="flex items-center gap-2">
             {step.stepType === 'FRAMEWORK' && onImport && (
               <button
