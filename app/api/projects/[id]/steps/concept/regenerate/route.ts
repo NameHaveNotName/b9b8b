@@ -29,7 +29,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'VALIDATION_001', message: '缺少 assetId' }, { status: 400 })
   }
   const newRatio = aspectRatio || '16:9'
-  const newModel = imageModel || IMAGE_MODELS.primary
+  const newModel = imageModel || 'gpt-image-2'
   console.log(`[REGENERATE-PARAMS] concept: ${assetId}, 新比例: ${newRatio}, 新模型: ${newModel}`)
 
   const step = await prisma.workflowStep.findUnique({

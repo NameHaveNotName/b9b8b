@@ -279,7 +279,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         shotAssets: shotAssets,
         mode: existingOutput.mode || 'keyframe',
         aspectRatio,
-        imageModel: imageModel || IMAGE_MODELS.primary,
+        imageModel: imageModel || 'gpt-image-2',
         actsSummary,
       }
 
@@ -480,7 +480,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       console.log(`[STORYBOARD-ACT] 阶段B: 生图 ${targetShotId}, prompt前80:`, shotPrompt.prompt.slice(0, 80))
 
       const { buffer, isMock, lastError } = await generateImage({
-        model: imageModel || IMAGE_MODELS.primary,
+        model: imageModel || 'gpt-image-2',
         prompt: shotPrompt.prompt,
         referenceImages: refImages.length > 0 ? refImages : undefined,
         aspectRatio,
@@ -506,7 +506,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
             type: 'storyboard',
             actNumber,
             aspectRatio,
-            imageModel: imageModel || IMAGE_MODELS.primary,
+            imageModel: imageModel || 'gpt-image-2',
             prompt: shotPrompt.prompt,
             caption: shotPrompt.caption,
             isMock: !!isMock,
@@ -530,7 +530,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         shotAssets: mergedShotAssets,
         shotPrompts: currentShotPrompts,
         aspectRatio,
-        imageModel: imageModel || IMAGE_MODELS.primary,
+        imageModel: imageModel || 'gpt-image-2',
       }
 
       await prisma.workflowStep.update({

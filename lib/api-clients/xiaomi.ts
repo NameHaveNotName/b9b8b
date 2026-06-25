@@ -456,9 +456,31 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
   }
 
   if (kind === 'dalle') {
-    if (p.referenceImageUrl) {
-      console.warn(`[Image] DALL-E/gpt-image 不支持 image 字段，referenceImageUrl 已忽略：model=${p.model}`)
+    // gpt-image-2 支持多图参考（referenceImages 数组）或单图参考（referenceImageUrl 字符串）
+    if (p.referenceImages && Array.isArray(p.referenceImages) && p.referenceImages.length > 0) {
+      const httpRefs = p.referenceImages.filter((u) => /^https?:\/\//i.test(u))
+      if (httpRefs.length > 0) {
+        console.log(`[Image] DALL-E/gpt-image: 传入 ${httpRefs.length} 张参考图`)
+        return {
+          model: p.model,
+          prompt,
+          n: typeof p.n === 'number' ? p.n : 1,
+          size: mapToDalleSize(p.size, p.aspectRatio),
+          image: httpRefs,
+        }
+      }
     }
+    if (p.referenceImageUrl && /^https?:\/\//i.test(p.referenceImageUrl)) {
+      console.log(`[Image] DALL-E/gpt-image: 单图参考，前80字符: ${p.referenceImageUrl.slice(0, 80)}`)
+      return {
+        model: p.model,
+        prompt,
+        n: typeof p.n === 'number' ? p.n : 1,
+        size: mapToDalleSize(p.size, p.aspectRatio),
+        image: p.referenceImageUrl,
+      }
+    }
+    console.warn(`[Image] DALL-E/gpt-image: 无有效 http(s) 参考图，降级为纯文生图`)
     return {
       model: p.model,
       prompt,

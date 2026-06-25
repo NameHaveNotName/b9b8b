@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getStyleRefUrl } from '@/lib/style-ref'
 import { logOperation } from '@/lib/operations'
 import { STEP_COSTS } from '@/lib/points-config'
 
@@ -51,17 +52,35 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const imageClient = await getImageClient()
     const textClient = await getTextClient()
 
-    // 获取选定的风格提示词
-    const styleAsset = project.selectedStyleId
-      ? await prisma.asset.findFirst({
-          where: { projectId: params.id, type: 'IMAGE', metadata: { path: ['styleId'], equals: project.selectedStyleId } },
-        })
-      : await prisma.asset.findFirst({
-          where: { projectId: params.id, type: 'IMAGE' },
-          orderBy: { createdAt: 'asc' },
-        })
-    const selectedStylePrompt = (styleAsset?.metadata as any)?.stylePrompt ||
-      'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
+    // 获取风格参考图 URL（与 CONCEPT/KEYFRAMES 一致）
+    let styleRefUrl: string
+    let selectedStylePrompt: string
+    try {
+      const ref = await getStyleRefUrl(params.id)
+      styleRefUrl = ref.styleRefUrl
+      selectedStylePrompt = ref.stylePrompt ||
+        'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
+    } catch (refErr: any) {
+      console.error('[REPRESENTATIVE] 风格图提取失败：', refErr?.message)
+      return NextResponse.json(
+        { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图 URL' },
+        { status: 400 }
+      )
+    }
+
+    // 收集角色参考图（用于多图参考）
+    const characterAssets = await prisma.asset.findMany({
+      where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
+    })
+    const characterImageUrls = characterAssets
+      .map((a) => a.url)
+      .filter((u): u is string => typeof u === 'string' && u.length > 0)
+    const characterDescs = characterAssets
+      .map((a) => ({
+        name: (a.metadata as any)?.characterName || '',
+        description: (a.metadata as any)?.chineseDesc || '',
+      }))
+      .filter((c) => c.name)
 
     const results = []
 
@@ -83,7 +102,17 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const promptText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 2048 })
 
       const label = `${shot.shotId} 高潮瞬间 - ${charNames} ${shot.keyAction || '关键动作'}`
-      const result = await imageClient.generateConceptScene(params.id, label, selectedStylePrompt, shot.characters)
+      const result = await imageClient.generateConceptScene(
+        params.id,
+        label,
+        styleRefUrl,
+        selectedStylePrompt,
+        characterImageUrls.length > 0 ? characterImageUrls : undefined,
+        undefined,
+        undefined,
+        'gpt-image-2',
+        characterDescs.length > 0 ? characterDescs : undefined
+      )
 
       const asset = await prisma.asset.create({
         data: {

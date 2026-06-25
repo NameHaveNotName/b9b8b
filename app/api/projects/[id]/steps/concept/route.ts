@@ -242,7 +242,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
                 llmPrompt: promptItem.englishPrompt,
                 prompt: promptItem.englishPrompt,
                 aspectRatio,
-                imageModel: imageModel || IMAGE_MODELS.primary,
+                imageModel: imageModel || 'gpt-image-2',
               },
             },
           })
@@ -270,7 +270,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
       }
 
-      await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
+      await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || 'gpt-image-2', aspectRatio })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[CONCEPT-IMAGE] 完成: 成功 ${scenes.length}/${resolvedPrompts.length} 条，失败: ${failedScenes.join(', ') || '无'}`)
       return NextResponse.json({ success: true, data: { scenes, totalScenes: scenes.length } })

@@ -231,7 +231,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         })
       }
 
-      await completeStep(step.id, { results, keyframes: results, count: results.length, aspectRatio, imageModel: imageModel || IMAGE_MODELS.primary })
+      await completeStep(step.id, { results, keyframes: results, count: results.length, aspectRatio, imageModel: imageModel || 'gpt-image-2' })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[KEYFRAMES-IMAGE] 用户确认，开始生图，共 ${prompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
       return NextResponse.json({ success: true, data: { results, count: results.length } })
