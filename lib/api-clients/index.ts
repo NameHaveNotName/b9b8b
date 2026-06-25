@@ -136,10 +136,11 @@ export interface ImageClient {
   generateKeyframe(
     projectId: string,
     sceneDesc: string,
-    styleRefUrl: string,       // 改为风格图 URL
+    styleRefUrl: string,       // 风格图 URL
     frameType: 'first' | 'last',
     aspectRatio?: string,      // 可选：画面比例
-    imageModel?: string        // 可选：生图模型
+    imageModel?: string,       // 可选：生图模型
+    characterImageUrls?: string[] // 可选：角色参考图数组
   ): Promise<KeyframeResult>
 }
 
@@ -251,7 +252,7 @@ export async function getImageClient(): Promise<ImageClient> {
         }
       },
 
-      async generateKeyframe(projectId, sceneDesc, styleRefUrl, frameType, aspectRatio?, imageModel?) {
+      async generateKeyframe(projectId, sceneDesc, styleRefUrl, frameType, aspectRatio?, imageModel?, characterImageUrls?) {
         const phase =
           frameType === 'first'
             ? 'opening moment, anticipatory posture'
@@ -259,10 +260,16 @@ export async function getImageClient(): Promise<ImageClient> {
         const prompt = `${sceneDesc}, ${phase}, cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism`
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
         console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${imageModel || '默认'}`)
+        // 构建多图参考：风格图 + 角色图
+        const refImages: string[] = [styleRefUrl]
+        if (characterImageUrls && characterImageUrls.length > 0) {
+          refImages.push(...characterImageUrls)
+        }
         const { buffer } = await generateImage({
           model: imageModel || IMAGE_MODELS.primary,
           prompt,
-          referenceImageUrl: styleRefUrl,
+          referenceImages: refImages.length > 1 ? refImages : undefined,
+          referenceImageUrl: refImages.length === 1 ? refImages[0] : undefined,
           aspectRatio: aspectRatio || '16:9',
           watermark: false,
         })

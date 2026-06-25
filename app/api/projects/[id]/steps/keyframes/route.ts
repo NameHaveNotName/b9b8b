@@ -185,6 +185,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       }
 
       const imageClient = await getImageClient()
+      // 收集角色参考图（用于多图参考：风格图 + 角色图）
+      const characterAssets = await prisma.asset.findMany({
+        where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
+      })
+      const characterImageUrls = characterAssets
+        .map((a) => a.url)
+        .filter((u): u is string => typeof u === 'string' && u.length > 0)
       const results = []
 
       for (const promptItem of prompts) {
@@ -194,7 +201,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           styleRefUrl,
           'last',
           aspectRatio,
-          imageModel
+          imageModel,
+          characterImageUrls.length > 0 ? characterImageUrls : undefined
         )
         const lastAsset = await prisma.asset.create({
           data: {
@@ -259,6 +267,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     const results = []
 
+    // 收集角色参考图（用于多图参考：风格图 + 角色图）
+    const characterAssets = await prisma.asset.findMany({
+      where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
+    })
+    const characterImageUrls = characterAssets
+      .map((a) => a.url)
+      .filter((u): u is string => typeof u === 'string' && u.length > 0)
+
     for (const shot of shotsWithFirstFrame) {
       // Phase 4: 尾帧 — 基于起始帧 + 动作变化生成
       const lastPrompt = loadPromptTemplate('keyframe-last', {
@@ -274,7 +290,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         params.id,
         lastImagePrompt,
         styleRefUrl,
-        'last'
+        'last',
+        undefined,
+        undefined,
+        characterImageUrls.length > 0 ? characterImageUrls : undefined
       )
       const lastAsset = await prisma.asset.create({
         data: {
