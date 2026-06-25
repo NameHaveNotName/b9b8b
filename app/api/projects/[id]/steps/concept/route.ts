@@ -200,6 +200,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       const characterImageUrls = characterAssets
         .map((a) => a.url)
         .filter((u) => typeof u === 'string' && u.length > 0) as string[]
+      const characterDescs = characterAssets
+        .map((a) => ({
+          name: (a.metadata as any)?.characterName || '',
+          description:
+            (a.metadata as any)?.chineseDesc ||
+            (a.metadata as any)?.llmPrompt ||
+            '',
+        }))
+        .filter((c) => c.name) as Array<{ name: string; description: string }>
 
       const imageClient = await getImageClient()
       const scenes = []
@@ -215,7 +224,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             characterImageUrls,
             undefined,
             aspectRatio,
-            imageModel
+            imageModel,
+            characterDescs
           )
           const asset = await prisma.asset.create({
             data: {

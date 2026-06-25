@@ -128,9 +128,10 @@ export interface ImageClient {
     styleRefUrl: string,       // 改为风格图 URL
     stylePrompt?: string,      // 可选：风格提示词
     characterImageUrls?: string[], // 工作指令.txt（Round 6）：可选角色图数组（多图参考）
-    size?: string,             // 可选：尺寸（如 '2K', '1024x1024', '16:9'）
-    aspectRatio?: string,      // 可选：纵横比（如 '16:9', '9:16', '1:1'）
-    imageModel?: string        // 可选：生图模型
+    size?: string,             // 可选：尺寸
+    aspectRatio?: string,      // 可选：纵横比
+    imageModel?: string,       // 可选：生图模型
+    characterDescs?: Array<{ name: string; description: string }> // 可选：角色名称/描述（用于 prompt 强调一致性）
   ): Promise<ConceptSceneResult>
   generateKeyframe(
     projectId: string,
@@ -196,24 +197,57 @@ export async function getImageClient(): Promise<ImageClient> {
         return { url, storageKey, characterId: character.id, isMock: !!isMock, ...(lastError ? { lastError } : {}) }
       },
 
-      async generateConceptScene(projectId, sceneDesc, styleRefUrl, _stylePrompt?, characterImageUrls?, size?, aspectRatio?, imageModel?) {
-        const prompt = `${_stylePrompt || ''}, ${sceneDesc}, cinematic wide shot, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism`
-        const storageKey = `projects/${projectId}/concepts/concept_${Date.now()}.png`
-        console.log(`[MODEL-SELECT] [generateConceptScene] 使用 GPT-image-2 编辑模式，角色图: ${characterImageUrls?.length || 0} 张`)
-        // 使用 gpt-image-2 /v1/images/edits 多图编辑端点
-        const raw = await generateConceptSceneWithEdit({
-          styleRefUrl,
-          characterImageUrls,
+      async generateConceptScene(projectId, sceneDesc, styleRefUrl, _stylePrompt?, characterImageUrls?, _size?, aspectRatio?, imageModel?, characterDescs?) {
+        // 收集所有参考图：风格图 + 角色图
+        const refs: string[] = []
+        if (styleRefUrl) refs.push(styleRefUrl)
+        if (characterImageUrls?.length) refs.push(...characterImageUrls)
+
+        // 用文字强调角色一致性（模型不一定能自动识别角色参考图）
+        const characterHint = characterDescs?.length
+          ? `Keep the following characters visually consistent: ${characterDescs
+              .map((c) => `${c.name}${c.description ? ` (${c.description})` : ''}`)
+              .join('; ')}.`
+          : ''
+
+        // 明确第一张参考图是风格参考
+        const styleHint = styleRefUrl
+          ? 'Use the first reference image as the visual style reference.'
+          : ''
+
+        const prompt = [
+          styleHint,
+          _stylePrompt || '',
+          characterHint,
+          sceneDesc,
+          'cinematic wide shot, atmospheric depth, 8k, poetic realism',
+        ]
+          .filter(Boolean)
+          .join('. ')
+
+        console.log(`[MODEL-SELECT] [generateConceptScene] 模型: ${imageModel || '默认'}, 参考图: ${refs.length} 张`)
+
+        const { buffer, isMock, lastError } = await generateImage({
+          model: imageModel || IMAGE_MODELS.primary,
           prompt,
-          size: aspectRatio === '9:16' ? '1024x1536' : aspectRatio === '1:1' ? '1024x1024' : '1024x1024',
-          n: 1,
+          referenceImages: refs,
+          aspectRatio: aspectRatio || '16:9',
+          watermark: false,
         })
-        const buffer = Buffer.from(raw.b64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
+
+        const storageKey = `projects/${projectId}/concepts/concept_${Date.now()}.png`
         const url = await uploadOrDataFallback(storageKey, buffer, 'image/png')
         return {
           url,
           storageKey,
-          metadata: { sceneDesc, styleRef: _stylePrompt || '', characterRefs: characterImageUrls || [], seed: Math.floor(Math.random() * 999999) },
+          metadata: {
+            sceneDesc,
+            styleRef: _stylePrompt || '',
+            characterRefs: characterImageUrls || [],
+            seed: Math.floor(Math.random() * 999999),
+            isMock: !!isMock,
+            ...(lastError ? { lastError } : {}),
+          },
         }
       },
 
