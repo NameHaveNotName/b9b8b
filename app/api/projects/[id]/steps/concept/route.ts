@@ -43,8 +43,13 @@ async function generateConceptPrompts(
       const llmScene = parsedScenes.find(
         (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
       )
-      const imagePrompt = llmScene?.imagePrompt || sceneDesc
-      prompts.push({
+      // 过滤空白，确保 englishPrompt 是有效的英文内容
+        const rawPrompt = llmScene?.imagePrompt || ''
+        const isValidEnglish = rawPrompt.trim().length > 5 && /[a-zA-Z]{3,}/.test(rawPrompt)
+        const imagePrompt = isValidEnglish
+          ? rawPrompt.trim()
+          : `Cinematic scene, ${sceneDesc}. Film still, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism.`
+        prompts.push({
         id: `prompt_act${actNo}_scene${i + 1}`,
         chineseDesc: sceneDesc,
         englishPrompt: imagePrompt,
@@ -373,7 +378,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           const llmScene = parsedScenes.find(
             (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
           )
-          const finalPrompt = llmScene?.imagePrompt || sceneDesc
+          const rawPrompt = llmScene?.imagePrompt || ''
+          const isValidEnglish = rawPrompt.trim().length > 5 && /[a-zA-Z]{3,}/.test(rawPrompt)
+          const finalPrompt = isValidEnglish
+            ? rawPrompt.trim()
+            : `Cinematic scene, ${sceneDesc}. Film still, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism.`
 
           // 工作指令.txt（Round 6 任务一）：多图参考 — 风格图 + 全部角色图
           const result = await imageClient.generateConceptScene(

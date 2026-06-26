@@ -36,12 +36,18 @@ async function generateCharacterPrompts(
 
   const prompts = characters.map((character, i) => {
     const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
-    const charPrompt = charData?.imagePrompt || ''
     const charDesc = charData?.description || character.description || `${character.name}（${character.role}）`
+    // 过滤空白，确保 englishPrompt 是有效的英文内容
+    const rawPrompt = charData?.imagePrompt || ''
+    const isValidEnglishPrompt = rawPrompt.trim().length > 10 && /[a-zA-Z]{3,}/.test(rawPrompt)
+    // 如果 LLM 返回了有效的英文提示词则使用；否则用 charDesc 构建完整英文描述
+    const englishPrompt = isValidEnglishPrompt
+      ? rawPrompt.trim()
+      : `Cinematic character portrait of ${character.name}, ${charDesc}. Solo portrait, front-facing, complete full face clearly visible. Cinematic film still, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism.`
     return {
       id: `prompt_${i + 1}`,
       chineseDesc: charDesc,
-      englishPrompt: charPrompt || `Character portrait: ${character.name}, ${character.role}`,
+      englishPrompt,
       target: `character_${character.id}`,
       characterName: character.name,
       characterId: character.id,
