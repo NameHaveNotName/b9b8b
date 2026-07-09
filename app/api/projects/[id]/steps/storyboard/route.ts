@@ -14,8 +14,9 @@ import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 import { logOperation } from '@/lib/operations'
 import { STEP_COSTS } from '@/lib/points-config'
+import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 
-async function generateStoryboardByAct(textClient: any, framework: any, act: any) {
+async function generateStoryboardByAct(textClient: any, framework: any, act: any, tagInstructions?: string) {
   const prompt = loadPromptTemplate('storyboard-act-dynamic', {
     USER_INPUT: JSON.stringify(framework),
     ACT_NUMBER: String(act.actNo || act.actNumber || 1),
@@ -24,6 +25,7 @@ async function generateStoryboardByAct(textClient: any, framework: any, act: any
     ESTIMATED_SHOTS: String(typeof act.estimatedShots === 'number' ? act.estimatedShots : 10),
     ACT_PACING: act.pacing || '张弛有度',
     KEY_SCENES: Array.isArray(act.keyScenes) ? act.keyScenes.join('；') : '',
+    TAG_INSTRUCTIONS: tagInstructions || '',
   })
   const text = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
   return extractJsonFromMarkdown(text) || []
@@ -68,9 +70,17 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const acts = Array.isArray(framework?.acts) ? framework.acts : []
       const textClient = await getTextClient()
 
-      // 动态遍历所有幕生成
+      const ideationStep = await prisma.workflowStep.findUnique({
+        where: { projectId_stepType: { projectId: params.id, stepType: 'IDEATION' } },
+      })
+      const outputData: any = ideationStep?.outputData || {}
+      const projectTag = outputData?.projectTag || ''
+      const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
+        ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].storyboard
+        : ''
+
       const actResults = await Promise.all(
-        acts.map((act: any) => generateStoryboardByAct(textClient, framework, act))
+        acts.map((act: any) => generateStoryboardByAct(textClient, framework, act, tagInstructions))
       )
       const allShots = actResults.flat()
       if (!Array.isArray(allShots) || allShots.length === 0) {
@@ -142,8 +152,17 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const framework = project.framework as any
       const acts = Array.isArray(framework?.acts) ? framework.acts : []
       const textClient = await getTextClient()
+
+      const ideationOutput: any = (await prisma.workflowStep.findUnique({
+        where: { projectId_stepType: { projectId: params.id, stepType: 'IDEATION' } },
+      }))?.outputData || {}
+      const projectTag2 = ideationOutput?.projectTag || ''
+      const tagInstructions2 = projectTag2 && PROJECT_TAG_PROMPTS[projectTag2 as keyof typeof PROJECT_TAG_PROMPTS]
+        ? PROJECT_TAG_PROMPTS[projectTag2 as keyof typeof PROJECT_TAG_PROMPTS].storyboard
+        : ''
+
       const actResults = await Promise.all(
-        acts.map((act: any) => generateStoryboardByAct(textClient, framework, act))
+        acts.map((act: any) => generateStoryboardByAct(textClient, framework, act, tagInstructions2))
       )
       currentAllShots = actResults.flat()
       if (!Array.isArray(currentAllShots) || currentAllShots.length === 0) {

@@ -5,6 +5,7 @@ import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
+import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { createStep, startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
@@ -88,11 +89,16 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const references = await getProjectReferences(params.id).catch(() => [])
     const hasRefs = references.length > 0 && references.some(r => r.url)
 
+    const projectTag = body.projectTag || ''
+    const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
+      ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].ideation
+      : ''
+
     let resultText: string
     if (hasRefs) {
       const refUrls = references.filter(r => r.url).map(r => r.url)
       const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
-      console.log(`[IDEATION-VISION] Using multimodal with ${refUrls.length} reference images, labels:`, refLabels)
+      console.log(`[IDEATION-VISION] Using multimodal with ${refUrls.length} reference images, labels:`, refLabels, 'tag:', projectTag || 'none')
 
       const visualRefBlock = refLabels.length > 0
         ? `【用户上传了 ${refUrls.length} 张视觉参考图，请仔细查看图片内容。用户标注的标签：${refLabels.join('、')}。\n请在创意设计时充分考虑这些视觉参考，确保角色形象、场景氛围、美术风格与参考素材保持一致。】`
@@ -101,6 +107,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const prompt = loadPromptTemplate('ideation', {
         USER_INPUT: project.rawIdea,
         VISUAL_REFERENCES: visualRefBlock,
+        PROJECT_TAG_INSTRUCTIONS: tagInstructions,
       })
       resultText = await textClient.generateVision({
         prompt,
@@ -110,7 +117,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         maxTokens: 12000,
       })
     } else {
-      const prompt = loadPromptTemplate('ideation', { USER_INPUT: project.rawIdea, VISUAL_REFERENCES: '' })
+      const prompt = loadPromptTemplate('ideation', {
+        USER_INPUT: project.rawIdea,
+        VISUAL_REFERENCES: '',
+        PROJECT_TAG_INSTRUCTIONS: tagInstructions,
+      })
       resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 12000 })
     }
 
@@ -139,7 +150,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       )
     }
 
-    const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, rawText: resultText.slice(0, 3000) }
+    const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, projectTag: projectTag || undefined, rawText: resultText.slice(0, 3000) }
     await completeStep(step.id, result)
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
 
@@ -194,7 +205,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 
   const body = await req.json().catch(() => ({}))
-  const { directions, storyLength, storyLengthLabel, storyLengthDesc } = body
+  const { directions, storyLength, storyLengthLabel, storyLengthDesc, projectTag } = body
 
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'IDEATION' } }
@@ -217,6 +228,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
   if (storyLengthDesc !== undefined) {
     nextOutput.storyLengthDesc = storyLengthDesc
+  }
+  if (projectTag !== undefined) {
+    nextOutput.projectTag = projectTag || ''
   }
 
   await prisma.workflowStep.update({

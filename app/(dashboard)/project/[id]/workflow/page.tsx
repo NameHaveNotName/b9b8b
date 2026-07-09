@@ -36,6 +36,7 @@ import QueueMonitor from '@/components/generation/QueueMonitor'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer'
 import { VISIBLE_STEP_TYPES } from '@/lib/workflow'
 import { ASPECT_RATIO_OPTIONS, IMAGE_MODELS, MODEL_SHORT_NAME, STYLE_MODEL_POOL, VIDEO_MODELS, VIDEO_MODEL_SHORT_NAME } from '@/lib/models-config'
+import { PROJECT_TAG_OPTIONS, PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import HoverImageBadge from '@/components/generation/HoverImageBadge'
 import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
@@ -916,6 +917,51 @@ const STORY_LENGTH_OPTIONS = [
   { key: 'epic', label: '史诗', range: '20-30分钟', acts: '4-5幕', shots: '150-250镜', desc: '宏大格局，群像/多线' },
 ]
 
+function ProjectTagSelector({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (key: string) => void
+}) {
+  const categories = ['用途', '风格', '调性']
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-stone-700">项目标签</span>
+        <span className="text-xs text-stone-400">可选，约束创意方向</span>
+      </div>
+      {categories.map(cat => {
+        const opts = PROJECT_TAG_OPTIONS.filter(o => o.category === cat)
+        return (
+          <div key={cat} className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-medium text-stone-400 w-8 shrink-0">{cat}</span>
+            {opts.map(opt => (
+              <button
+                key={opt.key}
+                onClick={() => onChange(value === opt.key ? '' : opt.key)}
+                title={opt.desc}
+                className={`rounded-full px-2.5 py-1 text-xs transition ${
+                  value === opt.key
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-stone-100 text-stone-500 hover:bg-stone-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )
+      })}
+      {value && (
+        <p className="text-[11px] text-amber-600">
+          {PROJECT_TAG_OPTIONS.find(o => o.key === value)?.desc}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function StoryLengthSelector({
   value,
   onChange,
@@ -990,6 +1036,8 @@ function IdeationPanel({
   const [localStoryLength, setLocalStoryLength] = useState<string>(
     step.outputData?.storyLength || 'short'
   )
+  const [projectTag, setProjectTag] = useState<string>(step.outputData?.projectTag || '')
+  const [savingTag, setSavingTag] = useState(false)
   // 工作指令.txt（2026-06-02）：创意输入区域
   const [creativeInput, setCreativeInput] = useState<string>(project.rawIdea || '')
   const [savingInput, setSavingInput] = useState(false)
@@ -999,6 +1047,7 @@ function IdeationPanel({
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
+  const tagSaveRef = useRef<NodeJS.Timeout | null>(null)
   const inputSaveRef = useRef<NodeJS.Timeout | null>(null)
   const isExecuting = executing === step.stepType
   const directions = step.outputData?.directions || []
@@ -1032,6 +1081,12 @@ function IdeationPanel({
       setLocalStoryLength(step.outputData.storyLength)
     }
   }, [step.outputData?.storyLength])
+
+  useEffect(() => {
+    if (step.outputData?.projectTag !== undefined && step.outputData.projectTag !== projectTag) {
+      setProjectTag(step.outputData.projectTag || '')
+    }
+  }, [step.outputData?.projectTag])
 
   function handleUpdateDirection(index: number, field: 'title' | 'description', value: string) {
     const newDirections = [...localDirections]
@@ -1114,6 +1169,33 @@ function IdeationPanel({
     }
   }
 
+  async function saveProjectTag(key: string) {
+    try {
+      setSavingTag(true)
+      const res = await fetch(`/api/projects/${projectId}/steps/ideation`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectTag: key }),
+      })
+      if (!res.ok) throw new Error('保存失败')
+      await mutate()
+      console.log('[TEXT-EDIT-IDEATION] 保存 projectTag 成功:', key)
+    } catch (e: any) {
+      console.error('[TEXT-EDIT-IDEATION] 保存 projectTag 失败:', e.message)
+      setProjectTag(step.outputData?.projectTag || '')
+    } finally {
+      setSavingTag(false)
+    }
+  }
+
+  function handleProjectTagChange(key: string) {
+    setProjectTag(key)
+    if (tagSaveRef.current) clearTimeout(tagSaveRef.current)
+    tagSaveRef.current = setTimeout(() => {
+      saveProjectTag(key)
+    }, 300)
+  }
+
   async function handleResetIdeation() {
     if (!confirm('确定要重新进行创意扩散吗？这将清除当前的所有创意方向。')) return
     try {
@@ -1189,10 +1271,12 @@ function IdeationPanel({
           )}
         </div>
 
+        <ProjectTagSelector value={projectTag} onChange={handleProjectTagChange} />
+
         <div className="flex justify-center">
           <div className="relative inline-block">
             <button
-              onClick={() => onExecute('IDEATION', { creativeInput: creativeInput.trim() })}
+              onClick={() => onExecute('IDEATION', { creativeInput: creativeInput.trim(), projectTag: projectTag || undefined })}
               disabled={isExecuting || !canGenerate}
               className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -1256,6 +1340,7 @@ function IdeationPanel({
         </div>
 
         <StoryLengthSelector value={localStoryLength} onChange={handleStoryLengthChange} />
+        <ProjectTagSelector value={projectTag} onChange={handleProjectTagChange} />
         <p className="text-sm text-stone-600">已生成的创意方向（点击卡片选择）：</p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {displayDirections.map((d: any, idx: number) => (

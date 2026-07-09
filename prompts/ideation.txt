@@ -18,6 +18,7 @@
 动作/惊悚类 ASL 可低至 2-4s，情感/艺术片 ASL 可高至 8-15s，由你根据故事类型自行决定总镜头数。
 无论什么风格，都需要尽量谨慎地使用特效（包括闪光，火花，全息等），尽量避免出现相关内容。
 {{VISUAL_REFERENCES}}
+{{PROJECT_TAG_INSTRUCTIONS}}
 
 输出格式（严格 JSON，不要 Markdown 代码块）：
 {
