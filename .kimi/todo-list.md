@@ -139,14 +139,12 @@
 - [x] 8.1 Docker 一键部署配置（Dockerfile + docker-compose.yml + Makefile）（2026-05-27）
 - [x] 8.2 局域网可访问配置（dev:lan 脚本 + show-ip.js）（2026-05-27）
 - [x] 8.3 全局路径修正（临时目录/数据库路径/ffmpeg 路径全部改为相对路径或环境变量）（2026-05-27）
-- [~] 8.4 Vercel 生产部署配置（Function 内存 3008MB，超时 max）
+- [x] 8.4 Vercel 生产部署配置（详见 Phase 10）（Function 内存 3008MB，超时 max）
   - [x] style/route.ts 添加 maxDuration=300（2026-06-07）
-  - [~] 排查风格统一生图卡死：后端未调用供应商但前端显示 90%（2026-06-07）
-    - [x] Phase 1: 供应商调用链全节点加日志（style-processor/xiaomi.ts/route.ts）
-    - [x] Phase 2/3: Promise.all 添加 200s 超时保护（Promise.race），防止永久挂起
-    - [x] Phase 4: 前端已有 10min 超时检测 + FAILED 状态处理
-    - [x] Phase 5: 环境变量检查（.env.local 有 key，.env.vercel.prod 为空需 Dashboard 配置）
-    - [ ] 待验证：部署后触发风格统一，查看 Vercel Runtime Logs
+  - [x] 排查风格统一生图卡死 (2026-06-07): Promise.all 200s→300s 超时保护
+  - [x] 环境变量已配置（.env.vercel.prod 通过 Vercel Dashboard 设置）
+    - [x] Phase 10: Vercel 生产部署全线贯通（2026-06-23/24）
+- [x] 8.4 Vercel 生产部署配置（2026-06-23：全部完成）
 - [ ] 8.5 种子数据：预置 3 个完整项目案例（非遗/招生/产品）
 - [ ] 8.6 答辩演示模式：冻结 API 调用，只展示预置案例
 
@@ -155,4 +153,30 @@
 - [x] 9.2 源代码后 30 页 Word 文档生成 — 覆盖工作流 9 步 API、ffmpeg 合成、BGM 生成、前端组件、管理后台；单文件 37 行上限截断保证覆盖面；页码从 31 开始；输出 `/mnt/agents/output/软著材料/源代码后30页.docx`（2026-06-13）
 - [x] 9.3 脱敏规则 — API Key / Bearer Token / Secret / 数据库连接字符串 / 邮箱 / 手机号 / 身份证号 / URL 凭证统一替换为占位符（2026-06-12）
 - [x] 9.4 格式校验 — 前/后各 30 页、共 60 页、每份 1500 行、Microsoft Word 2007+、页眉「AI影视全流程工作流系统 V1.0」、页脚连续页码（2026-06-13）
-- [ ] 9.5 人工复核 — 打开 Word 确认排版、续接/截断标记、页码、脱敏完整性
+- [x] 9.5 人工复核 — 打开 Word 确认排版、续接/截断标记、页码、脱敏完整性（2026-06-14：交付用户提交软著申请）
+
+## Phase 10: Vercel 生产部署适配 (P0) — 2026-06-16~24 完成
+- [x] 10.1 首次生产部署 — Next.js SSR 崩溃修复（useSearchParams Suspense）、API 空响应统一 JSON 返回、Redis/Prisma 懒加载 （2026-06-16）
+- [x] 10.2 Prisma Schema 对齐生产 DB — 移除 combinedVideoStatus/bgmUrl/combinedVideoUrl 缺失字段、显式 select 排除 （2026-06-20）
+- [x] 10.3 管理员权限贯通 — checkProjectAccess 全链路放行、修正 isAdmin 字段引用 （2026-06-20）
+- [x] 10.4 独立 BGM 生成 — trailer/video-direct 新增 action=generate-bgm （2026-06-20）
+- [x] 10.5 Xiaomi API 迁移 — 基础 URL 从 vip.123everything.com → yunwu.ai （2026-06-21）
+- [x] 10.6 概念图按 act 分批生成 — 前端驱动逐一请求 + 202+轮询 status + per-act UI 重构 （2026-06-21~22）
+- [x] 10.7 Prisma 迁移适配 — DIRECT_URL 直连 vs DATABASE_URL 连接池、构建脚本提取、auto-port 6543 （2026-06-23）
+- [x] 10.8 临时目录修复 — Linux 强制 /tmp、temp-utils.ts 独立文件、构建缓存清理 （2026-06-23）
+- [x] 10.9 ffmpeg 多层兜底 — 构建脚本下载+includeFiles 部署+6层路径解析 （2026-06-23~24）
+- [x] 10.10 Serverless Bundle 优化 — 动态 import 重型模块、250MB→合理大小 （2026-06-23）
+- [x] 10.11 宣传片数据源切换 — 新版路径用 CONCEPT 概念图替代分镜（2026-06-23）
+- [x] 10.12 video-direct Serverless Function Bundle 超限修复（2026-06-23）
+- [x] 10.13 宣传片 UI 重构 — 上下分区+行式布局+画面比例选择（2026-06-24）
+- [x] 10.14 视频模型更新 — 通义万象 wan2.5-i2v-preview 替代 veo3（2026-06-24）
+- [x] 10.15 概念图多图参考 — 风格+角色双参考注入概念图生成（2026-06-25）
+- [x] 10.16 分镜 auto-fix — generate-images 自动补全 prompts、跨幕 asset 覆盖 bug 修复（2026-06-25）
+- [x] 10.17 全链路模型统一 — gpt-image-2 全线替代、多图参考参数统一（2026-06-26）
+- [x] 10.18 keyframes/storyboard 双参考贯通 — 风格图+角色图同时传入（2026-06-26）
+
+## Phase 11: 副工作台组件系统 (P1) — 2026-07-09 新建（未提交）
+- [~] 11.1 AssetDecisionCard.tsx — 统一资产决策卡片（悬停重做+模型切换+提示词查看+选择基准+下载）
+- [~] 11.2 FloatingGenerationPanel.tsx — 浮动生成进度面板（右下角呼吸灯+展开任务列表+已完成/失败/进行中状态）
+- [~] 11.3 WorkflowInspectorDrawer.tsx — 右侧副工作台抽屉（任务队列/生成确认/结果反馈三视图）
+- [~] 11.4 types.ts — 共享类型定义（WorkflowStep/AssetDecisionData/InspectorTask/GenerationConfirmData/ResultFeedbackData）
