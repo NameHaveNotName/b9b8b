@@ -5,6 +5,7 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
+import { getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
@@ -17,12 +18,14 @@ const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: str
   epic: { label: '史诗', range: '20-30分钟', acts: '4-5幕', shots: '150-250镜', desc: '宏大格局，群像/多线' },
 }
 
-function buildFrameworkPrompt(userInput: string, selectedDirection: any, storyLengthKey: string) {
+function buildFrameworkPrompt(userInput: string, selectedDirection: any, storyLengthKey: string, visualReferences?: string) {
   const tier = STORY_LENGTH_MAP[storyLengthKey] || STORY_LENGTH_MAP.short
 
   return `角色：高端艺术电影 AI 编剧与结构顾问
 
 目标：根据客户的原始灵感和选定的创意方向，输出一份完整的故事框架。你不要生成创意方向（directions），而是直接输出框架（framework）。
+
+${visualReferences || ''}
 
 【故事分档上下文】
 用户选定的故事分档为：${tier.label} · ${tier.range}
@@ -533,9 +536,36 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     orderBy: { versionNumber: 'desc' },
   })
   const creativeSource = currentIteration?.creativeContent || project.rawIdea
-  const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength)
+
+  const references = await getProjectReferences(params.id).catch(() => [])
+  const hasRefs = references.length > 0 && references.some(r => r.url)
+
+  let visualRefBlock = ''
+  if (hasRefs) {
+    const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
+    visualRefBlock = refLabels.length > 0
+      ? `【用户上传了视觉参考图，请仔细查看。用户标注的标签：${refLabels.join('、')}。\n请在框架设计时充分考虑这些参考图，角色形象、场景氛围、美术风格应与参考素材一致。】\n`
+      : '【用户上传了视觉参考图，请仔细查看。请在框架设计时充分考虑这些参考图，角色形象、场景氛围、美术风格应与参考素材一致。】\n'
+  }
+
+  const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, hasRefs ? visualRefBlock : '')
     const textClient = await getTextClient()
-    const fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000 })
+
+    let fullText: string
+    if (hasRefs) {
+      const refUrls = references.filter(r => r.url).map(r => r.url)
+      const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
+      console.log(`[FRAMEWORK-VISION] Using multimodal with ${refUrls.length} reference images`)
+      fullText = await textClient.generateVision({
+        prompt,
+        imageUrls: refUrls,
+        imageLabels: refLabels,
+        temperature: 0.8,
+        maxTokens: 16000,
+      })
+    } else {
+      fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000 })
+    }
 
     const parsed = extractJsonFromMarkdown(fullText)
     const fw = parsed.framework || parsed

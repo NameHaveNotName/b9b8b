@@ -5,7 +5,7 @@ import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { generateImage } from '@/lib/api-clients/xiaomi'
-import { getStyleRefUrl } from '@/lib/style-ref'
+import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
@@ -473,9 +473,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         .map((a) => a.url)
         .filter((u): u is string => typeof u === 'string' && u.length > 0)
 
+      const refs = await getProjectReferences(params.id).catch(() => [])
+      const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+
       const refImages: string[] = []
       if (styleRefUrl) refImages.push(styleRefUrl)
       if (characterImageUrls.length > 0) refImages.push(...characterImageUrls)
+      if (userRefUrls.length > 0) refImages.push(...userRefUrls)
 
       console.log(`[STORYBOARD-ACT] 阶段B: 生图 ${targetShotId}, prompt前80:`, shotPrompt.prompt.slice(0, 80))
 

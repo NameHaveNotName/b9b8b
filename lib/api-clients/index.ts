@@ -6,7 +6,8 @@
  * 确保工作流路由无需修改即可运行。
  */
 
-import { generateText, generateImage, generateConceptSceneWithEdit, uploadBufferToR2 } from './xiaomi'
+import { generateText, generateImage, generateConceptSceneWithEdit, generateVisionText, uploadBufferToR2 } from './xiaomi'
+import type { GenerateVisionTextParams } from './xiaomi'
 import { IMAGE_MODELS, TEXT_MODELS } from '@/lib/models-config'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 
@@ -37,6 +38,7 @@ export interface TextClient {
     prompt: string,
     options?: { temperature?: number; maxTokens?: number; parseJson?: boolean; model?: string }
   ): Promise<string>
+  generateVision(params: GenerateVisionTextParams): Promise<string>
 }
 
 let _textClient: TextClient | null = null
@@ -45,10 +47,7 @@ export async function getTextClient(): Promise<TextClient> {
   if (!_textClient) {
     _textClient = {
       async generate(prompt, options = {}) {
-        // 优先使用调用方指定的模型
         let model = options.model || TEXT_MODELS.IDEATION
-        // 根据 prompt 内容推断步骤类型，选用对应模型（仅在未指定时）
-        // 注意：匹配词必须足够特异，避免日常剧情描述中的常见词被误匹配
         if (!options.model) {
           if (prompt.includes('质检总监') || prompt.includes('一致性检测') || prompt.includes('影片评测')) {
             model = TEXT_MODELS.REVIEW
@@ -59,6 +58,9 @@ export async function getTextClient(): Promise<TextClient> {
           }
         }
         return generateText(prompt, model, options.maxTokens ?? 8192)
+      },
+      async generateVision(params) {
+        return generateVisionText(params)
       },
     }
   }
@@ -112,35 +114,39 @@ export interface ImageClient {
     framework: any,
     count: number,
     aspectRatio?: string,
-    imageModel?: string
+    imageModel?: string,
+    userReferenceUrls?: string[]
   ): Promise<StyleSample[]>
   generateCharacterPortrait(
     projectId: string,
     character: any,
-    styleRefUrl?: string,       // Phase 6: 可选风格图 URL（跳过风格统一时为空）
-    stylePrompt?: string,       // 可选：原始风格提示词（可放到 prompt 内）
-    aspectRatio?: string,       // 可选：画面比例
-    imageModel?: string         // 可选：生图模型
+    styleRefUrl?: string,
+    stylePrompt?: string,
+    aspectRatio?: string,
+    imageModel?: string,
+    userReferenceUrls?: string[]
   ): Promise<CharacterPortraitResult>
   generateConceptScene(
     projectId: string,
     sceneDesc: string,
-    styleRefUrl: string,       // 改为风格图 URL
-    stylePrompt?: string,      // 可选：风格提示词
-    characterImageUrls?: string[], // 工作指令.txt（Round 6）：可选角色图数组（多图参考）
-    size?: string,             // 可选：尺寸
-    aspectRatio?: string,      // 可选：纵横比
-    imageModel?: string,       // 可选：生图模型
-    characterDescs?: Array<{ name: string; description: string }> // 可选：角色名称/描述（用于 prompt 强调一致性）
+    styleRefUrl: string,
+    stylePrompt?: string,
+    characterImageUrls?: string[],
+    size?: string,
+    aspectRatio?: string,
+    imageModel?: string,
+    characterDescs?: Array<{ name: string; description: string }>,
+    userReferenceUrls?: string[]
   ): Promise<ConceptSceneResult>
   generateKeyframe(
     projectId: string,
     sceneDesc: string,
-    styleRefUrl: string,       // 风格图 URL
+    styleRefUrl: string,
     frameType: 'first' | 'last',
-    aspectRatio?: string,      // 可选：画面比例
-    imageModel?: string,       // 可选：生图模型
-    characterImageUrls?: string[] // 可选：角色参考图数组
+    aspectRatio?: string,
+    imageModel?: string,
+    characterImageUrls?: string[],
+    userReferenceUrls?: string[]
   ): Promise<KeyframeResult>
 }
 
@@ -149,7 +155,7 @@ let _imageClient: ImageClient | null = null
 export async function getImageClient(): Promise<ImageClient> {
   if (!_imageClient) {
     _imageClient = {
-      async generateStyleSamples(projectId, framework, count, aspectRatio?, imageModel?) {
+      async generateStyleSamples(projectId, framework, count, aspectRatio?, imageModel?, userReferenceUrls?) {
         const styleBase =
           framework?.styleGuide ||
           framework?.visualStyle ||
@@ -170,6 +176,7 @@ export async function getImageClient(): Promise<ImageClient> {
             prompt,
             aspectRatio: ar,
             watermark: false,
+            referenceImages: userReferenceUrls?.length ? userReferenceUrls : undefined,
           })
           const id = `style_${Date.now()}_${i}`
           const storageKey = `projects/${projectId}/styles/${id}.png`
@@ -179,7 +186,7 @@ export async function getImageClient(): Promise<ImageClient> {
         return results
       },
 
-      async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?) {
+      async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?, userReferenceUrls?) {
         // 豆包图生图：把风格图通过 image 字段传入，prompt 写角色描述 + 风格修饰
         // Round 6 Phase 3：强制单人肖像约束，避免多人物/面部不完整
         // Phase 5: 强制单人肖像约束 + negative 描述避免多人/面部不完整
@@ -190,6 +197,7 @@ export async function getImageClient(): Promise<ImageClient> {
           model: imageModel || IMAGE_MODELS.primary,
           prompt,
           referenceImageUrl: styleRefUrl,
+          referenceImages: userReferenceUrls?.length ? userReferenceUrls : undefined,
           aspectRatio: aspectRatio || '16:9',
           watermark: false,
         })
@@ -198,11 +206,11 @@ export async function getImageClient(): Promise<ImageClient> {
         return { url, storageKey, characterId: character.id, isMock: !!isMock, ...(lastError ? { lastError } : {}) }
       },
 
-      async generateConceptScene(projectId, sceneDesc, styleRefUrl, _stylePrompt?, characterImageUrls?, _size?, aspectRatio?, imageModel?, characterDescs?) {
-        // 收集所有参考图：风格图 + 角色图
+      async generateConceptScene(projectId, sceneDesc, styleRefUrl, _stylePrompt?, characterImageUrls?, _size?, aspectRatio?, imageModel?, characterDescs?, userReferenceUrls?) {
         const refs: string[] = []
         if (styleRefUrl) refs.push(styleRefUrl)
         if (characterImageUrls?.length) refs.push(...characterImageUrls)
+        if (userReferenceUrls?.length) refs.push(...userReferenceUrls)
 
         // 用文字强调角色一致性（模型不一定能自动识别角色参考图）
         const characterHint = characterDescs?.length
@@ -252,7 +260,7 @@ export async function getImageClient(): Promise<ImageClient> {
         }
       },
 
-      async generateKeyframe(projectId, sceneDesc, styleRefUrl, frameType, aspectRatio?, imageModel?, characterImageUrls?) {
+      async generateKeyframe(projectId, sceneDesc, styleRefUrl, frameType, aspectRatio?, imageModel?, characterImageUrls?, userReferenceUrls?) {
         const phase =
           frameType === 'first'
             ? 'opening moment, anticipatory posture'
@@ -260,10 +268,12 @@ export async function getImageClient(): Promise<ImageClient> {
         const prompt = `${sceneDesc}, ${phase}, cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism`
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
         console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${imageModel || '默认'}`)
-        // 构建多图参考：风格图 + 角色图
         const refImages: string[] = [styleRefUrl]
         if (characterImageUrls && characterImageUrls.length > 0) {
           refImages.push(...characterImageUrls)
+        }
+        if (userReferenceUrls && userReferenceUrls.length > 0) {
+          refImages.push(...userReferenceUrls)
         }
         const { buffer } = await generateImage({
           model: imageModel || IMAGE_MODELS.primary,

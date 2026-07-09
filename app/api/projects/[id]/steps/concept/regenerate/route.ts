@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
-import { getStyleRefUrl } from '@/lib/style-ref'
+import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, DEFAULT_REGENERATE_COST } from '@/lib/points'
 
@@ -82,6 +82,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     .map((a) => a.url)
     .filter((u) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u)) as string[]
 
+  const refs = await getProjectReferences(params.id).catch(() => [])
+  const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+
   // 读取旧 Asset 的 metadata，获取原图 prompt 和 size（在删除前读取）
   const oldAsset = await prisma.asset.findUnique({ where: { id: assetId } })
   const oldMetadata = (oldAsset?.metadata || {}) as any
@@ -137,7 +140,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       characterImageUrls,
       originalSize,
       newRatio,
-      newModel
+      newModel,
+      undefined,
+      userRefUrls
     )
 
     const newAsset = await prisma.asset.create({

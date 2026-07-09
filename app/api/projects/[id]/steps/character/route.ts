@@ -7,7 +7,7 @@ import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
-import { getStyleRefUrl } from '@/lib/style-ref'
+import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 import { logOperation } from '@/lib/operations'
 import { STEP_COSTS } from '@/lib/points-config'
@@ -198,6 +198,9 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         }
       }
 
+      const refs = await getProjectReferences(params.id).catch(() => [])
+      const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+
       const imageClient = await getImageClient()
       const portraits = []
       const failedCharacters: string[] = []
@@ -217,7 +220,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
             styleRefUrl,
             stylePrompt,
             aspectRatio,
-            imageModel
+            imageModel,
+            userRefUrls
           )
           // 防御：确保 result 包含必需的 url 和 storageKey
           if (!result?.url || !result?.storageKey) {
@@ -332,6 +336,9 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       console.log('[CHARACTER] 无风格图，直接文生图')
     }
 
+    const refsCompat = await getProjectReferences(params.id).catch(() => [])
+    const userRefUrlsCompat = refsCompat.filter(r => r.url).map(r => r.url)
+
     // 1. 用文本模板生成角色提示词
     const prompt = loadPromptTemplate('character', {
       USER_INPUT: JSON.stringify(framework)
@@ -360,7 +367,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           params.id,
           enrichedCharacter,
           styleRefUrl,
-          stylePrompt
+          stylePrompt,
+          undefined,
+          undefined,
+          userRefUrlsCompat
         )
         const asset = await prisma.asset.create({
           data: {

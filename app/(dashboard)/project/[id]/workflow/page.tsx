@@ -44,6 +44,7 @@ import { getStepDisplayState, prismaTypeToStepId } from '@/lib/workflow-state'
 import { exportFrameworkToWord } from '@/lib/framework-export'
 import FrameworkImportModal from '@/components/framework/FrameworkImportModal'
 import IdeationDeepenPanel from '@/components/workflow/IdeationDeepenPanel'
+import ReferenceBar from '@/components/workflow/ReferenceBar'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -376,6 +377,12 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         <h1 className="text-2xl font-bold text-stone-800">{project.title}</h1>
         <p className="mt-1 text-sm text-stone-500">工作流看板 — 共 {VISIBLE_STEP_TYPES.length} 步</p>
       </div>
+
+      {/* ReferenceBar */}
+      <ReferenceBar
+        projectId={params.id}
+        defaultExpanded={currentActive === 'IDEATION'}
+      />
 
       {/* TopStepper */}
       <TopStepper

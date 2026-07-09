@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
-import { getStyleRefUrl } from '@/lib/style-ref'
+import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 import { logOperation } from '@/lib/operations'
@@ -215,6 +215,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         }))
         .filter((c) => c.name) as Array<{ name: string; description: string }>
 
+      const refs = await getProjectReferences(params.id).catch(() => [])
+      const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+
       const imageClient = await getImageClient()
       const scenes = []
       const failedScenes: string[] = []
@@ -230,7 +233,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             undefined,
             aspectRatio,
             imageModel,
-            characterDescs
+            characterDescs,
+            userRefUrls
           )
           const asset = await prisma.asset.create({
             data: {
@@ -351,6 +355,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       `[CONCEPT-READ] 角色图数量: ${characterImageUrls.length}, http(s) 数量: ${characterImageUrls.filter((u) => /^https?:\/\//i.test(u)).length}`
     )
 
+    const refs = await getProjectReferences(params.id).catch(() => [])
+    const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+
     // 1. 用文本模板生成概念图提示词
     const prompt = loadPromptTemplate('concept', {
       USER_INPUT: JSON.stringify({ framework, selectedStyle: stylePrompt })
@@ -390,7 +397,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             finalPrompt,
             styleRefUrl,
             stylePrompt,
-            characterImageUrls
+            characterImageUrls,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            userRefUrls
           )
           const asset = await prisma.asset.create({
             data: {

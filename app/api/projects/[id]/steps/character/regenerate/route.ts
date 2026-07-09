@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
-import { getStyleRefUrl } from '@/lib/style-ref'
+import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, DEFAULT_REGENERATE_COST } from '@/lib/points'
 
@@ -86,6 +86,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   try {
+    const refs = await getProjectReferences(params.id).catch(() => [])
+    const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+
     const imageClient = await getImageClient()
     const result = await imageClient.generateCharacterPortrait(
       params.id,
@@ -93,7 +96,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       styleRefUrl,
       stylePrompt,
       newRatio,
-      newModel
+      newModel,
+      userRefUrls
     )
 
     const newAsset = await prisma.asset.create({

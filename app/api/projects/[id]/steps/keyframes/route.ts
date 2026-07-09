@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
-import { getStyleRefUrl } from '@/lib/style-ref'
+import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 
@@ -192,6 +192,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const characterImageUrls = characterAssets
         .map((a) => a.url)
         .filter((u): u is string => typeof u === 'string' && u.length > 0)
+      const refs = await getProjectReferences(params.id).catch(() => [])
+      const userRefUrls = refs.filter(r => r.url).map(r => r.url)
       const results = []
 
       for (const promptItem of prompts) {
@@ -202,7 +204,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           'last',
           aspectRatio,
           imageModel,
-          characterImageUrls.length > 0 ? characterImageUrls : undefined
+          characterImageUrls.length > 0 ? characterImageUrls : undefined,
+          userRefUrls
         )
         const lastAsset = await prisma.asset.create({
           data: {
@@ -274,6 +277,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const characterImageUrls = characterAssets
       .map((a) => a.url)
       .filter((u): u is string => typeof u === 'string' && u.length > 0)
+    const refs = await getProjectReferences(params.id).catch(() => [])
+    const userRefUrls = refs.filter(r => r.url).map(r => r.url)
 
     for (const shot of shotsWithFirstFrame) {
       // Phase 4: 尾帧 — 基于起始帧 + 动作变化生成
@@ -293,7 +298,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         'last',
         undefined,
         undefined,
-        characterImageUrls.length > 0 ? characterImageUrls : undefined
+        characterImageUrls.length > 0 ? characterImageUrls : undefined,
+        userRefUrls
       )
       const lastAsset = await prisma.asset.create({
         data: {

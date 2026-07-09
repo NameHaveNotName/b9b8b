@@ -5,7 +5,7 @@ import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
-import { getStyleRefUrl } from '@/lib/style-ref'
+import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 
 /**
@@ -102,13 +102,20 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     console.log('[KEYFRAMES-GENERATE-LAST] 尾帧图像提示词生成完成')
 
+    const refs = await getProjectReferences(params.id).catch(() => [])
+    const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+
     // 调用图像生成
     const imageClient = await getImageClient()
     const result = await imageClient.generateKeyframe(
       params.id,
       imagePrompt,
       styleRefUrl,
-      'last'
+      'last',
+      undefined,
+      undefined,
+      undefined,
+      userRefUrls
     )
 
     // 创建 Asset 记录

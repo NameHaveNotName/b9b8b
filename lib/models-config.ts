@@ -217,6 +217,9 @@ export const TEXT_MODELS = {
   // 需要输出 JSON {videoPrompt, cameraMotion, duration}，DeepSeek 即可
   TRAILER_PROMPT: 'deepseek-chat',
   TRAILER_PROMPT_FALLBACK: 'gpt-4o-mini',
+
+  // 多模态视觉文本生成（用户上传参考图时使用）
+  VISION: 'gpt-4o-mini',
 }
 
 export const VIDEO_MODELS = {

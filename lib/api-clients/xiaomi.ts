@@ -178,6 +178,75 @@ export async function generateText(
   return data.choices[0].message.content
 }
 
+// ==================== 多模态文本生成（Vision）====================
+export interface VisionMessageContent {
+  type: 'text' | 'image_url'
+  text?: string
+  image_url?: { url: string; detail?: 'low' | 'high' | 'auto' }
+}
+
+export interface GenerateVisionTextParams {
+  prompt: string
+  model?: string
+  maxTokens?: number
+  temperature?: number
+  imageUrls: string[]
+  imageLabels?: string[]
+}
+
+export async function generateVisionText(params: GenerateVisionTextParams): Promise<string> {
+  const model = params.model || 'gpt-4o-mini'
+  const content: VisionMessageContent[] = []
+
+  const textParts: string[] = [params.prompt]
+
+  if (params.imageLabels && params.imageLabels.length > 0) {
+    const labelText = params.imageLabels
+      .map((label, i) => `Image ${i + 1}: [${label}]`)
+      .join('\n')
+    textParts.push(`\n[User-provided labels for reference images]\n${labelText}`)
+  }
+
+  content.push({ type: 'text', text: textParts.join('\n') })
+
+  for (const url of params.imageUrls) {
+    let finalUrl = url
+    if (!url.startsWith('data:')) {
+      try {
+        finalUrl = await resolveImageToBase64(url)
+      } catch {
+        console.warn('[VISION-TEXT] image base64 conversion failed, skipping:', url.slice(0, 80))
+        continue
+      }
+    }
+    content.push({ type: 'image_url', image_url: { url: finalUrl, detail: 'low' } })
+  }
+
+  const body: Record<string, unknown> = {
+    model,
+    messages: [{ role: 'user', content }],
+    max_tokens: params.maxTokens ?? 12000,
+    temperature: params.temperature ?? 0.7,
+  }
+
+  try {
+    const data = await xiaomiFetch('/v1/chat/completions', body)
+    return data.choices[0].message.content
+  } catch (err: any) {
+    if (err?.message?.includes('does not support image input') || err?.status === 400) {
+      console.warn('[VISION-TEXT] multimodal failed, falling back to text-only:', err?.message?.slice(0, 100))
+      const fallbackData = await xiaomiFetch('/v1/chat/completions', {
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: params.prompt }],
+        temperature: params.temperature ?? 0.7,
+        max_tokens: params.maxTokens ?? 12000,
+      })
+      return fallbackData.choices[0].message.content
+    }
+    throw err
+  }
+}
+
 // ==================== Gemini 原生图像生成 ====================
 //
 // Gemini 官方 API 格式（2026-05-24）：

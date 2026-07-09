@@ -76,3 +76,19 @@ export async function getStyleRefUrl(projectId: string): Promise<StyleRef> {
 
   return { styleRefUrl, stylePrompt, selectedStyleId }
 }
+
+export interface ProjectReference {
+  url: string
+  labels: string[]
+}
+
+export async function getProjectReferences(projectId: string): Promise<ProjectReference[]> {
+  const refs = await prisma.asset.findMany({
+    where: { projectId, type: 'REFERENCE', stepId: null },
+    orderBy: { createdAt: 'desc' },
+  })
+  return refs.map((a: any) => ({
+    url: a.url || '',
+    labels: Array.isArray(a.metadata?.labels) ? a.metadata.labels : [],
+  }))
+}

@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
+import { getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { createStep, startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
@@ -82,9 +83,36 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   await startStep(step.id)
 
   try {
-    const prompt = loadPromptTemplate('ideation', { USER_INPUT: project.rawIdea })
     const textClient = await getTextClient()
-    const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 12000 })
+
+    const references = await getProjectReferences(params.id).catch(() => [])
+    const hasRefs = references.length > 0 && references.some(r => r.url)
+
+    let resultText: string
+    if (hasRefs) {
+      const refUrls = references.filter(r => r.url).map(r => r.url)
+      const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
+      console.log(`[IDEATION-VISION] Using multimodal with ${refUrls.length} reference images, labels:`, refLabels)
+
+      const visualRefBlock = refLabels.length > 0
+        ? `【用户上传了 ${refUrls.length} 张视觉参考图，请仔细查看图片内容。用户标注的标签：${refLabels.join('、')}。\n请在创意设计时充分考虑这些视觉参考，确保角色形象、场景氛围、美术风格与参考素材保持一致。】`
+        : `【用户上传了 ${refUrls.length} 张视觉参考图，请仔细查看图片内容。\n请在创意设计时充分考虑这些视觉参考，确保角色形象、场景氛围、美术风格与参考素材保持一致。】`
+
+      const prompt = loadPromptTemplate('ideation', {
+        USER_INPUT: project.rawIdea,
+        VISUAL_REFERENCES: visualRefBlock,
+      })
+      resultText = await textClient.generateVision({
+        prompt,
+        imageUrls: refUrls,
+        imageLabels: refLabels,
+        temperature: 0.8,
+        maxTokens: 12000,
+      })
+    } else {
+      const prompt = loadPromptTemplate('ideation', { USER_INPUT: project.rawIdea, VISUAL_REFERENCES: '' })
+      resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 12000 })
+    }
 
     // 调试日志
     console.log('[IDEATION] resultText length:', resultText.length)

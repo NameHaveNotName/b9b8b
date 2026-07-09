@@ -18,7 +18,8 @@ export async function processStyleGeneration(
   projectId: string,
   styleOptions: StyleOption[],
   aspectRatio: string = '16:9',
-  imageModel?: string
+  imageModel?: string,
+  userRefUrls?: string[]
 ) {
   console.log(`[StyleProcessor-ENTER] stepId=${stepId}, projectId=${projectId}, styleOptions=${styleOptions.length}, ratio=${aspectRatio}, imageModel=${imageModel || '默认'}`)
   console.log(`[ASPECT-RATIO] [StyleProcessor] Starting for step ${stepId}, ratio: ${aspectRatio}`)
@@ -55,6 +56,7 @@ export async function processStyleGeneration(
               model: modelId,
               prompt: opt.prompt,
               aspectRatio,
+              referenceImages: userRefUrls?.length ? userRefUrls : undefined,
             })
             console.log(`[STYLE-GEN-EXIT] generateImage 返回，风格 ${idx + 1}: ${opt.styleName}, isMock=${!!isMock}, usedModel=${usedModel}`)
 
