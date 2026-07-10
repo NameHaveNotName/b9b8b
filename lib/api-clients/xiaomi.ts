@@ -843,18 +843,33 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
             } catch (retryErr: any) {
               retries++
               if (retryErr instanceof XiaomiHttpError && retryErr.status === 429 && retries < RATE_LIMIT_MAX_RETRIES) {
-                const delay = Math.pow(2, retries - 1) * 1000 // 1s, 2s, 4s
+                const delay = Math.pow(2, retries - 1) * 1000
                 console.warn(`[Image] 429 rate limit, retry ${retries}/${RATE_LIMIT_MAX_RETRIES}, waiting ${delay}ms`)
                 await new Promise((r) => setTimeout(r, delay))
                 continue
               }
-              // 非 429 或已达最大重试次数，跳出 429 重试
               lastError = retryErr
               break
             }
           }
-          // 429 重试已全部失败，继续外层模型 fallback
           console.warn(`[Image] model=${tryModel} 429 retries exhausted`)
+          break
+        }
+
+        // "does not support image input" — 移除参考图后重试
+        const errMsg = String(e?.message || '')
+        if (/does not support image input/i.test(errMsg) && (subParams.referenceImageUrl || subParams.referenceImages?.length)) {
+          console.warn(`[Image] model=${tryModel} 不支持 image 字段, 移除参考图重试`)
+          const stripped = { ...subParams, referenceImageUrl: undefined, referenceImages: undefined }
+          try {
+            const raw = await callXiaomiImageOnce(stripped)
+            const buffer = await rawToBuffer(raw)
+            return { buffer, url: raw.url || '', model: tryModel, revisedPrompt: raw.revisedPrompt, isMock: false }
+          } catch (strippedErr: any) {
+            console.warn(`[Image] 移除参考图后仍然失败: ${strippedErr?.message}`)
+            lastError = strippedErr
+          }
+          // 参考图移除后也走了，不再重试该模型的其它 attempt
           break
         }
 
