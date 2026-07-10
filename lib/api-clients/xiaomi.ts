@@ -409,7 +409,7 @@ type ModelKind = 'doubao-multi' | 'doubao' | 'dalle' | 'flux' | 'generic'
 function classifyModel(model: string): ModelKind {
   const m = model.toLowerCase()
   // 豆包多图模型（seedream-4-0/4-1/4.5）: image 字段传数组
-  if (m.includes('seedream-4-0') || m.includes('seedream-4-1') || m.includes('seedream-4.5')) return 'doubao-multi'
+  if (m.includes('seedream-4-0') || m.includes('seedream-4-1') || m.includes('seedream-4.5') || m.includes('seedream-5')) return 'doubao-multi'
   // 豆包单图模型（seedream-3-0/4-5 及新 7 模型中的 doubao-seedream-4.5）
   if (m.includes('doubao') || m.includes('seedream')) return 'doubao'
   // OpenAI 系列：dall-e-3 / gpt-image-1 / gpt-image-2 — 固定像素 size，不支持 aspect_ratio
