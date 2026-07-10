@@ -190,7 +190,7 @@ export async function getImageClient(): Promise<ImageClient> {
         const prompt = `${character.description || character.name || ''}, solo, single person, only one character. Avoid: multiple people, crowd, group shot.`
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${aspectRatio || '16:9'}`)
         const model = imageModel || IMAGE_MODELS.primary
-        console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: style=${!!styleRefUrl} user=${hasUserRefs}`)
+        console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: style=${!!styleRefUrl} user=${hasUserRefs} (${userReferenceUrls?.map((u: string) => u.slice(0, 30)).join(', ')})`)
         const { buffer, isMock, lastError } = await generateImage({
           model,
           prompt,

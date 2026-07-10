@@ -451,17 +451,20 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
 
   function normalizeRefs(): string[] {
     const refs: string[] = []
-    // 风格参考图优先级最高，放第一位
-    if (p.referenceImageUrl && typeof p.referenceImageUrl === 'string' && /^https?:\/\//i.test(p.referenceImageUrl)) {
+    const isValidUrl = (u: string) => /^(https?:\/\/|data:)/i.test(u)
+    if (p.referenceImageUrl && typeof p.referenceImageUrl === 'string' && isValidUrl(p.referenceImageUrl)) {
       refs.push(p.referenceImageUrl)
     }
-    // 多图参考（角色图、用户上传参考图）追加在后面
     if (Array.isArray(p.referenceImages)) {
       for (const u of p.referenceImages) {
-        if (typeof u === 'string' && /^https?:\/\//i.test(u) && !refs.includes(u)) {
+        if (typeof u === 'string' && isValidUrl(u) && !refs.includes(u)) {
           refs.push(u)
         }
       }
+    }
+    if (p.referenceImages && (p.referenceImages as any[]).length > 0 && refs.length === 0) {
+      const sample = String(p.referenceImages[0]).slice(0, 80)
+      console.warn(`[XIAOMI-IMG] normalizeRefs: ${(p.referenceImages as any[]).length} 参考图均无效(非http/data), 第一个: ${sample}`)
     }
     return refs
   }

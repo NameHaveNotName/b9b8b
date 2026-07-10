@@ -1,4 +1,19 @@
 import { prisma } from '@/lib/prisma'
+import { getSignedFileUrl } from '@/lib/r2'
+
+function resolveLocalFileToDataUrl(relativePath: string): string | null {
+  if (!relativePath.startsWith('/')) return null
+  try {
+    const fs = require('fs')
+    const path = require('path')
+    const filePath = path.join(process.cwd(), 'public', relativePath)
+    if (!fs.existsSync(filePath)) return null
+    const buffer = fs.readFileSync(filePath)
+    const ext = relativePath.split('.').pop()?.toLowerCase() || 'png'
+    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'
+    return `data:${mime};base64,${buffer.toString('base64')}`
+  } catch { return null }
+}
 
 /**
  * 工作指令.txt（Round 5 修复 #2）：统一提取 styleRefUrl + stylePrompt 的公共函数。
@@ -90,8 +105,19 @@ export async function getProjectReferences(projectId: string): Promise<ProjectRe
     where: { projectId, type: 'REFERENCE', stepId: null },
     orderBy: { createdAt: 'desc' },
   })
-  return refs.map((a: any) => ({
-    url: a.url || '',
-    labels: Array.isArray(a.metadata?.labels) ? a.metadata.labels : [],
-  }))
+  const results: ProjectReference[] = []
+  for (const a of refs) {
+    let url: string = (a.url as string) || ''
+    try { url = await getSignedFileUrl(a.storageKey, 3600) } catch { /* keep stored url */ }
+    if (url && !url.startsWith('http') && !url.startsWith('data:')) {
+      const dataUrl = resolveLocalFileToDataUrl(url)
+      if (dataUrl) url = dataUrl
+    }
+    results.push({
+      url,
+      labels: Array.isArray((a.metadata as any)?.labels) ? (a.metadata as any).labels : [],
+    })
+  }
+  console.log(`[GET-PROJECT-REFS] projectId=${projectId}, count=${results.length}, urls=${results.map(r => r.url?.slice(0, 40)).join('|')}`)
+  return results
 }
