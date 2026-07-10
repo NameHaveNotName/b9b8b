@@ -199,6 +199,9 @@ export async function getImageClient(): Promise<ImageClient> {
           aspectRatio: aspectRatio || '16:9',
           watermark: false,
         })
+
+        // normalizeRefs 在 buildPayload 中将 referenceImageUrl + referenceImages
+        // 合并为一个有序数组，styleRefUrl 自动排在最前（最高优先级）。
         const storageKey = `projects/${projectId}/characters/${character.id}.png`
         const url = await uploadOrDataFallback(storageKey, buffer, 'image/png')
         return { url, storageKey, characterId: character.id, isMock: !!isMock, ...(lastError ? { lastError } : {}) }

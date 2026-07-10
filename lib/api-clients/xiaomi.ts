@@ -449,6 +449,25 @@ function resolveSize(model: string, aspectRatio?: string, explicitSize?: string)
 function buildPayload(p: GenerateImageParams): Record<string, any> {
   const kind = classifyModel(p.model)
 
+  function normalizeRefs(): string[] {
+    const refs: string[] = []
+    // 风格参考图优先级最高，放第一位
+    if (p.referenceImageUrl && typeof p.referenceImageUrl === 'string' && /^https?:\/\//i.test(p.referenceImageUrl)) {
+      refs.push(p.referenceImageUrl)
+    }
+    // 多图参考（角色图、用户上传参考图）追加在后面
+    if (Array.isArray(p.referenceImages)) {
+      for (const u of p.referenceImages) {
+        if (typeof u === 'string' && /^https?:\/\//i.test(u) && !refs.includes(u)) {
+          refs.push(u)
+        }
+      }
+    }
+    return refs
+  }
+
+  const allRefs = normalizeRefs()
+
   // 工作指令.txt（防御版）：软截断 prompt 到 PROMPT_MAX_LEN，避免网关 invalid request body
   const promptRaw = p.prompt || ''
   if (!promptRaw || promptRaw.trim().length === 0) {
@@ -468,8 +487,6 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
   const resolvedSize = resolveSize(p.model, p.aspectRatio, p.size)
 
   if (kind === 'doubao-multi') {
-    // 工作指令.txt（Round 6 任务一）：豆包多图模型 doubao-seedream-4-0-250828。
-    // image 字段为数组，最多 N 张参考图。常用于概念图同时参考风格图 + 角色图。
     const body: Record<string, any> = {
       model: p.model,
       prompt,
@@ -480,22 +497,9 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
       max_images: p.maxImages ?? 1,
     }
 
-    // 收集所有参考图（数组 + 单图都接受），过滤非 http(s)
-    const collected: string[] = []
-    if (Array.isArray(p.referenceImages)) {
-      for (const u of p.referenceImages) {
-        if (typeof u === 'string' && /^https?:\/\//i.test(u)) collected.push(u)
-        else if (typeof u === 'string' && u.length > 0)
-          console.warn(`[XIAOMI-IMG] 多图：跳过非 http(s) 参考图（前80字符）：${u.slice(0, 80)}`)
-      }
-    }
-    if (p.referenceImageUrl && /^https?:\/\//i.test(p.referenceImageUrl)) {
-      collected.push(p.referenceImageUrl)
-    }
-
-    if (collected.length > 0) {
-      body.image = collected
-      console.log(`[XIAOMI-IMG] 多图模型 ${p.model}：传入 ${collected.length} 张参考图`)
+    if (allRefs.length > 0) {
+      body.image = allRefs
+      console.log(`[XIAOMI-IMG] 多图模型 ${p.model}：传入 ${allRefs.length} 张参考图`)
     } else {
       console.warn(`[XIAOMI-IMG] 多图模型 ${p.model}：无 http(s) 参考图，降级为纯文生图`)
     }
@@ -509,44 +513,24 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
       size: resolvedSize,
       watermark: p.watermark ?? false,
     }
-    // 关键：图生图参考图（必须是 http(s) 公开可访问 URL）
-    // 工作指令.txt（Round 4 修复 #3）：data: URL 不再抛 STORAGE_001，降级为纯文生图，
-    // 让人物设计能继续完成（即便没有参考图，至少能拿到角色概念图占位）。
-    if (p.referenceImageUrl) {
-      if (!/^https?:\/\//i.test(p.referenceImageUrl)) {
-        console.warn(
-          `[XIAOMI-IMG] referenceImageUrl 非 http(s)（可能是 data: URL 或 R2 上传失败兜底），降级为纯文生图。URL前120字符：${p.referenceImageUrl.slice(0, 120)}`
-        )
-      } else {
-        body.image = p.referenceImageUrl
-      }
+    // 单图参考：取 allRefs 第一个（referenceImageUrl 优先，因为它排在最前）
+    if (allRefs.length > 0) {
+      body.image = allRefs[0]
+      console.log(`[XIAOMI-IMG] 单图模型 ${p.model}：传入 1 张参考图（共 ${allRefs.length} 张可用）`)
     }
     return body
   }
 
   if (kind === 'dalle') {
-    // gpt-image-2 支持多图参考（referenceImages 数组）或单图参考（referenceImageUrl 字符串）
-    if (p.referenceImages && Array.isArray(p.referenceImages) && p.referenceImages.length > 0) {
-      const httpRefs = p.referenceImages.filter((u) => /^https?:\/\//i.test(u))
-      if (httpRefs.length > 0) {
-        console.log(`[Image] DALL-E/gpt-image: 传入 ${httpRefs.length} 张参考图`)
-        return {
-          model: p.model,
-          prompt,
-          n: typeof p.n === 'number' ? p.n : 1,
-          size: mapToDalleSize(p.size, p.aspectRatio),
-          image: httpRefs,
-        }
-      }
-    }
-    if (p.referenceImageUrl && /^https?:\/\//i.test(p.referenceImageUrl)) {
-      console.log(`[Image] DALL-E/gpt-image: 单图参考，前80字符: ${p.referenceImageUrl.slice(0, 80)}`)
+    if (allRefs.length > 0) {
+      const ref = allRefs.length === 1 ? allRefs[0] : allRefs
+      console.log(`[Image] DALL-E/gpt-image: 传入 ${allRefs.length} 张参考图`)
       return {
         model: p.model,
         prompt,
         n: typeof p.n === 'number' ? p.n : 1,
         size: mapToDalleSize(p.size, p.aspectRatio),
-        image: p.referenceImageUrl,
+        image: ref,
       }
     }
     console.warn(`[Image] DALL-E/gpt-image: 无有效 http(s) 参考图，降级为纯文生图`)
