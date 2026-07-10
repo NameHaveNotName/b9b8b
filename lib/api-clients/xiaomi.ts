@@ -18,7 +18,7 @@ const PROMPT_MAX_LEN = 900
 // 供应商代理支持的模型名可能与业务层 ID 不同，在此维护映射关系。
 const PROVIDER_MODEL_MAP: Record<string, string> = {
   'doubao-seedream-4.5': 'doubao-seedream-5.0-lite', // 供应商实际支持的模型名
-  'gpt-image-2': 'gpt-image-2',
+  'gpt-image-2': 'gpt-image-2-all',
   'flux.1-kontext-pro': 'flux.1-kontext-pro',
   'kling-omni-image': 'kling-omni-image',
   'gemini-3.1-flash-image': 'gemini-3.1-flash-image',
