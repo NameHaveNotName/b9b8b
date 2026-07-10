@@ -189,8 +189,7 @@ export async function getImageClient(): Promise<ImageClient> {
         const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
         const prompt = `${character.description || character.name || ''}, solo, single person, only one character. Avoid: multiple people, crowd, group shot.`
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${aspectRatio || '16:9'}`)
-        const REF_SUPPORT_MODEL = 'doubao-seedream-4.5'
-        const model = imageModel || (hasUserRefs ? REF_SUPPORT_MODEL : IMAGE_MODELS.primary)
+        const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: style=${!!styleRefUrl} user=${hasUserRefs} (${userReferenceUrls?.map((u: string) => u.slice(0, 30)).join(', ')})`)
         const { buffer, isMock, lastError } = await generateImage({
           model,
@@ -216,9 +215,7 @@ export async function getImageClient(): Promise<ImageClient> {
 
         const prompt = sceneDesc || ''
 
-        const REF_SUPPORT_MODEL_C = 'doubao-seedream-4.5'
-        const hasConceptRefs = refs.length > 0
-        const model = imageModel || (hasConceptRefs ? REF_SUPPORT_MODEL_C : IMAGE_MODELS.primary)
+        const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateConceptScene] 模型: ${model}, 参考图: ${refs.length} 张`)
 
         const { buffer, isMock, lastError } = await generateImage({
@@ -252,9 +249,7 @@ export async function getImageClient(): Promise<ImageClient> {
             : 'closing moment, action resolution'
         const prompt = `${sceneDesc}, ${phase}`
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
-        const hasRefs = (userReferenceUrls?.length || 0) + (characterImageUrls?.length || 0) > 0
-        const KEYF_REF_MODEL = 'doubao-seedream-4.5'
-        const model = imageModel || (hasRefs ? KEYF_REF_MODEL : IMAGE_MODELS.primary)
+        const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${model}`)
         const refImages: string[] = [styleRefUrl]
         if (characterImageUrls && characterImageUrls.length > 0) {
