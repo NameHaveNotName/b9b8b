@@ -4,7 +4,7 @@
 
 export const IMAGE_MODELS = {
   // 主模型（默认）
-  primary: 'doubao-seedream-4.5' as const,
+  primary: 'gpt-image-2' as const,
 
   // 全部可用模型
   available: [
@@ -154,17 +154,17 @@ Object.defineProperty(IMAGE_MODELS, 'STYLE', {
   configurable: true,
 });
 Object.defineProperty(IMAGE_MODELS, 'CHARACTER', {
-  get() { return 'doubao-seedream-4.5'; },
+  get() { return this.primary; },
   enumerable: false,
   configurable: true,
 });
 Object.defineProperty(IMAGE_MODELS, 'CONCEPT', {
-  get() { return 'doubao-seedream-4.5'; },
+  get() { return this.primary; },
   enumerable: false,
   configurable: true,
 });
 Object.defineProperty(IMAGE_MODELS, 'KEYFRAME', {
-  get() { return 'doubao-seedream-4.5'; },
+  get() { return this.primary; },
   enumerable: false,
   configurable: true,
 });
@@ -177,24 +177,24 @@ Object.defineProperty(IMAGE_MODELS, 'KEYFRAME', {
   defaultSize: '16:9',
 };
 (IMAGE_MODELS as any).characterDesign = {
-  primary: 'doubao-seedream-4.5',
-  fallback: 'doubao-seedream-4.5',
+  primary: IMAGE_MODELS.primary,
+  fallback: 'gpt-image-2',
   defaultSize: '2K',
 };
 (IMAGE_MODELS as any).conceptArt = {
-  primary: 'doubao-seedream-4.5',
-  fallback: 'doubao-seedream-4.5',
+  primary: IMAGE_MODELS.primary,
+  fallback: 'gpt-image-2',
   defaultSize: '2K',
   supportsMultipleImages: true,
 };
 (IMAGE_MODELS as any).keyframes = {
-  primary: 'doubao-seedream-4.5',
-  fallback: 'doubao-seedream-4.5',
+  primary: IMAGE_MODELS.primary,
+  fallback: 'gpt-image-2',
   defaultSize: '2K',
 };
 (IMAGE_MODELS as any).representative = {
-  primary: 'doubao-seedream-4.5',
-  fallback: 'doubao-seedream-4.5',
+  primary: IMAGE_MODELS.primary,
+  fallback: 'gpt-image-2',
   defaultSize: '2K',
 };
 

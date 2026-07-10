@@ -187,16 +187,10 @@ export async function getImageClient(): Promise<ImageClient> {
 
       async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?, userReferenceUrls?) {
         const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
-        const styleTag = 'cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism'
-
-        const refLabelHint = hasUserRefs
-          ? 'Follow the character appearance from the provided reference images. '
-          : ''
-
-        const prompt = `${refLabelHint}character portrait of ${character.name}, ${character.description || ''}, solo, single person, only one character, complete full face clearly visible, front facing, full head in frame, centered composition, ${styleTag}, full body shot. Avoid: multiple people, crowd, group shot, partial face, cropped head, off-center face, back view, profile view, obscured face.`
+        const prompt = `${character.description || character.name || ''}, solo, single person, only one character. Avoid: multiple people, crowd, group shot.`
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${aspectRatio || '16:9'}`)
-        const model = imageModel || (hasUserRefs ? 'gpt-image-2' : IMAGE_MODELS.primary)
-        console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}${hasUserRefs ? ' (多图参考→gpt-image-2)' : ''}`)
+        const model = imageModel || IMAGE_MODELS.primary
+        console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: style=${!!styleRefUrl} user=${hasUserRefs}`)
         const { buffer, isMock, lastError } = await generateImage({
           model,
           prompt,
@@ -219,37 +213,11 @@ export async function getImageClient(): Promise<ImageClient> {
         if (characterImageUrls?.length) refs.push(...characterImageUrls)
         if (userReferenceUrls?.length) refs.push(...userReferenceUrls)
 
-        // 用文字强调角色一致性（模型不一定能自动识别角色参考图）
-        const characterHint = characterDescs?.length
-          ? `Keep the following characters visually consistent: ${characterDescs
-              .map((c) => `${c.name}${c.description ? ` (${c.description})` : ''}`)
-              .join('; ')}.`
-          : ''
-
-        // 明确第一张参考图是风格参考
-        const styleHint = styleRefUrl
-          ? 'Use the first reference image as the visual style reference.'
-          : ''
-
-        const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
-
-        const refLabelHint = hasUserRefs
-          ? 'Follow the visual references from all provided images for scene composition and character appearance. '
-          : ''
-
-        const prompt = [
-          styleHint,
-          refLabelHint,
-          characterHint,
-          sceneDesc,
-          'cinematic wide shot, atmospheric depth, 8k, poetic realism',
-        ]
-          .filter(Boolean)
-          .join('. ')
+        const prompt = sceneDesc || ''
 
         console.log(`[MODEL-SELECT] [generateConceptScene] 模型: ${imageModel || '默认'}, 参考图: ${refs.length} 张`)
 
-        const model = imageModel || (hasUserRefs ? 'gpt-image-2' : IMAGE_MODELS.primary)
+        const model = imageModel || IMAGE_MODELS.primary
 
         const { buffer, isMock, lastError } = await generateImage({
           model,
@@ -280,12 +248,9 @@ export async function getImageClient(): Promise<ImageClient> {
           frameType === 'first'
             ? 'opening moment, anticipatory posture'
             : 'closing moment, action resolution'
-        const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
-        const prompt = hasUserRefs
-          ? `Follow the visual references from the provided images. ${sceneDesc}, ${phase}, cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism`
-          : `${sceneDesc}, ${phase}, cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism`
+        const prompt = `${sceneDesc}, ${phase}`
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
-        const model = imageModel || (hasUserRefs ? 'gpt-image-2' : IMAGE_MODELS.primary)
+        const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${model}`)
         const refImages: string[] = [styleRefUrl]
         if (characterImageUrls && characterImageUrls.length > 0) {
