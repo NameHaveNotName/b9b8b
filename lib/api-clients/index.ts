@@ -114,8 +114,7 @@ export interface ImageClient {
     framework: any,
     count: number,
     aspectRatio?: string,
-    imageModel?: string,
-    userReferenceUrls?: string[]
+    imageModel?: string
   ): Promise<StyleSample[]>
   generateCharacterPortrait(
     projectId: string,
@@ -155,7 +154,7 @@ let _imageClient: ImageClient | null = null
 export async function getImageClient(): Promise<ImageClient> {
   if (!_imageClient) {
     _imageClient = {
-      async generateStyleSamples(projectId, framework, count, aspectRatio?, imageModel?, userReferenceUrls?) {
+      async generateStyleSamples(projectId, framework, count, aspectRatio?, imageModel?) {
         const styleBase =
           framework?.styleGuide ||
           framework?.visualStyle ||
@@ -176,7 +175,6 @@ export async function getImageClient(): Promise<ImageClient> {
             prompt,
             aspectRatio: ar,
             watermark: false,
-            referenceImages: userReferenceUrls?.length ? userReferenceUrls : undefined,
           })
           const id = `style_${Date.now()}_${i}`
           const storageKey = `projects/${projectId}/styles/${id}.png`

@@ -13,7 +13,6 @@ import { processStyleGeneration } from '@/lib/style-processor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 import { logOperation } from '@/lib/operations'
 import { STEP_COSTS } from '@/lib/points-config'
-import { getProjectReferences } from '@/lib/style-ref'
 
 const styleQueue = createQueue('style-generation')
 
@@ -218,9 +217,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       modelNo: p.modelNo,
     }))
 
-    const refs = await getProjectReferences(params.id).catch(() => [])
-    const userRefUrls = refs.filter(r => r.url).map(r => r.url)
-
     try {
       const useQueue = process.env.STYLE_USE_QUEUE === '1'
       let queued = false
@@ -229,7 +225,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         try {
           await styleQueue.add(
             'generate-style-images',
-            { stepId: step.id, projectId: params.id, styleOptions, aspectRatio, imageModel, userRefUrls },
+            { stepId: step.id, projectId: params.id, styleOptions, aspectRatio, imageModel },
             {
               attempts: 2,
               backoff: { type: 'exponential', delay: 3000 },
@@ -250,7 +246,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           (async () => {
             console.log(`[STYLE-IMAGE] waitUntil 回调开始执行，stepId=${step.id}`)
             try {
-              await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel, userRefUrls)
+              await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel)
               console.log(`[STYLE-IMAGE] waitUntil 回调成功完成，stepId=${step.id}`)
             } catch (e: any) {
               // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
@@ -338,9 +334,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   await startStep(step.id)
 
-  const refsCompat = await getProjectReferences(params.id).catch(() => [])
-  const userRefUrlsCompat = refsCompat.filter(r => r.url).map(r => r.url)
-
   try {
     const framework = project.framework || (frameworkStep.outputData as any)
     const storyBrief = framework?.synopsis || framework?.storyBrief || ''
@@ -426,7 +419,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         (async () => {
           console.log(`[STYLE] waitUntil 回调开始执行（compat），stepId=${step.id}`)
           try {
-            await processStyleGeneration(step.id, params.id, styleOptions, undefined, undefined, userRefUrlsCompat)
+            await processStyleGeneration(step.id, params.id, styleOptions, undefined, undefined)
             console.log(`[STYLE] waitUntil 回调成功完成（compat），stepId=${step.id}`)
           } catch (e: any) {
             // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
