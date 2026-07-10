@@ -580,6 +580,103 @@ function cleanUndefined(obj: Record<string, any>): Record<string, any> {
 // 工作指令.txt（Phase 2 修复）：模块级图像生成请求计数器（终端搜索 [CONCEPT-IMG-COUNT] 查看统计）
 let _xiaomiImageRequestCount = 0
 
+function makeFormPart(name: string, filename: string, data: Buffer, contentType: string, boundary: string): Buffer {
+  const prefix = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`, 'utf-8')
+  return Buffer.concat([prefix, data, Buffer.from('\r\n', 'utf-8')])
+}
+
+async function callGptImageEdit(p: GenerateImageParams): Promise<XiaomiImageRaw> {
+  if (!API_KEY) throw new Error('XIAOMI_API_KEY not configured')
+
+  const model = applyProviderModelMap(p.model)
+  const boundary = '----GptImageEditBoundary'
+
+  const parts: Buffer[] = []
+
+  const imgUrls: string[] = []
+  if (p.referenceImageUrl && /^https?:\/\//i.test(p.referenceImageUrl)) imgUrls.push(p.referenceImageUrl)
+  if (Array.isArray(p.referenceImages)) {
+    for (const u of p.referenceImages) {
+      if (typeof u === 'string' && /^https?:\/\//i.test(u)) imgUrls.push(u)
+    }
+  }
+  const dataUrls = [p.referenceImageUrl, ...(Array.isArray(p.referenceImages) ? p.referenceImages : [])]
+    .filter((u): u is string => typeof u === 'string' && u.startsWith('data:'))
+
+  console.log(`[GPT-EDIT] model=${model}, http refs=${imgUrls.length}, data refs=${dataUrls.length}`)
+
+  let imageCount = 0
+  for (const url of imgUrls) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(30000) })
+      if (!resp.ok) { console.warn(`[GPT-EDIT] download failed: ${url.slice(0, 60)}`); continue }
+      const buffer = Buffer.from(await resp.arrayBuffer())
+      const ct = resp.headers.get('content-type') || 'image/png'
+      const ext = ct.includes('jpeg') ? 'jpg' : ct.includes('webp') ? 'webp' : 'png'
+      parts.push(makeFormPart('image', `ref_${imageCount}.${ext}`, buffer, ct, boundary))
+      imageCount++
+    } catch { console.warn(`[GPT-EDIT] fetch error: ${url.slice(0, 60)}`) }
+  }
+  for (const dataUrl of dataUrls) {
+    try {
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+      if (!match) continue
+      const buffer = Buffer.from(match[2], 'base64')
+      const mime = match[1]
+      const ext = mime.includes('jpeg') ? 'jpg' : mime.includes('webp') ? 'webp' : 'png'
+      parts.push(makeFormPart('image', `ref_${imageCount}.${ext}`, buffer, mime, boundary))
+      imageCount++
+    } catch { /* skip */ }
+  }
+
+  if (imageCount === 0) {
+    console.log('[GPT-EDIT] no valid references, text-to-image fallback')
+    throw new Error('does not support image input')
+  }
+
+  const textPart = (name: string, value: string) =>
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`, 'utf-8')
+
+  parts.push(textPart('prompt', p.prompt || ''))
+  parts.push(textPart('model', model))
+  parts.push(textPart('n', String(p.n || 1)))
+  if (p.size || p.aspectRatio) {
+    const sz = p.size || (p.aspectRatio === '3:4' ? '1024x1536' : p.aspectRatio === '9:16' ? '1024x1536' : p.aspectRatio === '1:1' ? '1024x1024' : '1536x1024')
+    parts.push(textPart('size', sz))
+  }
+
+  const footer = Buffer.from(`--${boundary}--\r\n`, 'utf-8')
+  const body = Buffer.concat([...parts, footer])
+
+  if (body.length > 50 * 1024 * 1024) {
+    throw new Error('GPT_EDIT_TOO_LARGE: 请求体超过 50MB 限制')
+  }
+
+  const res = await fetch(`${BASE_URL}/v1/images/edits`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${API_KEY}`,
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+    signal: AbortSignal.timeout ? AbortSignal.timeout(180000) : undefined,
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    throw new XiaomiHttpError(res.status, errText)
+  }
+
+  const data = await res.json()
+  const b64 = data?.data?.[0]?.b64_json || data?.data?.b64_json || data?.b64_json
+  if (!b64) {
+    throw new Error(`GPT_EDIT_INVALID_RSP: ${JSON.stringify(data).slice(0, 300)}`)
+  }
+
+  console.log(`[GPT-EDIT] success, b64 length=${b64.length}`)
+  return { b64, url: undefined, revisedPrompt: undefined }
+}
+
 async function callXiaomiImageOnce(p: GenerateImageParams): Promise<XiaomiImageRaw> {
   // 工作指令.txt（P0-1 2026-05-24）：应用供应商模型名映射
   const params = { ...p, model: applyProviderModelMap(p.model) }
@@ -760,6 +857,26 @@ export async function generateImage(
 }
 
 async function _generateImageInner(params: GenerateImageParams): Promise<GenerateImageResult> {
+  const isGptImage = params.model.toLowerCase().includes('gpt-image')
+  if (isGptImage) {
+    console.log(`[GPT-EDIT] gpt-image 走 /v1/images/edits, model=${params.model}`)
+    try {
+      const raw = await callGptImageEdit(params)
+      const buffer = await rawToBuffer(raw)
+      return { buffer, url: raw.url || '', model: params.model, revisedPrompt: raw.revisedPrompt, isMock: false }
+    } catch (e: any) {
+      console.warn(`[GPT-EDIT] edits 失败: ${e?.message?.slice(0,100) || e}`)
+      if (/does not support image input/i.test(e?.message || '')) {
+        console.warn(`[GPT-EDIT] 不支持 image input，降级 doubao-seedream-4.5`)
+        const fallback = await _generateImageInner({ ...params, model: 'doubao-seedream-4.5' })
+        return fallback
+      }
+      const lastError = e
+      const mock = await generateMockImage(params.prompt)
+      return { ...mock, isMock: true, lastError: String(lastError?.message || lastError || 'unknown') }
+    }
+  }
+
   // Gemini 系列走原生 API，不经过 xiaomi 代理的 /v1/images/generations
   if (params.model.toLowerCase().includes('gemini')) {
     console.log(`[GEMINI-IMG] 检测到 Gemini 模型 ${params.model}，走原生 API`)
