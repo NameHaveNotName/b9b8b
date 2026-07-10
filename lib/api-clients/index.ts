@@ -155,18 +155,19 @@ export async function getImageClient(): Promise<ImageClient> {
   if (!_imageClient) {
     _imageClient = {
       async generateStyleSamples(projectId, framework, count, aspectRatio?, imageModel?) {
-        const styleBase =
-          framework?.styleGuide ||
-          framework?.visualStyle ||
-          'cinematic film still, 35mm Kodak Portra 400'
+        const styleBaseRaw =
+          framework?.styleGuide || framework?.visualStyle || ''
+        const styleTag = styleBaseRaw
+          ? `cinematic film still, ${styleBaseRaw.slice(0, 100).replace(/[,，。.!！?？\n]/g, ' ')}`
+          : 'cinematic film still, 35mm Kodak Portra 400'
         const variations = [
-          `${styleBase}, warm golden hour, soft bokeh, amber glow, nostalgic intimacy`,
-          `${styleBase}, cool blue moonlight, high contrast, dramatic shadows, nocturnal solitude`,
-          `${styleBase}, desaturated vintage, heavy film grain, documentary realism, faded colors`,
+          `${styleTag}, warm golden hour, soft bokeh, amber glow, nostalgic intimacy`,
+          `${styleTag}, cool blue moonlight, high contrast, dramatic shadows, nocturnal solitude`,
+          `${styleTag}, desaturated vintage, heavy film grain, documentary realism, faded colors`,
         ]
         const results: StyleSample[] = []
         for (let i = 0; i < count; i++) {
-          const prompt = variations[i] || styleBase
+          const prompt = variations[i] || styleTag
           const model = imageModel || IMAGE_MODELS.primary
           const ar = aspectRatio || '16:9'
           console.log(`[MODEL-SELECT] [generateStyleSamples] 模型: ${model}, 比例: ${ar}`)
@@ -185,17 +186,22 @@ export async function getImageClient(): Promise<ImageClient> {
       },
 
       async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?, userReferenceUrls?) {
-        // 豆包图生图：把风格图通过 image 字段传入，prompt 写角色描述 + 风格修饰
-        // Round 6 Phase 3：强制单人肖像约束，避免多人物/面部不完整
-        // Phase 5: 强制单人肖像约束 + negative 描述避免多人/面部不完整
-        const prompt = `${_stylePrompt || ''}, character portrait of ${character.name}, ${character.description || ''}, solo, single person, only one character, complete full face clearly visible, front facing, full head in frame, centered composition, cinematic film still, 35mm Kodak Portra 400, full body shot, 8k, poetic realism. Avoid: multiple people, crowd, group shot, partial face, cropped head, off-center face, back view, profile view, obscured face.`
+        const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
+        const styleTag = 'cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism'
+
+        const refLabelHint = hasUserRefs
+          ? 'Follow the character appearance from the provided reference images. '
+          : ''
+
+        const prompt = `${refLabelHint}character portrait of ${character.name}, ${character.description || ''}, solo, single person, only one character, complete full face clearly visible, front facing, full head in frame, centered composition, ${styleTag}, full body shot. Avoid: multiple people, crowd, group shot, partial face, cropped head, off-center face, back view, profile view, obscured face.`
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${aspectRatio || '16:9'}`)
-        console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${imageModel || '默认'}`)
+        const model = imageModel || (hasUserRefs ? 'gpt-image-2' : IMAGE_MODELS.primary)
+        console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}${hasUserRefs ? ' (多图参考→gpt-image-2)' : ''}`)
         const { buffer, isMock, lastError } = await generateImage({
-          model: imageModel || IMAGE_MODELS.primary,
+          model,
           prompt,
           referenceImageUrl: styleRefUrl,
-          referenceImages: userReferenceUrls?.length ? userReferenceUrls : undefined,
+          referenceImages: hasUserRefs ? userReferenceUrls : undefined,
           aspectRatio: aspectRatio || '16:9',
           watermark: false,
         })
@@ -225,9 +231,15 @@ export async function getImageClient(): Promise<ImageClient> {
           ? 'Use the first reference image as the visual style reference.'
           : ''
 
+        const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
+
+        const refLabelHint = hasUserRefs
+          ? 'Follow the visual references from all provided images for scene composition and character appearance. '
+          : ''
+
         const prompt = [
           styleHint,
-          _stylePrompt || '',
+          refLabelHint,
           characterHint,
           sceneDesc,
           'cinematic wide shot, atmospheric depth, 8k, poetic realism',
@@ -237,8 +249,10 @@ export async function getImageClient(): Promise<ImageClient> {
 
         console.log(`[MODEL-SELECT] [generateConceptScene] 模型: ${imageModel || '默认'}, 参考图: ${refs.length} 张`)
 
+        const model = imageModel || (hasUserRefs ? 'gpt-image-2' : IMAGE_MODELS.primary)
+
         const { buffer, isMock, lastError } = await generateImage({
-          model: imageModel || IMAGE_MODELS.primary,
+          model,
           prompt,
           referenceImages: refs,
           aspectRatio: aspectRatio || '16:9',
@@ -266,9 +280,13 @@ export async function getImageClient(): Promise<ImageClient> {
           frameType === 'first'
             ? 'opening moment, anticipatory posture'
             : 'closing moment, action resolution'
-        const prompt = `${sceneDesc}, ${phase}, cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism`
+        const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
+        const prompt = hasUserRefs
+          ? `Follow the visual references from the provided images. ${sceneDesc}, ${phase}, cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism`
+          : `${sceneDesc}, ${phase}, cinematic film still, 35mm Kodak Portra 400, 8k, poetic realism`
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
-        console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${imageModel || '默认'}`)
+        const model = imageModel || (hasUserRefs ? 'gpt-image-2' : IMAGE_MODELS.primary)
+        console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${model}`)
         const refImages: string[] = [styleRefUrl]
         if (characterImageUrls && characterImageUrls.length > 0) {
           refImages.push(...characterImageUrls)
@@ -277,7 +295,7 @@ export async function getImageClient(): Promise<ImageClient> {
           refImages.push(...userReferenceUrls)
         }
         const { buffer } = await generateImage({
-          model: imageModel || IMAGE_MODELS.primary,
+          model,
           prompt,
           referenceImages: refImages.length > 1 ? refImages : undefined,
           referenceImageUrl: refImages.length === 1 ? refImages[0] : undefined,

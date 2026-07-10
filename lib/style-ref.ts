@@ -65,11 +65,14 @@ export async function getStyleRefUrl(projectId: string): Promise<StyleRef> {
     throw new Error('STORAGE_001 — 未找到有效风格参考图 URL，请先完成风格统一并选择基准图')
   }
 
-  // 同时取 stylePrompt（用于角色/场景生图时的风格修饰提示词）
-  const stylePrompt: string =
-    outputData?.styleOptions?.find((o: any) => o.id === selectedStyleId)?.prompt ||
-    outputData?.styleOptions?.[0]?.prompt ||
-    ''
+  // 取短风格描述（chineseDesc）而非完整英文 prompt，避免场景描述污染下游生图
+  const selectedOption = outputData?.styleOptions?.find((o: any) => o.id === selectedStyleId)
+    || outputData?.styleOptions?.[0]
+  const styleName = selectedOption?.styleName || ''
+  const styleDesc = selectedOption?.styleDescription || selectedOption?.chineseDesc || ''
+  const stylePrompt: string = styleName
+    ? `${styleName}: ${styleDesc.slice(0, 80)}`
+    : 'cinematic film still, 35mm Kodak Portra 400, 8k'
 
   console.log('[STYLE-REF] 最终 styleRefUrl:', styleRefUrl.slice(0, 80))
   console.log('[STYLE-REF] 最终 stylePrompt 长度:', stylePrompt.length)
