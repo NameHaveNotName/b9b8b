@@ -18,7 +18,7 @@ const PROMPT_MAX_LEN = 900
 // 供应商代理支持的模型名可能与业务层 ID 不同，在此维护映射关系。
 const PROVIDER_MODEL_MAP: Record<string, string> = {
   'doubao-seedream-4.5': 'doubao-seedream-5.0-lite', // 供应商实际支持的模型名
-  'gpt-image-2': 'gpt-image-2-all',
+  'gpt-image-2': 'gpt-image-2',
   'flux.1-kontext-pro': 'flux.1-kontext-pro',
   'kling-omni-image': 'kling-omni-image',
   'gemini-3.1-flash-image': 'gemini-3.1-flash-image',
@@ -525,24 +525,16 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
   }
 
   if (kind === 'dalle') {
+    const supportsImage = p.model.includes('-all') || p.model.includes('dall-e')
     if (allRefs.length > 0) {
-      const ref = allRefs.length === 1 ? allRefs[0] : allRefs
-      console.log(`[Image] DALL-E/gpt-image: 传入 ${allRefs.length} 张参考图`)
-      return {
-        model: p.model,
-        prompt,
-        n: typeof p.n === 'number' ? p.n : 1,
-        size: mapToDalleSize(p.size, p.aspectRatio),
-        image: ref,
+      if (supportsImage) {
+        const ref = allRefs.length === 1 ? allRefs[0] : allRefs
+        console.log(`[Image] DALL-E/gpt-image: 传入 ${allRefs.length} 张参考图`)
+        return { model: p.model, prompt, n: typeof p.n === 'number' ? p.n : 1, size: mapToDalleSize(p.size, p.aspectRatio), image: ref }
       }
+      console.warn(`[Image] gpt-image-2 不支持 image 字段，${allRefs.length} 张参考图已忽略，降级为纯文生图`)
     }
-    console.warn(`[Image] DALL-E/gpt-image: 无有效 http(s) 参考图，降级为纯文生图`)
-    return {
-      model: p.model,
-      prompt,
-      n: typeof p.n === 'number' ? p.n : 1,
-      size: mapToDalleSize(p.size, p.aspectRatio),
-    }
+    return { model: p.model, prompt, n: typeof p.n === 'number' ? p.n : 1, size: mapToDalleSize(p.size, p.aspectRatio) }
   }
 
   if (kind === 'flux') {
