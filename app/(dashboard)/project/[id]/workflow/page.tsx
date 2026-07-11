@@ -269,7 +269,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         }
 
         await mutate()
-        setToast({ kind: 'success', message: '已保存为统一视觉基准' })
+        setToast({ kind: 'success', message: '已保存为统一视觉基准 — 将影响人物设计、概念图、尾帧和直生视频' })
       } catch (e: any) {
         setToast({ kind: 'error', message: '选择风格失败：' + e.message })
       }

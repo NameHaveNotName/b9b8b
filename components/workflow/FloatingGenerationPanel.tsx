@@ -176,6 +176,7 @@ export default function FloatingGenerationPanel({
 }: FloatingGenerationPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [dismissedTasks, setDismissedTasks] = useState<Set<string>>(new Set())
+  const [removingTasks, setRemovingTasks] = useState<Set<string>>(new Set())
 
   const { data } = useSWR(
     externalSteps ? null : `/api/projects/${projectId}`,
@@ -204,10 +205,11 @@ export default function FloatingGenerationPanel({
   const failedCount = visibleFailed.length
 
   function dismissTask(key: string) {
-    setDismissedTasks(prev => {
-      const arr = Array.from(prev)
-      return new Set([...arr, key])
-    })
+    setRemovingTasks(prev => new Set([...Array.from(prev), key]))
+    setTimeout(() => {
+      setDismissedTasks(prev => new Set([...Array.from(prev), key]))
+      setRemovingTasks(prev => { const n = new Set(Array.from(prev)); n.delete(key); return n })
+    }, 250)
   }
 
   return (
@@ -241,7 +243,16 @@ export default function FloatingGenerationPanel({
               {processingCount === 0 && completedCount === 0 && failedCount > 0 && `失败 ${failedCount}`}
             </span>
           </div>
-          <ChevronUp className="h-4 w-4 text-stone-400" />
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); (window as any).__openInspector?.('task-queue') }}
+              className="rounded-lg border border-stone-200 px-2.5 py-1 text-[11px] font-medium text-stone-500 transition hover:bg-stone-100"
+              title="打开副工作台"
+            >
+              副工作台
+            </button>
+            <ChevronUp className="h-4 w-4 text-stone-400" />
+          </div>
         </button>
       )}
 
