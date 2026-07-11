@@ -46,6 +46,9 @@ import { exportFrameworkToWord } from '@/lib/framework-export'
 import FrameworkImportModal from '@/components/framework/FrameworkImportModal'
 import IdeationDeepenPanel from '@/components/workflow/IdeationDeepenPanel'
 import ReferenceBar from '@/components/workflow/ReferenceBar'
+import FloatingGenerationPanel from '@/components/workflow/FloatingGenerationPanel'
+import WorkflowInspectorDrawer from '@/components/workflow/WorkflowInspectorDrawer'
+import SuggestionBar from '@/components/workflow/SuggestionBar'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -379,6 +382,11 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         <p className="mt-1 text-sm text-stone-500">工作流看板 — 共 {VISIBLE_STEP_TYPES.length} 步</p>
       </div>
 
+      {/* 建议动作 */}
+      {project && steps.length > 0 && (
+        <SuggestionBar steps={steps} project={project} activeStep={currentActive} onLocate={(t) => setActiveStepType(t)} />
+      )}
+
       {/* ReferenceBar */}
       <ReferenceBar
         projectId={params.id}
@@ -532,7 +540,45 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
           }}
         />
       )}
+
+      {/* 浮动生成任务面板 */}
+      <FloatingGenerationPanel
+        steps={steps}
+        projectId={params.id}
+        onViewResult={(s) => { setActiveStepType(s.stepType); mutate() }}
+        onOpenAssetLibrary={(s) => { window.location.href = `/project/${params.id}/assets` }}
+        onLocateStep={(t) => setActiveStepType(t)}
+      />
+      <WorkflowInspectorDrawerWrapper steps={steps} projectId={params.id} setActiveStepType={setActiveStepType} />
     </div>
+  )
+}
+
+function WorkflowInspectorDrawerWrapper({ steps, projectId, setActiveStepType }: { steps: any[]; projectId: string; setActiveStepType: (t: string) => void }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [activeView, setActiveView] = useState<'task-queue' | 'generation-confirm' | 'result-feedback'>('task-queue')
+
+  const openInspector = useCallback((view: 'task-queue' | 'generation-confirm' | 'result-feedback') => {
+    setActiveView(view)
+    setIsOpen(true)
+  }, [])
+
+  useEffect(() => {
+    (window as any).__openInspector = openInspector
+    return () => { delete (window as any).__openInspector }
+  }, [openInspector])
+
+  return (
+    <WorkflowInspectorDrawer
+      isOpen={isOpen}
+      onClose={() => setIsOpen(false)}
+      projectId={projectId}
+      steps={steps}
+      activeView={activeView}
+      onViewChange={setActiveView}
+      onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
+      onLocateTaskStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
+    />
   )
 }
 

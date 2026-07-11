@@ -94,19 +94,19 @@ export default function TopStepper({ steps, project, activeStepType, onStepClick
                 }`}
               >
                 <div
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition ${
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition duration-200 ${
                     step.isHidden && step.isDone
                       ? 'border-stone-300 bg-stone-100 text-stone-400'
                       : step.isProcessing
                         ? 'border-blue-500 bg-blue-50'
                         : step.isFailed
-                          ? 'border-red-500 bg-red-50'
+                          ? 'border-red-400 bg-red-50 text-red-500 animate-pulse'
                           : step.isDone
                             ? 'border-green-500 bg-green-500 text-white'
                             : step.isAvailable
-                              ? 'border-amber-500 bg-amber-50'
+                              ? 'border-amber-400 bg-amber-50'
                               : 'border-stone-200 bg-white'
-                  }`}
+                  } ${canClick ? 'group-hover:shadow-md group-hover:-translate-y-0.5' : ''}`}
                 >
                   {step.isHidden && step.isDone ? (
                     <Check className="h-4 w-4 text-stone-400" />
@@ -141,11 +141,15 @@ export default function TopStepper({ steps, project, activeStepType, onStepClick
                 </span>
               </button>
 
-              {/* 连接线：已完成步骤之间用实线，其他用虚线 */}
+              {/* 连接线 */}
               {idx < visibleSteps.length - 1 && (
                 <div
-                  className={`mx-0.5 h-0.5 w-4 md:mx-1 md:w-8 ${
-                    step.isDone ? 'bg-green-500' : 'border-t-2 border-dashed border-stone-200'
+                  className={`mx-0.5 h-[3px] w-5 rounded-full md:mx-1 md:w-8 ${
+                    step.isFailed
+                      ? 'bg-gradient-to-r from-red-300 to-stone-200'
+                      : step.isDone
+                        ? 'bg-green-500'
+                        : 'border-t-2 border-dashed border-stone-200'
                   }`}
                 />
               )}
