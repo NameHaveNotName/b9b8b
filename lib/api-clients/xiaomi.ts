@@ -638,8 +638,21 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<XiaomiImageRaw>
   }
 
   if (imageCount === 0) {
-    console.log('[GPT-EDIT] no valid references, text-to-image fallback')
-    throw new Error('does not support image input')
+    console.log('[GPT-EDIT] no refs, using blank canvas for text-to-image')
+    const { createCanvas } = (() => { try { return require('canvas') } catch { return { createCanvas: null } } })()
+    let blankPng: Buffer
+    if (createCanvas) {
+      const canvas = createCanvas(512, 512)
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#FFFFFF'
+      ctx.fillRect(0, 0, 512, 512)
+      blankPng = canvas.toBuffer('image/png')
+    } else {
+      // minimal valid 1x1 white PNG
+      blankPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64')
+    }
+    parts.push(makeFormPart('image', 'blank.png', blankPng, 'image/png', boundary))
+    imageCount = 1
   }
 
   const textPart = (name: string, value: string) =>
@@ -874,11 +887,6 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
       return { buffer, url: raw.url || '', model: params.model, revisedPrompt: raw.revisedPrompt, isMock: false }
     } catch (e: any) {
       console.warn(`[GPT-EDIT] edits 失败: ${e?.message?.slice(0,100) || e}`)
-      if (/does not support image input/i.test(e?.message || '')) {
-        console.warn(`[GPT-EDIT] 不支持 image input，降级 doubao-seedream-4.5`)
-        const fallback = await _generateImageInner({ ...params, model: 'doubao-seedream-4.5' })
-        return fallback
-      }
       const lastError = e
       const mock = await generateMockImage(params.prompt)
       return { ...mock, isMock: true, lastError: String(lastError?.message || lastError || 'unknown') }
