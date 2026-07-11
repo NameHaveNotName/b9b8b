@@ -606,16 +606,24 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<XiaomiImageRaw>
   console.log(`[GPT-EDIT] model=${model}, http refs=${imgUrls.length}, data refs=${dataUrls.length}`)
 
   let imageCount = 0
-  for (const url of imgUrls) {
-    try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(30000) })
-      if (!resp.ok) { console.warn(`[GPT-EDIT] download failed: ${url.slice(0, 60)}`); continue }
-      const buffer = Buffer.from(await resp.arrayBuffer())
-      const ct = resp.headers.get('content-type') || 'image/png'
-      const ext = ct.includes('jpeg') ? 'jpg' : ct.includes('webp') ? 'webp' : 'png'
-      parts.push(makeFormPart('image', `ref_${imageCount}.${ext}`, buffer, ct, boundary))
-      imageCount++
-    } catch { console.warn(`[GPT-EDIT] fetch error: ${url.slice(0, 60)}`) }
+  // 并行下载 http 参考图
+  if (imgUrls.length > 0) {
+    const downloads = await Promise.allSettled(
+      imgUrls.map(async (url) => {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(15000) })
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const buffer = Buffer.from(await resp.arrayBuffer())
+        const ct = resp.headers.get('content-type') || 'image/png'
+        const ext = ct.includes('jpeg') ? 'jpg' : ct.includes('webp') ? 'webp' : 'png'
+        return { buffer, ct, ext }
+      })
+    )
+    for (const d of downloads) {
+      if (d.status === 'fulfilled') {
+        parts.push(makeFormPart('image', `ref_${imageCount}.${d.value.ext}`, d.value.buffer, d.value.ct, boundary))
+        imageCount++
+      }
+    }
   }
   for (const dataUrl of dataUrls) {
     try {
