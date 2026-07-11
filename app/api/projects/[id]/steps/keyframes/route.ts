@@ -86,10 +86,16 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       }
 
       const prompts = []
+      const keyRefs = await getProjectReferences(params.id).catch(() => [])
+      const keyRefLabels = keyRefs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+      const keyRefHint = keyRefs.length > 0
+        ? `\n【参考图】${keyRefs.length} 张用户参考图${keyRefLabels.length > 0 ? `（标签：${keyRefLabels.join('、')}）` : ''}。生成 imagePrompt 时可以直接引用参考图中的人物，无需重新描述外貌。`
+        : ''
+
       for (const shot of shotsWithFirstFrame) {
         const lastPrompt = loadPromptTemplate('keyframe-last', {
           STYLE_REF: selectedStylePrompt,
-          USER_INPUT: shot.description || `${shot.shotId} - ${shot.sceneName}`,
+          USER_INPUT: (shot.description || `${shot.shotId} - ${shot.sceneName}`) + keyRefHint,
         })
         const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024 })
         const parsedLast = extractJsonFromMarkdown(lastPromptText)
@@ -279,12 +285,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       .filter((u): u is string => typeof u === 'string' && u.length > 0)
     const refs = await getProjectReferences(params.id).catch(() => [])
     const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+    const defaultRefLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+    const defaultRefHint = refs.length > 0
+      ? `\n【参考图】${refs.length} 张用户参考图${defaultRefLabels.length > 0 ? `（标签：${defaultRefLabels.join('、')}）` : ''}。生成 imagePrompt 时可以直接引用参考图中的人物。`
+      : ''
 
     for (const shot of shotsWithFirstFrame) {
-      // Phase 4: 尾帧 — 基于起始帧 + 动作变化生成
       const lastPrompt = loadPromptTemplate('keyframe-last', {
         STYLE_REF: selectedStylePrompt,
-        USER_INPUT: shot.description || `${shot.shotId} - ${shot.sceneName}`,
+        USER_INPUT: (shot.description || `${shot.shotId} - ${shot.sceneName}`) + defaultRefHint,
       })
       const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024 })
       const parsedLast = extractJsonFromMarkdown(lastPromptText)

@@ -370,6 +370,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
       if (missingShotIds.length > 0) {
         console.log(`[STORYBOARD-ACT] 阶段A: 为 ${missingShotIds.length} 个缺失镜头生成提示词`)
+
+        const sbRefs = await getProjectReferences(params.id).catch(() => [])
+        const sbRefLabels = sbRefs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+        const sbRefHint = sbRefs.length > 0
+          ? `\n6. 如果有用户上传的 ${sbRefs.length} 张参考图${sbRefLabels.length > 0 ? `（标签：${sbRefLabels.join('、')}）` : ''}，提示词中可以直接引用'参考图1中的角色'，无需重新描述外貌特征`
+          : ''
+
         const newPrompts = await Promise.all(
           missingShotIds.map(async (sid: string) => {
             const promptItem = actPrompts.find((p: any) => p.shotId === sid)!
@@ -396,7 +403,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 3. 提示词长度控制在 200-500 词，适合即梦/Flux/DALL-E 等模型
 4. 同时生成一个中文描述（用于前端展示）
 5. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
-{"prompt": "英文生图提示词...", "caption": "中文画面描述..."}`
+{"prompt": "英文生图提示词...", "caption": "中文画面描述..."}${sbRefHint}`
 
             try {
               const resultText = await textClient.generate(llmPrompt, { temperature: 0.7, maxTokens: 2048 })

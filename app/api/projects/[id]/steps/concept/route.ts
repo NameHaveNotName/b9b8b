@@ -25,8 +25,14 @@ async function generateConceptPrompts(
   const framework = (project.framework || frameworkStep.outputData) as any
   const acts = Array.isArray(framework?.acts) ? framework.acts : []
 
+  const refs = await getProjectReferences(project.id).catch(() => [])
+  const refLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+  const refHint = refs.length > 0
+    ? `\n\n【用户上传的人物/场景参考图】用户上传了 ${refs.length} 张参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}。在生成 imagePrompt 时：1) 如果角色匹配参考图中的人物，可以直接写'参考图1中的XXX'，无需重新描述外貌特征。2) 如果场景匹配参考图中的环境，可以直接写'类似参考图2中的场景氛围'。`
+    : ''
+
   const prompt = loadPromptTemplate('concept', {
-    USER_INPUT: JSON.stringify({ framework })
+    USER_INPUT: JSON.stringify({ framework }) + refHint
   })
   const textClient = await getTextClient()
   const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
@@ -357,10 +363,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const refs = await getProjectReferences(params.id).catch(() => [])
     const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+    const refLabelsDefault = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+    const refHintDefault = refs.length > 0
+      ? `\n\n【用户上传的参考图】用户上传了 ${refs.length} 张参考图${refLabelsDefault.length > 0 ? `，标签：${refLabelsDefault.join('、')}` : ''}。生成 imagePrompt 时可引用参考图中的人物/场景，无需重新描述。`
+      : ''
 
-    // 1. 用文本模板生成概念图提示词
     const prompt = loadPromptTemplate('concept', {
-      USER_INPUT: JSON.stringify({ framework, selectedStyle: stylePrompt })
+      USER_INPUT: JSON.stringify({ framework, selectedStyle: stylePrompt }) + refHintDefault
     })
     const textClient = await getTextClient()
     const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })

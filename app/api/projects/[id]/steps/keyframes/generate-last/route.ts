@@ -92,9 +92,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // 生成尾帧图像提示词
     const textClient = await getTextClient()
+    const glRefs = await getProjectReferences(params.id).catch(() => [])
+    const glRefLabels = glRefs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+    const glRefHint = glRefs.length > 0
+      ? `\n【参考图】${glRefs.length} 张用户参考图${glRefLabels.length > 0 ? `（标签：${glRefLabels.join('、')}）` : ''}。生成 imagePrompt 时可直接引用参考图中的人物。`
+      : ''
+
     const promptTemplate = loadPromptTemplate('keyframe-last', {
       STYLE_REF: stylePrompt,
-      USER_INPUT: shot.description || `${shot.shotId} - ${shot.sceneName || ''}`,
+      USER_INPUT: (shot.description || `${shot.shotId} - ${shot.sceneName || ''}`) + glRefHint,
     })
     const generatedPrompt = await textClient.generate(promptTemplate, { temperature: 0.7, maxTokens: 1024 })
     const parsed = extractJsonFromMarkdown(generatedPrompt)

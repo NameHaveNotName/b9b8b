@@ -26,8 +26,14 @@ async function generateCharacterPrompts(
     framework?.characters || []
   const characters = allCharacters.slice(0, 5)
 
+  const refs = await getProjectReferences(project.id).catch(() => [])
+  const refLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+  const refHint = refs.length > 0
+    ? `\n\n【用户上传的人物参考图】用户上传了 ${refs.length} 张人物参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}。在生成 imagePrompt 时：1) 如果角色形象匹配某个参考图中的人物，可以直接写'参考图1中的女性角色'或'参考图2中的男性角色'，无需重新详细描述外貌特征、服装、发型等。2) 参考图将作为图生图的 image 输入，AI 会根据参考图直接生成匹配的形象，所以你不需要在提示词中重复描写。`
+    : ''
+
   const prompt = loadPromptTemplate('character', {
-    USER_INPUT: JSON.stringify(framework)
+    USER_INPUT: JSON.stringify(framework) + refHint
   })
   const textClient = await getTextClient()
   const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
@@ -338,10 +344,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     const refsCompat = await getProjectReferences(params.id).catch(() => [])
     const userRefUrlsCompat = refsCompat.filter(r => r.url).map(r => r.url)
+    const refLabelsCompat = refsCompat.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
 
-    // 1. 用文本模板生成角色提示词
+    const refHintCompat = refsCompat.length > 0
+      ? `\n\n【用户上传的人物参考图】用户上传了 ${refsCompat.length} 张人物参考图${refLabelsCompat.length > 0 ? `，标签：${refLabelsCompat.join('、')}` : ''}。在生成 imagePrompt 时可以直接引用参考图中的人物形象，无需重新描述外貌特征。`
+      : ''
+
     const prompt = loadPromptTemplate('character', {
-      USER_INPUT: JSON.stringify(framework)
+      USER_INPUT: JSON.stringify(framework) + refHintCompat
     })
     const textClient = await getTextClient()
     const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
