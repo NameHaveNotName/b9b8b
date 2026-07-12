@@ -196,8 +196,7 @@ export default function FloatingGenerationPanel({
 
   const totalVisible = visibleProcessing.length + visibleCompleted.length + visibleFailed.length
 
-  // Hide panel when nothing to show
-  if (totalVisible === 0) return null
+  // 始终显示面板（收起态），无任务时显示占位文字
 
   // Collapsed summary text
   const processingCount = visibleProcessing.length
@@ -222,21 +221,19 @@ export default function FloatingGenerationPanel({
         >
           <div className="flex items-center gap-2.5">
             {/* Breathing indicator */}
-            <span className="relative flex h-2.5 w-2.5">
+            <span className="relative flex h-3 w-3">
               {(processingCount > 0 || failedCount > 0) && (
                 <>
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+                  <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
                 </>
               )}
-              {processingCount === 0 && failedCount === 0 && completedCount > 0 && (
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-40" />
-                  <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
-                </span>
+              {processingCount === 0 && failedCount === 0 && (
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500 opacity-50" />
               )}
             </span>
             <span className="text-sm font-medium text-stone-700">
+              {totalVisible === 0 && '生成控制台 · 暂无新任务'}
               {processingCount > 0 && `生成中 ${processingCount}`}
               {processingCount > 0 && completedCount > 0 && ' · '}
               {completedCount > 0 && `刚完成 ${completedCount}`}
