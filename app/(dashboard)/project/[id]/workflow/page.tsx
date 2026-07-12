@@ -482,7 +482,15 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
               step={currentStep}
               project={project}
               executing={executing}
-              onExecute={executeStep}
+              onExecute={(stepType, body) => {
+                // 先打开副工作台,显示生成前确认
+                if ((window as any).__buildConfirmFromCurrentStep) {
+                  ;(window as any).__buildConfirmFromCurrentStep(body)
+                } else {
+                  // 兜底:直接执行
+                  executeStep(stepType, body)
+                }
+              }}
               onSelectStyle={selectStyle}
               onError={setLastError}
               mutate={mutate}
@@ -618,8 +626,11 @@ function WorkflowInspectorDrawerWrapper({
   }, [])
 
   // 点击"生成/重新生成"时打开副工作台 + 构建实际参数
-  const buildConfirmFromCurrentStep = useCallback(() => {
+  const [pendingBody, setPendingBody] = useState<any>(null)
+
+  const buildConfirmFromCurrentStep = useCallback((body?: any) => {
     if (!currentStep) return
+    setPendingBody(body || null)
     const out = currentStep.outputData || {}
     const prompt = out.prompts?.[0]?.englishPrompt
       || out.prompts?.[0]?.chineseDesc
@@ -685,10 +696,10 @@ function WorkflowInspectorDrawerWrapper({
         onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
         onLocateTaskStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
         onConfirmGenerate={() => {
-          // 关闭副工作台,触发执行
+          // 关闭副工作台,触发实际执行
           setIsOpen(false)
           if (currentStep && (window as any).__executeStep) {
-            (window as any).__executeStep(currentStep.stepType)
+            ;(window as any).__executeStep(currentStep.stepType, pendingBody || undefined)
           }
         }}
       />
