@@ -712,22 +712,6 @@ export default function WorkflowInspectorDrawer({
     { id: 'result-feedback', label: '结果反馈' },
   ]
 
-  if (!isOpen) {
-    // Show small entry button
-    return (
-      <button
-        onClick={onClose}
-        className="fixed right-0 top-1/2 z-50 flex items-center gap-1 rounded-l-lg border border-r-0 border-stone-200 bg-white/95 px-2 py-6 shadow-md backdrop-blur transition-all hover:bg-white"
-        style={{ right: 0 }}
-      >
-        <LayoutGrid className="h-4 w-4 text-stone-500" />
-        <span className="writing-mode-vertical text-[10px] font-medium text-stone-500" style={{ writingMode: 'vertical-rl' }}>
-          副工作台
-        </span>
-      </button>
-    )
-  }
-
   return (
     <div
       ref={drawerRef}

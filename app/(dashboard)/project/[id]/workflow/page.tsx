@@ -222,6 +222,12 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
     [params.id, mutate]
   )
 
+  // 暴露 executeStep 到 window,让副工作台"确认生成"按钮可调用
+  useEffect(() => {
+    ;(window as any).__executeStep = executeStep
+    return () => { delete (window as any).__executeStep }
+  }, [executeStep])
+
   const selectStyle = useCallback(
     async (styleId: string, styleRefUrl?: string) => {
       // 【强制日志5】确认前端传的值
@@ -561,10 +567,21 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
       <FloatingGenerationPanel
         steps={steps}
         projectId={params.id}
-        onViewDetails={(s) => { if ((window as any).__openInspector) (window as any).__openInspector('result') }}
+        onViewDetails={(s) => {
+          if ((window as any).__buildFeedbackFromStep) {
+            ;(window as any).__buildFeedbackFromStep(s)
+          } else if ((window as any).__openInspector) {
+            ;(window as any).__openInspector('result')
+          }
+        }}
         onViewResult={(s) => { setActiveStepType(s.stepType); mutate() }}
         onOpenAssetLibrary={(s) => { window.location.href = `/project/${params.id}/assets` }}
-        onLocateStep={(t) => setActiveStepType(t)}
+        onLocateStep={(t) => {
+          setActiveStepType(t)
+          if ((window as any).__buildConfirmFromCurrentStep) {
+            ;(window as any).__buildConfirmFromCurrentStep()
+          }
+        }}
       />
       <WorkflowInspectorDrawerWrapper
         steps={steps}
@@ -591,6 +608,8 @@ function WorkflowInspectorDrawerWrapper({
   setActiveStepType: (t: string) => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  const [confirmData, setConfirmData] = useState<any>(null)
+  const [feedbackData, setFeedbackData] = useState<any>(null)
   const [activeView, setActiveView] = useState<'task-queue' | 'generation-confirm' | 'result-feedback'>('task-queue')
 
   const openInspector = useCallback((view: 'task-queue' | 'generation-confirm' | 'result-feedback') => {
@@ -598,54 +617,82 @@ function WorkflowInspectorDrawerWrapper({
     setIsOpen(true)
   }, [])
 
-  useEffect(() => {
-    ;(window as any).__openInspector = openInspector
-    return () => { delete (window as any).__openInspector }
-  }, [openInspector])
-
-  // 自动从当前步骤生成 confirmData
-  const confirmData = useMemo(() => {
-    if (!currentStep) return null
+  // 点击"生成/重新生成"时打开副工作台 + 构建实际参数
+  const buildConfirmFromCurrentStep = useCallback(() => {
+    if (!currentStep) return
     const out = currentStep.outputData || {}
-    const prompt = out.prompts?.[0]?.englishPrompt || out.prompts?.[0]?.chineseDesc || out.englishPrompt || out.chineseDesc || '(无 prompt)'
-    return {
+    const prompt = out.prompts?.[0]?.englishPrompt
+      || out.prompts?.[0]?.chineseDesc
+      || out.englishPrompt
+      || out.chineseDesc
+      || ''
+    setConfirmData({
       stepType: currentStep.stepType,
       inputDeps: getInputDeps(currentStep.stepType, project),
       model: out.imageModel || out.modelId || 'gpt-image-2',
       aspectRatio: out.aspectRatio || '16:9',
       prompt,
       pointCost: 5,
-      asset: undefined,
-    } as any
-  }, [currentStep, project])
+    })
+    openInspector('generation-confirm')
+  }, [currentStep, project, openInspector])
 
-  // 自动从当前步骤生成 feedbackData
-  const feedbackData = useMemo(() => {
-    if (!currentStep) return null
-    const out = currentStep.outputData || {}
-    return {
-      step: currentStep,
-      stages: buildStages(currentStep),
-      previewUrl: out.styleRefUrl || out.imageUrl || out.url,
-      partialSuccess: currentStep.status === 'COMPLETED' && out.isMock,
-      failedReason: currentStep.status === 'FAILED' ? currentStep.errorMessage : undefined,
-      preservedAssets: out.generatedCount ? [`${out.generatedCount} 张已生成`] : [],
-    } as any
-  }, [currentStep])
+  // 任务完成时显示结果反馈
+  const buildFeedbackFromStep = useCallback((step: any) => {
+    if (!step) return
+    setFeedbackData({
+      step,
+      stages: step.status === 'FAILED' ? [{ name: '生成', status: 'failed', error: step.errorMessage }] : [],
+      previewUrl: step.outputData?.styleRefUrl || step.outputData?.imageUrl || step.outputData?.url,
+      partialSuccess: false,
+      failedReason: step.status === 'FAILED' ? step.errorMessage : undefined,
+      preservedAssets: [],
+    })
+    openInspector('result-feedback')
+  }, [openInspector])
+
+  useEffect(() => {
+    ;(window as any).__openInspector = openInspector
+    ;(window as any).__buildConfirmFromCurrentStep = buildConfirmFromCurrentStep
+    ;(window as any).__buildFeedbackFromStep = buildFeedbackFromStep
+    return () => {
+      delete (window as any).__openInspector
+      delete (window as any).__buildConfirmFromCurrentStep
+      delete (window as any).__buildFeedbackFromStep
+    }
+  }, [openInspector, buildConfirmFromCurrentStep, buildFeedbackFromStep])
 
   return (
-    <WorkflowInspectorDrawer
-      isOpen={isOpen}
-      onClose={() => setIsOpen(false)}
-      projectId={projectId}
-      steps={steps}
-      activeView={activeView}
-      onViewChange={setActiveView}
-      confirmData={confirmData}
-      feedbackData={feedbackData}
-      onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
-      onLocateTaskStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
-    />
+    <>
+      {/* 副工作台入口按钮 — 始终可见 */}
+      <button
+        onClick={() => openInspector('task-queue')}
+        className="fixed right-0 top-1/3 z-40 rounded-l-xl border border-r-0 border-stone-200 bg-white/90 px-3 py-4 text-xs font-bold text-amber-600 shadow-md backdrop-blur transition hover:bg-white hover:pr-4"
+        style={{ writingMode: 'vertical-rl' }}
+        title="打开副工作台"
+      >
+        副工作台
+      </button>
+      <WorkflowInspectorDrawer
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        projectId={projectId}
+        steps={steps}
+        activeView={activeView}
+        onViewChange={setActiveView}
+        confirmData={confirmData}
+        feedbackData={feedbackData}
+        onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
+        onLocateTaskStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
+        onConfirmGenerate={() => {
+          // 关闭副工作台,触发执行
+          setIsOpen(false)
+          if (currentStep && (window as any).__executeStep) {
+            (window as any).__executeStep(currentStep.stepType)
+          }
+        }}
+      />
+    </>
   )
 }
 
