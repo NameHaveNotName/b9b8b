@@ -566,12 +566,30 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         onOpenAssetLibrary={(s) => { window.location.href = `/project/${params.id}/assets` }}
         onLocateStep={(t) => setActiveStepType(t)}
       />
-      <WorkflowInspectorDrawerWrapper steps={steps} projectId={params.id} setActiveStepType={setActiveStepType} />
+      <WorkflowInspectorDrawerWrapper
+        steps={steps}
+        projectId={params.id}
+        currentStep={currentStep}
+        project={project}
+        setActiveStepType={setActiveStepType}
+      />
     </div>
   )
 }
 
-function WorkflowInspectorDrawerWrapper({ steps, projectId, setActiveStepType }: { steps: any[]; projectId: string; setActiveStepType: (t: string) => void }) {
+function WorkflowInspectorDrawerWrapper({
+  steps,
+  projectId,
+  currentStep,
+  project,
+  setActiveStepType,
+}: {
+  steps: any[]
+  projectId: string
+  currentStep: any
+  project: any
+  setActiveStepType: (t: string) => void
+}) {
   const [isOpen, setIsOpen] = useState(false)
   const [activeView, setActiveView] = useState<'task-queue' | 'generation-confirm' | 'result-feedback'>('task-queue')
 
@@ -581,9 +599,39 @@ function WorkflowInspectorDrawerWrapper({ steps, projectId, setActiveStepType }:
   }, [])
 
   useEffect(() => {
-    (window as any).__openInspector = openInspector
+    ;(window as any).__openInspector = openInspector
     return () => { delete (window as any).__openInspector }
   }, [openInspector])
+
+  // 自动从当前步骤生成 confirmData
+  const confirmData = useMemo(() => {
+    if (!currentStep) return null
+    const out = currentStep.outputData || {}
+    const prompt = out.prompts?.[0]?.englishPrompt || out.prompts?.[0]?.chineseDesc || out.englishPrompt || out.chineseDesc || '(无 prompt)'
+    return {
+      stepType: currentStep.stepType,
+      inputDeps: getInputDeps(currentStep.stepType, project),
+      model: out.imageModel || out.modelId || 'gpt-image-2',
+      aspectRatio: out.aspectRatio || '16:9',
+      prompt,
+      pointCost: 5,
+      asset: undefined,
+    } as any
+  }, [currentStep, project])
+
+  // 自动从当前步骤生成 feedbackData
+  const feedbackData = useMemo(() => {
+    if (!currentStep) return null
+    const out = currentStep.outputData || {}
+    return {
+      step: currentStep,
+      stages: buildStages(currentStep),
+      previewUrl: out.styleRefUrl || out.imageUrl || out.url,
+      partialSuccess: currentStep.status === 'COMPLETED' && out.isMock,
+      failedReason: currentStep.status === 'FAILED' ? currentStep.errorMessage : undefined,
+      preservedAssets: out.generatedCount ? [`${out.generatedCount} 张已生成`] : [],
+    } as any
+  }, [currentStep])
 
   return (
     <WorkflowInspectorDrawer
@@ -593,10 +641,41 @@ function WorkflowInspectorDrawerWrapper({ steps, projectId, setActiveStepType }:
       steps={steps}
       activeView={activeView}
       onViewChange={setActiveView}
+      confirmData={confirmData}
+      feedbackData={feedbackData}
       onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
       onLocateTaskStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
     />
   )
+}
+
+function getInputDeps(stepType: string, project: any): string[] {
+  const map: Record<string, string[]> = {
+    IDEATION: [],
+    FRAMEWORK: ['原始元构思'],
+    STYLE: ['框架 (synopsis + visualStyle)', '可选用户参考图'],
+    CHARACTER: ['风格基准', '角色列表', '可选用户参考图'],
+    CONCEPT: ['风格基准', '角色图', '剧本框架', '可选用户参考图'],
+    TRAILER: ['概念图 (≥1)', '已生成片段', 'BGM 策略'],
+    STORYBOARD: ['风格基准', '概念图', '角色图', '分幕', '可选用户参考图'],
+    KEYFRAMES: ['起始帧 (from storyboard)', '风格基准', '角色图', '可选用户参考图'],
+    VIDEO_DIRECT: ['起始帧 + 尾帧 (from keyframes)', '风格基准'],
+  }
+  return map[stepType] || []
+}
+
+function buildStages(step: any): Array<{ name: string; status: 'completed' | 'processing' | 'failed' | 'pending'; progress?: number; error?: string }> {
+  const out = step.outputData || {}
+  const isFailed = step.status === 'FAILED'
+  const isCompleted = step.status === 'COMPLETED'
+  const isProcessing = step.status === 'PROCESSING'
+
+  return [
+    { name: '参数计算', status: 'completed' },
+    { name: '提示词生成', status: isFailed && !out.prompts ? 'failed' : isCompleted || out.prompts ? 'completed' : 'processing' },
+    { name: '模型调用', status: isFailed ? 'failed' : isProcessing ? 'processing' : isCompleted ? 'completed' : 'pending' },
+    { name: '资产写入', status: isFailed ? 'failed' : isCompleted ? 'completed' : isProcessing ? 'processing' : 'pending' },
+  ]
 }
 
 /* ============================================================

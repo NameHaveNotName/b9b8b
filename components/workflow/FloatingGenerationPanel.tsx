@@ -189,8 +189,8 @@ export default function FloatingGenerationPanel({
   const failedSteps = steps.filter(s => s.status === 'FAILED')
   const { recentCompletions, dismiss } = useRecentCompletions(steps)
 
-  // Filter out dismissed tasks
-  const visibleProcessing = processingSteps.filter(s => !dismissedTasks.has(s.id))
+  // 处理中任务不应该被 dismiss 过滤（用户重新生成时需要看到）
+  const visibleProcessing = processingSteps
   const visibleFailed = failedSteps.filter(s => !dismissedTasks.has(s.id))
   const visibleCompleted = recentCompletions.filter(c => !c.dismissed)
 
@@ -199,7 +199,7 @@ export default function FloatingGenerationPanel({
   // 始终显示面板（收起态），无任务时显示占位文字
 
   // Collapsed summary text
-  const processingCount = visibleProcessing.length
+  const processingCount = processingSteps.length
   const completedCount = visibleCompleted.length
   const failedCount = visibleFailed.length
 
