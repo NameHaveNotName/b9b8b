@@ -180,12 +180,12 @@ export default function AssetDecisionCard({
 
   return (
     <div
-      className={`group relative flex flex-col overflow-hidden rounded-xl border-2 transition-all duration-200 ${
-        asset.isSelected || asset.is基准
-          ? 'border-amber-400 shadow-lg ring-2 ring-amber-100'
+      className={`group relative flex flex-col overflow-hidden rounded-2xl border-2 transition-all duration-300 ${
+        asset.isSelected || (asset as any).is基準
+          ? 'border-amber-400 shadow-lg shadow-amber-100/50 ring-1 ring-amber-200'
           : asset.isMock
           ? 'border-yellow-300 bg-yellow-50/30'
-          : 'border-stone-200 bg-white hover:border-stone-400 hover:shadow-md'
+          : 'border-stone-200 bg-white hover:border-stone-300 hover:shadow-lg hover:-translate-y-1'
       }`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -236,44 +236,38 @@ export default function AssetDecisionCard({
 
             {/* Hover overlay actions */}
             {showHoverActions && hovered && !readOnly && (
-              <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/30 backdrop-blur-sm transition-opacity duration-200">
-                {/* Regenerate */}
-                {(onRegenerate || onViewPrompt || onViewParams) && (
-                  <div className="flex gap-2">
-                    {onRegenerate && (
-                      <button
-                        onClick={handleRegenerate}
-                        disabled={isRegenerating}
-                        className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-stone-700 shadow-sm transition hover:bg-white disabled:opacity-50"
-                      >
-                        {isRegenerating ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-3.5 w-3.5" />
-                        )}
-                        重新生成
-                      </button>
-                    )}
-                    {onViewPrompt && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onViewPrompt(asset) }}
-                        className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-stone-700 shadow-sm transition hover:bg-white"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        查看 Prompt
-                      </button>
-                    )}
-                    {onViewParams && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onViewParams(asset) }}
-                        className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-stone-700 shadow-sm transition hover:bg-white"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        参数
-                      </button>
-                    )}
-                  </div>
-                )}
+              <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/30 backdrop-blur-[2px] transition-opacity duration-200">
+                <div className="flex gap-2">
+                  {onRegenerate && (
+                    <button
+                      onClick={handleRegenerate}
+                      disabled={isRegenerating}
+                      className="flex items-center gap-1.5 rounded-full border border-white/30 bg-white/15 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition hover:bg-white/25 disabled:opacity-50"
+                    >
+                      {isRegenerating ? (
+                        <><Loader2 className="h-3.5 w-3.5 animate-spin" />重做中</>
+                      ) : (
+                        <><RefreshCw className="h-3.5 w-3.5" />重新生成</>
+                      )}
+                    </button>
+                  )}
+                  {onViewPrompt && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onViewPrompt(asset) }}
+                      className="flex items-center gap-1.5 rounded-full border border-white/30 bg-white/15 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition hover:bg-white/25"
+                    >
+                      查看 Prompt
+                    </button>
+                  )}
+                  {onViewParams && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onViewParams(asset) }}
+                      className="flex items-center gap-1.5 rounded-full border border-white/30 bg-white/15 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition hover:bg-white/25"
+                    >
+                      参数
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -291,7 +285,10 @@ export default function AssetDecisionCard({
             {isRegenerating ? (
               <Loader2 className="h-8 w-8 animate-spin" />
             ) : (
-              <ImageIcon className="h-8 w-8" />
+              <>
+                <div className="h-16 w-10 rounded-full bg-stone-300/40" />
+                <div className="mt-2 h-1.5 w-20 rounded-full bg-stone-200/60" />
+              </>
             )}
             <span className="mt-2 text-xs">
               {isRegenerating ? '生成中...' : asset.isMock ? '占位图' : '待生成'}
