@@ -712,6 +712,8 @@ export default function WorkflowInspectorDrawer({
     { id: 'result-feedback', label: '结果反馈' },
   ]
 
+  if (!isOpen) return null
+
   return (
     <div
       ref={drawerRef}
