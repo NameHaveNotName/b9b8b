@@ -251,12 +251,17 @@ function TaskQueueView({
               return (
                 <div
                   key={task.id}
-                  className={`rounded-lg border px-3 py-2.5 ${TASK_CATEGORY_COLORS[cat]}`}
+                  className={`rounded-xl border px-4 py-3.5 transition hover:shadow-sm ${
+                    cat === 'failed' ? 'border-stone-800 bg-stone-900 text-white' :
+                    cat === 'suggested' ? 'border-blue-200 bg-blue-50/50' :
+                    cat === 'available' ? 'border-stone-200 bg-white' :
+                    'border-stone-200 bg-white'
+                  }`}
                 >
-                  <div className="flex items-start gap-2.5">
-                    <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                  <div className="flex items-start gap-3">
+                    <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                       isProcessing ? 'bg-blue-100 text-blue-600' :
-                      isFailed ? 'bg-red-100 text-red-600' :
+                      isFailed ? (cat === 'failed' ? 'bg-red-800 text-red-300' : 'bg-red-100 text-red-600') :
                       isCompleted ? 'bg-green-100 text-green-600' :
                       'bg-stone-100 text-stone-500'
                     }`}>
@@ -272,16 +277,16 @@ function TaskQueueView({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium text-stone-700">{task.label}</span>
+                        <span className={`text-sm font-semibold ${cat === 'failed' ? 'text-white' : 'text-stone-700'}`}>{task.label}</span>
                         {task.priority === 'high' && (
-                          <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-medium text-red-600">优先</span>
+                          <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${cat === 'failed' ? 'bg-red-700 text-red-200' : 'bg-red-100 text-red-600'}`}>优先</span>
                         )}
                       </div>
                       {task.suggestion && (
-                        <p className="mt-0.5 text-[11px] text-stone-500">{task.suggestion}</p>
+                        <p className={`mt-0.5 text-xs ${cat === 'failed' ? 'text-stone-300' : 'text-stone-500'}`}>{task.suggestion}</p>
                       )}
                       {task.errorMessage && (
-                        <p className="mt-0.5 text-[11px] text-red-500 line-clamp-2">{task.errorMessage}</p>
+                        <p className={`mt-0.5 text-xs line-clamp-2 ${cat === 'failed' ? 'text-red-300' : 'text-red-500'}`}>{task.errorMessage}</p>
                       )}
                       {/* Actions */}
                       <div className="mt-2 flex items-center gap-2">
