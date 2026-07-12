@@ -557,16 +557,6 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         />
       )}
 
-      {/* 右侧副工作台入口按钮 — 始终可见 */}
-      <button
-        onClick={() => { (window as any).__openInspector?.('task-queue') }}
-        className="fixed right-0 top-64 z-40 rounded-l-xl border border-r-0 border-stone-200 bg-white/90 px-3 py-4 text-sm font-bold text-amber-600 shadow-md backdrop-blur transition hover:bg-white"
-        style={{ writingMode: 'vertical-rl' }}
-        title="打开副工作台"
-      >
-        副工作台
-      </button>
-
       {/* 浮动生成任务面板 */}
       <FloatingGenerationPanel
         steps={steps}
