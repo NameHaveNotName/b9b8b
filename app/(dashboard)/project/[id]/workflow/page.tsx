@@ -354,11 +354,11 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
       {/* Toast：风格选中等成功/失败的瞬时反馈 */}
       {toast && (
         <div
-          className={`fixed left-1/2 top-6 z-50 -translate-x-1/2 rounded-lg px-5 py-2.5 text-sm font-medium shadow-lg transition ${
+          className={`fixed bottom-8 left-1/2 z-50 -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg transition-all duration-300 ease-out ${
             toast.kind === 'success'
-              ? 'bg-amber-500 text-white'
-              : 'bg-red-500 text-white'
-          }`}
+              ? 'bg-stone-900 text-white translate-y-0 opacity-100'
+              : 'bg-red-500 text-white translate-y-0 opacity-100'
+          } animate-bounce-in`}
           role="status"
         >
           {toast.kind === 'success' ? '✓ ' : '⚠ '}
@@ -493,7 +493,23 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
             />
           </div>
 
-          {/* 底部导航：隐藏步骤不显示 */}
+          {/* 决策提示栏：已选视觉基准时显示 */}
+          {currentStep.stepType === 'STYLE' && project.selectedStyleId && (
+            <div className="mt-5 flex items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/60 px-5 py-3.5">
+              <div>
+                <span className="text-sm font-semibold text-amber-800">已选视觉基准：</span>
+                <span className="text-sm text-amber-700">该资产将用于人物设计、概念图、分镜尾帧和视频片段生成。切换基准时会提示是否影响已生成资产。</span>
+              </div>
+              <button
+                onClick={() => { (window as any).__openInspector?.('task-queue') }}
+                className="shrink-0 rounded-lg border border-amber-300 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition hover:bg-amber-50"
+              >
+                展开副工作台
+              </button>
+            </div>
+          )}
+
+          {/* 底部导航 */}
           {currentStep.status === 'COMPLETED' && (
             () => {
               const stepId = prismaTypeToStepId(currentStep.stepType)

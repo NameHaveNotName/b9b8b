@@ -230,9 +230,9 @@ export default function FloatingGenerationPanel({
                 </>
               )}
               {processingCount === 0 && failedCount === 0 && completedCount > 0 && (
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-40" />
+                  <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
                 </span>
               )}
             </span>
@@ -304,7 +304,9 @@ export default function FloatingGenerationPanel({
               return (
                 <div
                   key={`proc-${step.id}`}
-                  className="group flex items-start gap-3 border-b border-stone-50 px-4 py-3 transition hover:bg-stone-50/50"
+                  className={`group flex items-start gap-3 border-b border-stone-50 px-4 py-3 transition-all duration-300 hover:bg-stone-50/50 ${
+                    removingTasks.has(`proc-${step.id}`) ? 'translate-x-3 opacity-0 max-h-0 py-0' : ''
+                  }`}
                 >
                   <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600">
                     <Icon className="h-4 w-4" />
@@ -362,7 +364,9 @@ export default function FloatingGenerationPanel({
               return (
                 <div
                   key={`done-${completion.stepType}`}
-                  className="group flex items-start gap-3 border-b border-stone-50 px-4 py-3 transition hover:bg-stone-50/50"
+                  className={`group flex items-start gap-3 border-b border-stone-50 px-4 py-3 transition-all duration-300 hover:bg-stone-50/50 ${
+                    removingTasks.has(`done-${completion.stepType}`) ? 'translate-x-3 opacity-0 max-h-0 py-0' : ''
+                  }`}
                 >
                   <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-50 text-green-600">
                     <CheckCircle2 className="h-4 w-4" />
@@ -408,7 +412,9 @@ export default function FloatingGenerationPanel({
               return (
                 <div
                   key={`fail-${step.id}`}
-                  className="group flex items-start gap-3 border-b border-stone-50 px-4 py-3 transition hover:bg-stone-50/50"
+                  className={`group flex items-start gap-3 border-b border-stone-50 px-4 py-3 transition-all duration-300 hover:bg-stone-50/50 ${
+                    removingTasks.has(`fail-${step.id}`) ? 'translate-x-3 opacity-0 max-h-0 py-0' : ''
+                  }`}
                 >
                   <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600">
                     <Icon className="h-4 w-4" />
