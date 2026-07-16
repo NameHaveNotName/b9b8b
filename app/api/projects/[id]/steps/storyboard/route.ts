@@ -82,10 +82,16 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const actResults = await Promise.all(
         acts.map((act: any) => generateStoryboardByAct(textClient, framework, act, tagInstructions))
       )
-      const allShots = actResults.flat()
+      let allShots = actResults.flat()
       if (!Array.isArray(allShots) || allShots.length === 0) {
         throw new Error('Failed to parse storyboard from LLM output')
       }
+
+      // 规范化 shotId：缺失时按顺序补齐 shot_001, shot_002 ...
+      allShots = allShots.map((s: any, i: number) => ({
+        ...s,
+        shotId: s.shotId || `shot_${String(i + 1).padStart(3, '0')}`,
+      }))
 
       // 构建提示词数组
       const prompts = allShots.map((shot, i) => ({
@@ -338,8 +344,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
 
     const existingOutput = (step.outputData as any) || {}
-    const prompts = existingOutput.prompts || []
-    const allShots = existingOutput.shots || []
+    const prompts = (existingOutput.prompts || []).map((p: any, i: number) => ({
+      ...p,
+      shotId: p.shotId || `shot_${String(i + 1).padStart(3, '0')}`,
+    }))
+    const allShots = (existingOutput.shots || []).map((s: any, i: number) => ({
+      ...s,
+      shotId: s.shotId || `shot_${String(i + 1).padStart(3, '0')}`,
+    }))
     const existingShotAssets: Array<{ shotId: string; assetId: string; url: string }> = existingOutput.shotAssets || []
     const existingShotPrompts: Array<{ shotId: string; prompt: string; caption: string }> = existingOutput.shotPrompts || []
 
@@ -376,7 +388,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       let currentShotPrompts = [...existingShotPrompts]
 
       if (missingShotIds.length > 0) {
-        console.log(`[STORYBOARD-ACT] 阶段A: 为 ${missingShotIds.length} 个缺失镜头生成提示词`)
+        console.log(`[STORYBOARD-ACT] 阶段A: 为 ${missingShotIds.length} 个缺失镜头生成提示词`, missingShotIds)
 
         const sbRefs = await getProjectReferences(params.id).catch(() => [])
         const sbRefLabels = sbRefs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
@@ -431,17 +443,20 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
             }
           })
         )
-        currentShotPrompts = [
-          ...existingShotPrompts.filter((p: any) => !actShotIds.has(p.shotId)),
-          ...newPrompts,
-        ]
 
-        // 立即保存 shotPrompts，避免重复生成
+        // 合并提示词：以新提示词覆盖同 shotId，保留其他幕的提示词
+        const promptMap = new Map(existingShotPrompts.map((p: any) => [p.shotId, p]))
+        for (const p of newPrompts) promptMap.set(p.shotId, p)
+        currentShotPrompts = Array.from(promptMap.values())
+
+        // 立即保存 shotPrompts，同时规范化 shots/prompts，避免前后端 shotId 不一致
         await prisma.workflowStep.update({
           where: { id: step.id },
           data: {
             outputData: {
               ...existingOutput,
+              prompts,
+              shots: allShots,
               shotPrompts: currentShotPrompts,
             },
           },
@@ -477,8 +492,21 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         })
       }
 
-      const shotPrompt = currentShotPrompts.find((p: any) => p.shotId === targetShotId)
+      let shotPrompt = currentShotPrompts.find((p: any) => p.shotId === targetShotId)
       if (!shotPrompt) {
+        // 防御性回退：从 actPrompts 直接构造（防止 shotId 类型/格式不一致导致找不到）
+        const fallbackPromptItem = actPrompts.find((p: any) => p.shotId === targetShotId)
+        if (fallbackPromptItem) {
+          console.warn(`[STORYBOARD-ACT] 未找到 ${targetShotId} 的 shotPrompt，使用 actPrompt 回退`)
+          shotPrompt = {
+            shotId: targetShotId,
+            prompt: fallbackPromptItem.englishPrompt || '',
+            caption: fallbackPromptItem.chineseDesc || '',
+          }
+        }
+      }
+      if (!shotPrompt) {
+        console.error(`[STORYBOARD-ACT] 镜头 ${targetShotId} 无可用提示词，currentShotPrompts:`, currentShotPrompts.map((p: any) => p.shotId), 'actPrompts:', actPrompts.map((p: any) => p.shotId))
         return NextResponse.json({ error: 'VALIDATION_003', message: `镜头 ${targetShotId} 没有对应的提示词` }, { status: 400 })
       }
 
@@ -590,7 +618,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         ...cleanedShotAssets.filter((s: any) => !(s.shotId === shotPrompt.shotId && s.actNumber === actNumber)),
         newShotAsset,
       ]
-      const mergedShots = (existingOutput.shots || []).map((s: any) =>
+      const mergedShots = allShots.map((s: any) =>
         s.shotId === shotPrompt.shotId ? { ...s, firstFrameUrl: url } : s
       )
 
@@ -599,6 +627,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
       const nextOutput = {
         ...existingOutput,
+        prompts,
         shots: mergedShots,
         shotAssets: mergedShotAssets,
         shotPrompts: currentShotPrompts,
@@ -676,11 +705,17 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const actResults = await Promise.all(
       acts.map((act: any) => generateStoryboardByAct(textClient, framework, act))
     )
-    const allShots = actResults.flat()
+    let allShots = actResults.flat()
 
     if (!Array.isArray(allShots) || allShots.length === 0) {
       throw new Error('Failed to parse storyboard from LLM output')
     }
+
+    // 规范化 shotId：缺失时按顺序补齐 shot_001, shot_002 ...
+    allShots = allShots.map((s: any, i: number) => ({
+      ...s,
+      shotId: s.shotId || `shot_${String(i + 1).padStart(3, '0')}`,
+    }))
 
     // 为每个 shot 生成分镜草图
     const shotAssets = []
