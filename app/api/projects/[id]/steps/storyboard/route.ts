@@ -389,7 +389,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
               })
               .join('、')
 
-            const llmPrompt = `基于以下分镜信息，生成一段适合 AI 图像生成模型的英文提示词（prompt）：
+            const llmPrompt = `基于以下分镜信息，生成一段适合 AI 图像生成模型的英文提示词（prompt）。这张图片将直接作为视频首帧，必须是单张完整画面，不能是拼接/分屏/多格漫画。
 
 分镜描述：${shot.description || promptItem.chineseDesc || ''}
 运镜方式：${shot.cameraMove || promptItem.cameraMove || '固定'}
@@ -402,7 +402,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 2. 如果涉及角色，必须引用该角色的形象特征（从角色设定中提取），确保角色一致性
 3. 提示词长度控制在 200-500 词，适合即梦/Flux/DALL-E 等模型
 4. 同时生成一个中文描述（用于前端展示）
-5. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
+5. 【最高优先级】必须输出单张完整画面（single full frame），禁止出现以下任何形式：分屏 split-screen、多格 panels、漫画分镜 comic layout、拼贴 collage、三联画 triptych、双联画 diptych、时间轴 timeline、前后对比 before/after、白天黑夜并列 day-night split。只描述一个单一瞬间的单一画面。
+6. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
 {"prompt": "英文生图提示词...", "caption": "中文画面描述..."}${sbRefHint}`
 
             try {
@@ -534,11 +535,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         finalPrompt = `[Continuity from previous shot: ${previousShotDesc.slice(0, 80)}] ${hint}\n\nCurrent shot: ${currentDesc}\n\n${shotPrompt.prompt}`
       }
 
-      console.log(`[STORYBOARD-ACT] 阶段B: 生图 ${targetShotId}, prompt前80:`, finalPrompt.slice(0, 80))
+      // 强制单帧：追加负面约束，防止模型输出分屏/多格/拼贴
+      const singleFrameGuard = ' Single full frame only. Absolutely no split-screen, multi-panel, collage, triptych, diptych, comic layout, before-and-after comparison, or timeline sequence. One image, one moment.'
+      const guardedPrompt = finalPrompt + singleFrameGuard
+
+      console.log(`[STORYBOARD-ACT] 阶段B: 生图 ${targetShotId}, prompt前80:`, guardedPrompt.slice(0, 80))
 
       const { buffer, isMock, lastError } = await generateImage({
         model: imageModel || 'gpt-image-2',
-        prompt: finalPrompt,
+        prompt: guardedPrompt,
         referenceImages: refImages.length > 0 ? refImages : undefined,
         aspectRatio,
         watermark: false,

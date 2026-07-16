@@ -19,6 +19,7 @@
 4. 提示词必须包含：场景环境、角色结束姿态、光影、35mm胶片关键词、色调、8K。
 5. 遵循已选定的影片风格（{{STYLE_REF}}），将风格关键词直接融入 prompt。
 6. 禁止纯风景空镜——画面中必须包含角色（即使是背影或远景）。
+7. 【最高优先级】必须输出单张完整画面（single full frame），禁止出现以下任何形式：分屏 split-screen、多格 panels、漫画分镜 comic layout、拼贴 collage、三联画 triptych、双联画 diptych、时间轴 timeline、前后对比 before/after、白天黑夜并列 day-night split。只描述一个单一瞬间的单一画面。
 
 输出格式（严格 JSON）：
 {

@@ -238,7 +238,8 @@ export async function getImageClient(): Promise<ImageClient> {
         if (styleRefUrl) refs.push(styleRefUrl)
         if (userReferenceUrls?.length) refs.push(...userReferenceUrls)
 
-        const prompt = sceneDesc || ''
+        const singleFrameGuard = ' Single full frame only. Absolutely no split-screen, multi-panel, collage, triptych, diptych, comic layout, before-and-after comparison, or timeline sequence.'
+        const prompt = (sceneDesc || '') + singleFrameGuard
 
         const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateConceptScene] 模型: ${model}, 参考图: ${refs.length} 张`)
@@ -272,7 +273,8 @@ export async function getImageClient(): Promise<ImageClient> {
           frameType === 'first'
             ? 'opening moment, anticipatory posture'
             : 'closing moment, action resolution'
-        const prompt = `${sceneDesc}, ${phase}`
+        const singleFrameGuard = 'Single full frame only. Absolutely no split-screen, multi-panel, collage, triptych, diptych, comic layout, before-and-after comparison, or timeline sequence. One image, one moment.'
+        const prompt = `${sceneDesc}, ${phase}. ${singleFrameGuard}`
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
         const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${model}`)
