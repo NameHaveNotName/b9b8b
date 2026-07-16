@@ -195,7 +195,7 @@ export interface GenerateVisionTextParams {
 }
 
 export async function generateVisionText(params: GenerateVisionTextParams): Promise<string> {
-  const model = params.model || 'gpt-4o-mini'
+  const model = params.model || 'gpt-4o'
   const content: VisionMessageContent[] = []
 
   const textParts: string[] = [params.prompt]
