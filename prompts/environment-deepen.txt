@@ -2,6 +2,8 @@
 
 目标：为指定环境生成详细的设定内容。
 
+{{TAG_INSTRUCTIONS}}
+
 【整体故事框架】
 {{FRAMEWORK}}
 

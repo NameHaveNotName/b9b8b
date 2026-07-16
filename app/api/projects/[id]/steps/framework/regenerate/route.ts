@@ -5,6 +5,7 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
+import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
@@ -18,12 +19,14 @@ const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: str
   epic: { label: '史诗', range: '20-30分钟', acts: '4-5幕', shots: '150-250镜', desc: '宏大格局，群像/多线' },
 }
 
-function buildFrameworkPrompt(userInput: string, selectedDirection: any, storyLengthKey: string) {
+function buildFrameworkPrompt(userInput: string, selectedDirection: any, storyLengthKey: string, tagInstructions?: string) {
   const tier = STORY_LENGTH_MAP[storyLengthKey] || STORY_LENGTH_MAP.short
 
   return `角色：高端艺术电影 AI 编剧与结构顾问
 
 目标：根据客户的原始灵感和选定的创意方向，输出一份完整的故事框架。你不要生成创意方向（directions），而是直接输出框架（framework）。
+
+${tagInstructions || ''}
 
 【故事分档上下文】
 用户选定的故事分档为：${tier.label} · ${tier.range}
@@ -136,6 +139,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const storyLength = ideationOutput.storyLength || 'short'
+  const projectTag = ideationOutput?.projectTag || ''
+  const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
+    ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].framework
+    : ''
 
   const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
   if (!pointsCheck.ok) {
@@ -162,7 +169,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       orderBy: { versionNumber: 'desc' },
     })
     const creativeSource = currentIteration?.creativeContent || project.rawIdea
-    const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength)
+    const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, tagInstructions)
     const textClient = await getTextClient()
     const fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000 })
 
@@ -210,7 +217,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     waitUntil(
       (async () => {
         try {
-          await runDeepening(params.id, step.id, framework)
+          await runDeepening(params.id, step.id, framework, projectTag)
         } catch (e: any) {
           console.error('[FRAMEWORK-REGENERATE] 后台深化失败:', e.message)
         }

@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
+import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
 import {
   deepenCharacters,
@@ -43,6 +44,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const framework = (step.outputData as any) || {}
 
+  const ideationStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'IDEATION' } }
+  })
+  const ideationOutput = (ideationStep?.outputData as any) || {}
+  const projectTag = ideationOutput?.projectTag || ''
+
   const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足' }, { status: 403 })
@@ -63,7 +70,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             }),
           }
         }
-        nextFramework = await deepenCharacters(nextFramework, step.id)
+        nextFramework = await deepenCharacters(nextFramework, step.id, projectTag)
         break
 
       case 'story':
@@ -76,8 +83,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             return rest
           }),
         }
-        nextFramework = await deepenSynopsis(nextFramework, step.id)
-        nextFramework = await deepenActs(nextFramework, step.id)
+        nextFramework = await deepenSynopsis(nextFramework, step.id, projectTag)
+        nextFramework = await deepenActs(nextFramework, step.id, projectTag)
         break
 
       case 'environments':
@@ -87,7 +94,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           environments: [],
           environmentsDeepened: [],
         }
-        nextFramework = await extractAndDeepenEnvironments(nextFramework, step.id)
+        nextFramework = await extractAndDeepenEnvironments(nextFramework, step.id, projectTag)
         break
     }
 

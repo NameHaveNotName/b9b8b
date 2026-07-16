@@ -1,6 +1,17 @@
 import { prisma } from './prisma'
 import { getTextClient } from './api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from './prompts'
+import { PROJECT_TAG_PROMPTS } from './project-tags'
+
+function isPresentationTag(projectTag?: string): boolean {
+  return projectTag === 'trailer' || projectTag === 'product'
+}
+
+function getTagDeepeningInstructions(projectTag?: string): string {
+  if (!projectTag) return ''
+  const entry = PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
+  return entry?.deepening || ''
+}
 
 function truncateText(text: string, maxLen: number): string {
   if (!text) return ''
@@ -83,12 +94,13 @@ export async function updateDeepeningStatus(stepId: string, framework: any, stat
   return nextFramework
 }
 
-export async function deepenCharacters(framework: any, stepId: string) {
+export async function deepenCharacters(framework: any, stepId: string, projectTag?: string) {
   const characters = framework.characters || []
   if (characters.length === 0) return framework
 
   const textClient = await getTextClient()
   const completedCharacters: any[] = []
+  const tagInstructions = getTagDeepeningInstructions(projectTag)
 
   for (let i = 0; i < characters.length; i++) {
     const char = characters[i]
@@ -106,6 +118,7 @@ export async function deepenCharacters(framework: any, stepId: string) {
         CHARACTER_NAME: char.name,
         CHARACTER_ROLE: char.role,
         CHARACTER_DESCRIPTION: char.description || '',
+        TAG_INSTRUCTIONS: tagInstructions,
       })
 
       const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 4096 })
@@ -158,7 +171,7 @@ export async function deepenCharacters(framework: any, stepId: string) {
   return framework
 }
 
-export async function deepenSynopsis(framework: any, stepId: string) {
+export async function deepenSynopsis(framework: any, stepId: string, projectTag?: string) {
   framework = await updateDeepeningStatus(stepId, framework, 'deepening_synopsis', {
     current: 1,
     total: 1,
@@ -168,9 +181,12 @@ export async function deepenSynopsis(framework: any, stepId: string) {
   try {
     const textClient = await getTextClient()
     const context = buildNarrativeContext(framework)
-    const prompt = loadPromptTemplate('synopsis-deepen', {
+    const templateName = isPresentationTag(projectTag) ? 'synopsis-deepen-presentation' : 'synopsis-deepen'
+    const tagInstructions = getTagDeepeningInstructions(projectTag)
+    const prompt = loadPromptTemplate(templateName, {
       FRAMEWORK: JSON.stringify(context, null, 2),
       CHARACTERS: JSON.stringify(context.characters, null, 2),
+      TAG_INSTRUCTIONS: tagInstructions,
     })
 
     const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 })
@@ -189,12 +205,14 @@ export async function deepenSynopsis(framework: any, stepId: string) {
   return framework
 }
 
-export async function deepenActs(framework: any, stepId: string) {
+export async function deepenActs(framework: any, stepId: string, projectTag?: string) {
   const acts = framework.acts || []
   if (acts.length === 0) return framework
 
   const textClient = await getTextClient()
   const deepenedActs: any[] = []
+  const templateName = isPresentationTag(projectTag) ? 'act-deepen-presentation' : 'act-deepen'
+  const tagInstructions = getTagDeepeningInstructions(projectTag)
 
   for (let i = 0; i < acts.length; i++) {
     const act = acts[i]
@@ -206,7 +224,7 @@ export async function deepenActs(framework: any, stepId: string) {
 
     try {
       const context = buildNarrativeContext(framework)
-      const prompt = loadPromptTemplate('act-deepen', {
+      const prompt = loadPromptTemplate(templateName, {
         FRAMEWORK: JSON.stringify(context, null, 2),
         CHARACTERS: JSON.stringify(context.characters, null, 2),
         SYNOPSIS: context.synopsis,
@@ -214,6 +232,7 @@ export async function deepenActs(framework: any, stepId: string) {
         ACT_NO: String(act.actNo || i + 1),
         ACT_TITLE: act.title || '',
         ACT_CONTENT: act.content || '',
+        TAG_INSTRUCTIONS: tagInstructions,
       })
 
       const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 })
@@ -242,7 +261,7 @@ export async function deepenActs(framework: any, stepId: string) {
   return framework
 }
 
-export async function extractAndDeepenEnvironments(framework: any, stepId: string) {
+export async function extractAndDeepenEnvironments(framework: any, stepId: string, projectTag?: string) {
   framework = await updateDeepeningStatus(stepId, framework, 'extracting_environments', {
     current: 1,
     total: 1,
@@ -252,6 +271,7 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
   try {
     const textClient = await getTextClient()
     const context = buildNarrativeContext(framework)
+    const tagInstructions = getTagDeepeningInstructions(projectTag)
     const extractPrompt = loadPromptTemplate('environment-extract', {
       FRAMEWORK: JSON.stringify(context, null, 2),
       CHARACTERS: JSON.stringify(context.characters, null, 2),
@@ -297,6 +317,7 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
             keyScenes: (a.keyScenes || []).slice(0, 3),
           })), null, 2),
           ENV_NAME: env.name,
+          TAG_INSTRUCTIONS: tagInstructions,
           ENV_BRIEF: env.brief || '',
         })
 
@@ -335,15 +356,15 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
   return framework
 }
 
-export async function runDeepening(projectId: string, stepId: string, initialFramework: any) {
-  console.log('[DEEPEN] 开始自动深化流程')
+export async function runDeepening(projectId: string, stepId: string, initialFramework: any, projectTag?: string) {
+  console.log('[DEEPEN] 开始自动深化流程', projectTag ? `tag=${projectTag}` : '')
   let framework = initialFramework
 
   try {
-    framework = await deepenCharacters(framework, stepId)
-    framework = await deepenSynopsis(framework, stepId)
-    framework = await deepenActs(framework, stepId)
-    framework = await extractAndDeepenEnvironments(framework, stepId)
+    framework = await deepenCharacters(framework, stepId, projectTag)
+    framework = await deepenSynopsis(framework, stepId, projectTag)
+    framework = await deepenActs(framework, stepId, projectTag)
+    framework = await extractAndDeepenEnvironments(framework, stepId, projectTag)
 
     framework = await updateDeepeningStatus(stepId, framework, 'completed', {
       current: 1,
