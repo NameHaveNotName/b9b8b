@@ -31,7 +31,13 @@ export function extractJsonFromMarkdown(text: string): any {
   if (match) {
     try {
       return JSON.parse(match[1].trim())
-    } catch {}
+    } catch {
+      // 再试一次：尝试修复 JSON 中未加引号的字符串值（LLM 偶尔在标题字段漏引号）
+      try {
+        const fixed = match[1].replace(/("(?:title|styleName|styleDescription|caption|description|name|label|role)"\s*:\s*)([^\s",\[\]{}]+)(\s*[,}\n])/g, '$1"$2"$3')
+        return JSON.parse(fixed.trim())
+      } catch {}
+    }
   }
 
   // 最终兜底：返回原始文本包装

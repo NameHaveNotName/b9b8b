@@ -235,9 +235,19 @@ export async function generateVisionText(params: GenerateVisionTextParams): Prom
   } catch (err: any) {
     if (err?.message?.includes('does not support image input') || err?.status === 400) {
       console.warn('[VISION-TEXT] multimodal failed, falling back to text-only:', err?.message?.slice(0, 100))
+
+      // 构建纯文本 prompt：替换视觉参考指令为文字描述
+      let textOnlyPrompt = params.prompt
+      const labelInfo = params.imageLabels && params.imageLabels.length > 0
+        ? `\n【用户上传了 ${params.imageUrls.length} 张视觉参考图（你无法直接查看），标签：${params.imageLabels.join('、')}。请在生成角色 description 时，根据标签推断角色的外观特征，使用具体的颜色、体型、视觉元素来描述，而不仅仅是角色定位或性格。】\n`
+        : ''
+      // 移除"请仔细查看图片内容"等只能多模态模型执行的指令，替换为纯文本说明
+      textOnlyPrompt = textOnlyPrompt.replace(/请仔细查看图片内容[。.]?/g, '请根据下方文字描述来构建角色外观')
+      textOnlyPrompt = textOnlyPrompt.replace(/【强制规则：角色外观匹配】[\s\S]*?禁止只用角色定位[。.]?/g, labelInfo)
+
       const fallbackData = await xiaomiFetch('/v1/chat/completions', {
         model: 'deepseek-chat',
-        messages: [{ role: 'user', content: params.prompt }],
+        messages: [{ role: 'user', content: textOnlyPrompt }],
         temperature: params.temperature ?? 0.7,
         max_tokens: params.maxTokens ?? 12000,
       })
@@ -887,6 +897,21 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
       return { buffer, url: raw.url || '', model: params.model, revisedPrompt: raw.revisedPrompt, isMock: false }
     } catch (e: any) {
       console.warn(`[GPT-EDIT] edits 失败: ${e?.message?.slice(0,100) || e}`)
+
+      // "does not support image input" — 移除参考图后走纯文生图
+      const errMsg = String(e?.message || '')
+      if (/does not support image input/i.test(errMsg) && (params.referenceImageUrl || params.referenceImages?.length)) {
+        console.warn(`[GPT-EDIT] model=${params.model} 不支持 image 字段, 降级为纯文生图`)
+        const stripped = { ...params, referenceImageUrl: undefined, referenceImages: undefined }
+        try {
+          const raw = await callXiaomiImageOnce(stripped)
+          const buffer = await rawToBuffer(raw)
+          return { buffer, url: raw.url || '', model: params.model, revisedPrompt: raw.revisedPrompt, isMock: false }
+        } catch (strippedErr: any) {
+          console.warn(`[GPT-EDIT] 降级纯文生图仍失败: ${strippedErr?.message}`)
+        }
+      }
+
       const lastError = e
       const mock = await generateMockImage(params.prompt)
       return { ...mock, isMock: true, lastError: String(lastError?.message || lastError || 'unknown') }
@@ -918,7 +943,7 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
     }
   }
 
-  // 候选模型链：主模型 → fallback（如有）→ Mock
+  // 候选模型链：主模型 → 模块 fallback → 通用降级（gpt-image-2）→ Mock
   const fallbackChain: string[] = []
   // 从 models-config 读取该模型对应的 fallback（按业务模块匹配）
   for (const key of Object.keys(IMAGE_MODELS)) {
@@ -927,6 +952,12 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
       fallbackChain.push(v.fallback)
       break
     }
+  }
+
+  // 通用降级：如果请求的不是 gpt-image-2 且 fallbackChain 中没有它，追加 gpt-image-2 作为兜底
+  const PRIMARY_MODEL = IMAGE_MODELS.primary
+  if (params.model !== PRIMARY_MODEL && !fallbackChain.includes(PRIMARY_MODEL)) {
+    fallbackChain.push(PRIMARY_MODEL)
   }
 
   const seen = new Set<string>()

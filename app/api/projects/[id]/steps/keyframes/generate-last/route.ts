@@ -111,6 +111,9 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const refs = await getProjectReferences(params.id).catch(() => [])
     const userRefUrls = refs.filter(r => r.url).map(r => r.url)
 
+    // 尾帧以当前镜头的首帧为参考，保持同一镜头内画面连贯
+    const currentFirstFrameUrl: string | undefined = shot.firstFrameUrl || shot.referenceImageUrl || undefined
+
     // 调用图像生成
     const imageClient = await getImageClient()
     const result = await imageClient.generateKeyframe(
@@ -121,7 +124,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       undefined,
       undefined,
       undefined,
-      userRefUrls
+      userRefUrls,
+      currentFirstFrameUrl
     )
 
     // 创建 Asset 记录

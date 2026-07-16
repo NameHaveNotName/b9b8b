@@ -114,7 +114,8 @@ export interface ImageClient {
     framework: any,
     count: number,
     aspectRatio?: string,
-    imageModel?: string
+    imageModel?: string,
+    basePrompt?: string
   ): Promise<StyleSample[]>
   generateCharacterPortrait(
     projectId: string,
@@ -145,7 +146,8 @@ export interface ImageClient {
     aspectRatio?: string,
     imageModel?: string,
     characterImageUrls?: string[],
-    userReferenceUrls?: string[]
+    userReferenceUrls?: string[],
+    previousImageUrl?: string
   ): Promise<KeyframeResult>
 }
 
@@ -154,20 +156,20 @@ let _imageClient: ImageClient | null = null
 export async function getImageClient(): Promise<ImageClient> {
   if (!_imageClient) {
     _imageClient = {
-      async generateStyleSamples(projectId, framework, count, aspectRatio?, imageModel?) {
+      async generateStyleSamples(projectId, framework, count, aspectRatio?, imageModel?, basePrompt?) {
         const styleBaseRaw =
           framework?.styleGuide || framework?.visualStyle || ''
         const styleTag = styleBaseRaw
           ? `cinematic film still, ${styleBaseRaw.slice(0, 100).replace(/[,，。.!！?？\n]/g, ' ')}`
           : 'cinematic film still, 35mm Kodak Portra 400'
         const variations = [
-          `${styleTag}, warm golden hour, soft bokeh, amber glow, nostalgic intimacy`,
-          `${styleTag}, cool blue moonlight, high contrast, dramatic shadows, nocturnal solitude`,
-          `${styleTag}, desaturated vintage, heavy film grain, documentary realism, faded colors`,
+          `${styleTag}, high contrast black and white, bold ink outlines, graphic novel style, dramatic chiaroscuro, halftone patterns`,
+          `${styleTag}, cinematic photorealism, 35mm Kodak Portra 400, natural light, shallow depth of field, soft grain`,
+          `${styleTag}, digital watercolor and ink wash, sumi-e inspired, cel-shaded, poetic negative space, hand-drawn texture`,
         ]
         const results: StyleSample[] = []
         for (let i = 0; i < count; i++) {
-          const prompt = variations[i] || styleTag
+          const prompt = basePrompt || variations[i] || styleTag
           const model = imageModel || IMAGE_MODELS.primary
           const ar = aspectRatio || '16:9'
           console.log(`[MODEL-SELECT] [generateStyleSamples] 模型: ${model}, 比例: ${ar}`)
@@ -201,7 +203,7 @@ export async function getImageClient(): Promise<ImageClient> {
         })
 
         // normalizeRefs 在 buildPayload 中将 referenceImageUrl + referenceImages
-        // 合并为一个有序数组，styleRefUrl 自动排在最前（最高优先级）。
+        // 合并为一个有序数组。参考图优先级由步骤顺序决定（近→远）：角色 > 风格 > 用户素材。
         const storageKey = `projects/${projectId}/characters/${character.id}.png`
         const url = await uploadOrDataFallback(storageKey, buffer, 'image/png')
         return { url, storageKey, characterId: character.id, isMock: !!isMock, ...(lastError ? { lastError } : {}) }
@@ -209,8 +211,8 @@ export async function getImageClient(): Promise<ImageClient> {
 
       async generateConceptScene(projectId, sceneDesc, styleRefUrl, _stylePrompt?, characterImageUrls?, _size?, aspectRatio?, imageModel?, characterDescs?, userReferenceUrls?) {
         const refs: string[] = []
-        if (styleRefUrl) refs.push(styleRefUrl)
         if (characterImageUrls?.length) refs.push(...characterImageUrls)
+        if (styleRefUrl) refs.push(styleRefUrl)
         if (userReferenceUrls?.length) refs.push(...userReferenceUrls)
 
         const prompt = sceneDesc || ''
@@ -242,7 +244,7 @@ export async function getImageClient(): Promise<ImageClient> {
         }
       },
 
-      async generateKeyframe(projectId, sceneDesc, styleRefUrl, frameType, aspectRatio?, imageModel?, characterImageUrls?, userReferenceUrls?) {
+      async generateKeyframe(projectId, sceneDesc, styleRefUrl, frameType, aspectRatio?, imageModel?, characterImageUrls?, userReferenceUrls?, previousImageUrl?) {
         const phase =
           frameType === 'first'
             ? 'opening moment, anticipatory posture'
@@ -251,10 +253,12 @@ export async function getImageClient(): Promise<ImageClient> {
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
         const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${model}`)
-        const refImages: string[] = [styleRefUrl]
+        const refImages: string[] = []
+        if (previousImageUrl) refImages.push(previousImageUrl)
         if (characterImageUrls && characterImageUrls.length > 0) {
           refImages.push(...characterImageUrls)
         }
+        if (styleRefUrl) refImages.push(styleRefUrl)
         if (userReferenceUrls && userReferenceUrls.length > 0) {
           refImages.push(...userReferenceUrls)
         }

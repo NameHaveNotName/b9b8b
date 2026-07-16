@@ -211,7 +211,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           aspectRatio,
           imageModel,
           characterImageUrls.length > 0 ? characterImageUrls : undefined,
-          userRefUrls
+          userRefUrls,
+          promptItem.firstFrameUrl || undefined
         )
         const lastAsset = await prisma.asset.create({
           data: {

@@ -3889,6 +3889,7 @@ function StoryboardPanel({
   const isExecuting = executing === step.stepType
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
+  const [confirmingShotId, setConfirmingShotId] = useState<string | null>(null)
 
   // [ACT-QUEUE] 每幕异步生图进度（独立轮询，不占用全局 executing 状态）
   const [actProgress, setActProgress] = useState<Record<number, { current: number; total: number; shotId: string | null }>>({})
@@ -4201,23 +4202,42 @@ function StoryboardPanel({
                             <span className="font-mono text-sm font-bold text-stone-600">{shot.shotId || ''}</span>
                             <span className="mt-1 max-w-[90%] truncate px-2 text-xs text-stone-400">{(shot.sceneName || '').slice(0, 14)}</span>
                             {!readOnly && (
-                              <button
-                                onClick={() => handleGenerateSingleShot(actNumber, shot.shotId)}
-                                disabled={isExecuting || !!actProgress[actNumber]}
-                                className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded bg-stone-100/80 text-xs font-medium text-stone-600 transition hover:bg-stone-200/90 hover:text-stone-800 disabled:opacity-50"
-                              >
-                                {actProgress[actNumber]?.shotId === shot.shotId ? (
-                                  <>
-                                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                                    生成中
-                                  </>
+                              <>
+                                {confirmingShotId === shot.shotId ? (
+                                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded bg-amber-50/95 px-2">
+                                    <p className="text-[11px] font-medium text-stone-700">确认生成镜头 {shot.shotId}？</p>
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => setConfirmingShotId(null)}
+                                        className="rounded-md border border-stone-300 bg-white px-3 py-1 text-[11px] text-stone-600 transition hover:bg-stone-50"
+                                      >取消</button>
+                                      <button
+                                        onClick={() => { setConfirmingShotId(null); handleGenerateSingleShot(actNumber, shot.shotId) }}
+                                        disabled={isExecuting || !!actProgress[actNumber]}
+                                        className="rounded-md bg-amber-600 px-3 py-1 text-[11px] font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+                                      >确认生成</button>
+                                    </div>
+                                  </div>
                                 ) : (
-                                  <>
-                                    <ImageIcon className="h-4 w-4" />
-                                    生成
-                                  </>
+                                  <button
+                                    onClick={() => setConfirmingShotId(shot.shotId)}
+                                    disabled={isExecuting || !!actProgress[actNumber]}
+                                    className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded bg-stone-100/80 text-xs font-medium text-stone-600 transition hover:bg-stone-200/90 hover:text-stone-800 disabled:opacity-50"
+                                  >
+                                    {actProgress[actNumber]?.shotId === shot.shotId ? (
+                                      <>
+                                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                                        生成中
+                                      </>
+                                    ) : (
+                                      <>
+                                        <ImageIcon className="h-4 w-4" />
+                                        生成
+                                      </>
+                                    )}
+                                  </button>
                                 )}
-                              </button>
+                              </>
                             )}
                           </div>
                         )}

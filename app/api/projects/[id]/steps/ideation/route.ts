@@ -101,8 +101,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       console.log(`[IDEATION-VISION] Using multimodal with ${refUrls.length} reference images, labels:`, refLabels, 'tag:', projectTag || 'none')
 
       const visualRefBlock = refLabels.length > 0
-        ? `【用户上传了 ${refUrls.length} 张视觉参考图，请仔细查看图片内容。用户标注的标签：${refLabels.join('、')}。\n请在创意设计时充分考虑这些视觉参考，确保角色形象、场景氛围、美术风格与参考素材保持一致。】`
-        : `【用户上传了 ${refUrls.length} 张视觉参考图，请仔细查看图片内容。\n请在创意设计时充分考虑这些视觉参考，确保角色形象、场景氛围、美术风格与参考素材保持一致。】`
+        ? `【用户上传了 ${refUrls.length} 张视觉参考图。用户标注的标签：${refLabels.join('、')}。\n` +
+          `【角色外观要求】\n` +
+          `你必须在 characters[].description 中描述角色的实际外貌特征，包括：颜色、体型、着装/纹样、标志性视觉元素。\n` +
+          `请根据图片内容或标签名称推断角色外观（例如标签含"宝"可推断为圆润可爱型，含"贝"可推断为贝壳/海洋元素），禁止只用"风格定位：..."替代外观描述。\n` +
+          `对场景/风格元素，必须在 styleGuide 中体现参考图的视觉特征。`
+        : `【用户上传了 ${refUrls.length} 张视觉参考图。\n` +
+          `【角色外观要求】\n` +
+          `你必须在 characters[].description 中描述角色的实际外貌特征（颜色、体型、标志性元素），禁止只用角色定位/性格来填充。\n` +
+          `styleGuide 必须体现参考图中的视觉风格特征。`
 
       const prompt = loadPromptTemplate('ideation', {
         USER_INPUT: project.rawIdea,

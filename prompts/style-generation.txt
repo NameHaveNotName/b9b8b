@@ -7,10 +7,16 @@
    - styleName（风格名称，中文，2-6个字）
    - styleDescription（风格描述，50字左右中文，说明色彩、光影、构图、质感特点）
    - prompt（一段完整的英文图像生成提示词，适合喂给 FLUX / GPT-Image / DALL-E 等模型）
-2. 三种风格必须在色彩、光影、构图、质感上形成明显差异，例如：暖金怀旧 vs 冷蓝科幻 vs  desaturated 纪实。
+2. 【核心要求】三种风格必须在艺术媒介/流派层面形成根本差异，绝不能只是换颜色/光影。必须从不同绘画或视觉传统中选取，例如（仅供参考，不需要严格照搬）：
+   - 黑白硬笔漫画 / 美漫粗线条 / 日漫赛璐珞
+   - 水彩手绘 / 油画厚涂 / 数字概念艺术
+   - 纪实黑白摄影 / 胶片电影感 / 时尚杂志硬光
+   - 水墨写意 / 浮世绘 / 扁平矢量插画
+   - 铅笔素描 / 炭笔速写 / 钢笔墨线
+   同一组三个风格必须横跨至少两类不同的视觉传统，禁止三个风格属于同一大类（如全是"写实摄影"或全是"插画"）。
 3. 每种风格的 prompt 必须包含统一的故事主体（确保三图内容主题一致，仅风格不同），以便用户横向对比。
 4. 每张风格图必须是 16:9 横屏构图（cinematic widescreen, 16:9 frame），且场景中必须包含至少一个角色的人物形象（主角或配角均可），不可只生成空场景/纯环境；允许出现侧影、背影或局部特写，但绝对禁止脸部特写（以免生成误导性的真实人脸）。
-5. prompt 中应包含高质量摄影关键词：cinematic film still, 35mm Kodak Portra 400, atmospheric depth, 8K。
+5. prompt 中应包含对应风格的专属关键词（如漫画用 ink lines, halftone dots，胶片用 35mm Kodak Portra 400，水墨用 sumi-e ink wash 等），不要照搬统一的摄影关键词。
 
 输出格式（严格 JSON 数组，不要 Markdown 代码块标记）：
 [
@@ -62,21 +68,21 @@
 示例输出：
 [
   {
-    "styleName": "赛博霓虹现实主义",
-    "styleDescription": "高密度霓虹灯光与潮湿街道的写实摄影风格...",
-    "prompt": "Cyberpunk neon realism, cinematic street photography...",
+    "styleName": "硬派黑白漫画",
+    "styleDescription": "高对比度黑白钢笔线条，美漫粗描边风格，大面积阴影与留白...",
+    "prompt": "High contrast black and white comic art, bold ink lines, dramatic shadows, halftone dots, graphic novel style, Frank Miller inspired...",
+    "modelNo": 1
+  },
+  {
+    "styleName": "胶片电影写实",
+    "styleDescription": "35mm胶片质感的电影写实风，柔光浅景深，黄昏自然光...",
+    "prompt": "Cinematic film still, 35mm Kodak Portra 400, natural golden hour light, shallow depth of field, photorealistic...",
     "modelNo": 2
   },
   {
-    "styleName": "浮世绘数字重构",
-    "styleDescription": "传统浮世绘线条与数字发光效果融合...",
-    "prompt": "Ukiyo-e digital reconstruction, traditional Japanese woodblock...",
+    "styleName": "水墨诗意动画",
+    "styleDescription": "数字水墨渲染结合赛璐璐上色，东方式留白与飞白笔触...",
+    "prompt": "Digital sumi-e ink wash style, cel-shaded anime coloring, traditional Chinese watercolor texture, poetic negative space...",
     "modelNo": 3
-  },
-  {
-    "styleName": "生物机械概念艺术",
-    "styleDescription": "有机生物与机械结构混合的实验性插画...",
-    "prompt": "Biomechanical concept art, fusion of organic...",
-    "modelNo": 1
   }
 ]

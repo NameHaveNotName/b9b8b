@@ -87,7 +87,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       framework,
       1,
       newRatio,
-      resolvedModel
+      resolvedModel,
+      targetStyle.prompt
     )
     const result = results[0]
     if (!result) throw new Error('风格图生成返回空结果')

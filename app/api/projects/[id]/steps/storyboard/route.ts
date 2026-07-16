@@ -474,6 +474,20 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         return NextResponse.json({ error: 'VALIDATION_003', message: `镜头 ${targetShotId} 没有对应的提示词` }, { status: 400 })
       }
 
+      // 查找上一个镜头（同幕内），用于画面连贯性
+      let previousShotImageUrl: string | null = null
+      let previousShotDesc: string | null = null
+      const targetIndex = actPrompts.findIndex((p: any) => p.shotId === targetShotId)
+      if (targetIndex > 0) {
+        const prevPrompt = actPrompts[targetIndex - 1]
+        const prevAsset = cleanedShotAssets.find((s: any) => s.shotId === prevPrompt.shotId && s.actNumber === actNumber)
+        if (prevAsset?.url) {
+          previousShotImageUrl = prevAsset.url
+          previousShotDesc = allShots.find((s: any) => s.shotId === prevPrompt.shotId)?.description || prevPrompt.chineseDesc || ''
+          console.log(`[STORYBOARD-ACT] 上一镜头 ${prevPrompt.shotId} 已有图片，用作连贯参考`)
+        }
+      }
+
       // 删除该 shot 已有的 asset（覆盖生成，需同时匹配 shotId 和 actNumber）
       const allAssets = await prisma.asset.findMany({
         where: { projectId: params.id, stepId: step.id }
@@ -503,15 +517,28 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const userRefUrls = refs.filter(r => r.url).map(r => r.url)
 
       const refImages: string[] = []
-      if (styleRefUrl) refImages.push(styleRefUrl)
+      if (previousShotImageUrl) refImages.push(previousShotImageUrl)
       if (characterImageUrls.length > 0) refImages.push(...characterImageUrls)
+      if (styleRefUrl) refImages.push(styleRefUrl)
       if (userRefUrls.length > 0) refImages.push(...userRefUrls)
 
-      console.log(`[STORYBOARD-ACT] 阶段B: 生图 ${targetShotId}, prompt前80:`, shotPrompt.prompt.slice(0, 80))
+      // 如果有上一镜头参考图，增强 prompt 以保持画面连贯性
+      let finalPrompt = shotPrompt.prompt
+      if (previousShotImageUrl && previousShotDesc) {
+        const currentShot = allShots.find((s: any) => s.shotId === targetShotId)
+        const currentDesc = currentShot?.description || shotPrompt.caption || ''
+        const charSame = currentShot?.characters?.join(',') === actPrompts[targetIndex]?.characters?.join(',')
+        const hint = charSame
+          ? 'Maintain the same characters, environment, and lighting as the reference image. Only adjust camera angle, framing, and character poses as described.'
+          : 'Maintain the same environment and lighting as the reference image, but apply the character changes described below.'
+        finalPrompt = `[Continuity from previous shot: ${previousShotDesc.slice(0, 80)}] ${hint}\n\nCurrent shot: ${currentDesc}\n\n${shotPrompt.prompt}`
+      }
+
+      console.log(`[STORYBOARD-ACT] 阶段B: 生图 ${targetShotId}, prompt前80:`, finalPrompt.slice(0, 80))
 
       const { buffer, isMock, lastError } = await generateImage({
         model: imageModel || 'gpt-image-2',
-        prompt: shotPrompt.prompt,
+        prompt: finalPrompt,
         referenceImages: refImages.length > 0 ? refImages : undefined,
         aspectRatio,
         watermark: false,
