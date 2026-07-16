@@ -167,9 +167,17 @@ export async function getImageClient(): Promise<ImageClient> {
           `${styleTag}, cinematic photorealism, 35mm Kodak Portra 400, natural light, shallow depth of field, soft grain`,
           `${styleTag}, digital watercolor and ink wash, sumi-e inspired, cel-shaded, poetic negative space, hand-drawn texture`,
         ]
+
+        const { getProjectReferences } = await import('@/lib/style-ref')
+        const userRefs = await getProjectReferences(projectId).catch(() => [])
+        const userRefUrls = userRefs.filter(r => r.url).map(r => r.url)
+        const refHint = userRefUrls.length > 0
+          ? 'Keep the character appearance, colors, outfit and iconic accessories consistent with the provided reference image(s). '
+          : ''
+
         const results: StyleSample[] = []
         for (let i = 0; i < count; i++) {
-          const prompt = basePrompt || variations[i] || styleTag
+          const prompt = (basePrompt || variations[i] || styleTag) + (refHint ? `. ${refHint}` : '')
           const model = imageModel || IMAGE_MODELS.primary
           const ar = aspectRatio || '16:9'
           console.log(`[MODEL-SELECT] [generateStyleSamples] 模型: ${model}, 比例: ${ar}`)
@@ -178,6 +186,7 @@ export async function getImageClient(): Promise<ImageClient> {
             prompt,
             aspectRatio: ar,
             watermark: false,
+            referenceImages: userRefUrls.length > 0 ? userRefUrls : undefined,
           })
           const id = `style_${Date.now()}_${i}`
           const storageKey = `projects/${projectId}/styles/${id}.png`
@@ -189,7 +198,9 @@ export async function getImageClient(): Promise<ImageClient> {
 
       async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?, userReferenceUrls?) {
         const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
-        const prompt = `${character.description || character.name || ''}, solo, single person, only one character. Avoid: multiple people, crowd, group shot.`
+        const styleHint = _stylePrompt ? `Style reference: ${_stylePrompt}. ` : ''
+        const refHint = hasUserRefs ? 'Strictly match the character appearance, colors, outfit, hairstyle and iconic accessories from the provided reference image(s). ' : ''
+        const prompt = `${styleHint}${refHint}${character.description || character.name || ''}, solo, single person, only one character. Avoid: multiple people, crowd, group shot. Keep all iconic visual elements from the reference consistent.`
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${aspectRatio || '16:9'}`)
         const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: style=${!!styleRefUrl} user=${hasUserRefs} (${userReferenceUrls?.map((u: string) => u.slice(0, 30)).join(', ')})`)

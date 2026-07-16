@@ -6,6 +6,7 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
+import { getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown, assignModelNoFallback } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { createQueue } from '@/lib/queue'
@@ -30,10 +31,18 @@ async function generateStylePrompts(
   const visualKeywords = framework?.visualStyle || framework?.styleGuide || framework?.visualKeywords || ''
   const mood = framework?.mood || framework?.atmosphere || ''
 
+  const refs = await getProjectReferences(project.id).catch(() => [])
+  const refLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+  const visualRefBlock = refs.length > 0
+    ? `【用户上传了 ${refs.length} 张视觉参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}】\n` +
+      `请仔细分析这些参考图：如果图中包含角色/吉祥物/产品形象，在生成三种风格方案时，必须保留其核心视觉识别特征（颜色、体型、服装、头饰/发型、标志性配件），仅改变艺术媒介和渲染风格。三种风格方案应围绕同一组主体展开，方便用户对比不同风格下的同一角色/场景。`
+    : '【无视觉参考图】请基于故事梗概和视觉关键词生成三种风格方案。'
+
   const prompt = loadPromptTemplate('style-generation', {
     STORY_BRIEF: storyBrief,
     VISUAL_KEYWORDS: visualKeywords,
     MOOD: mood,
+    VISUAL_REFERENCES: visualRefBlock,
   })
   const textClient = await getTextClient()
   const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
@@ -340,11 +349,19 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const visualKeywords = framework?.visualStyle || framework?.styleGuide || framework?.visualKeywords || ''
     const mood = framework?.mood || framework?.atmosphere || ''
 
+    const refsCompat = await getProjectReferences(params.id).catch(() => [])
+    const refLabelsCompat = refsCompat.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
+    const visualRefBlockCompat = refsCompat.length > 0
+      ? `【用户上传了 ${refsCompat.length} 张视觉参考图${refLabelsCompat.length > 0 ? `，标签：${refLabelsCompat.join('、')}` : ''}】\n` +
+        `请仔细分析这些参考图：如果图中包含角色/吉祥物/产品形象，在生成三种风格方案时，必须保留其核心视觉识别特征（颜色、体型、服装、头饰/发型、标志性配件），仅改变艺术媒介和渲染风格。`
+      : '【无视觉参考图】请基于故事梗概和视觉关键词生成三种风格方案。'
+
     // 1. 用文本模板生成 3 组风格提示词
     const prompt = loadPromptTemplate('style-generation', {
       STORY_BRIEF: storyBrief,
       VISUAL_KEYWORDS: visualKeywords,
       MOOD: mood,
+      VISUAL_REFERENCES: visualRefBlockCompat,
     })
     const textClient = await getTextClient()
     const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })

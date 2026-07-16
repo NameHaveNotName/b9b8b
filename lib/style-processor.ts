@@ -3,6 +3,7 @@ import { completeStep, failStep, isStepCancelled } from './workflow-executor'
 import { generateImage } from './api-clients/xiaomi'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
+import { getProjectReferences } from './style-ref'
 
 export interface StyleOption {
   id: string
@@ -22,6 +23,10 @@ export async function processStyleGeneration(
 ) {
   console.log(`[StyleProcessor-ENTER] stepId=${stepId}, projectId=${projectId}, styleOptions=${styleOptions.length}, ratio=${aspectRatio}, imageModel=${imageModel || '默认'}`)
   console.log(`[ASPECT-RATIO] [StyleProcessor] Starting for step ${stepId}, ratio: ${aspectRatio}`)
+
+  const userRefs = await getProjectReferences(projectId).catch(() => [])
+  const userRefUrls = userRefs.filter(r => r.url).map(r => r.url)
+  console.log(`[StyleProcessor] 用户参考图: ${userRefUrls.length} 张`)
 
   // 幂等检查：若 step 已 COMPLETED/FAILED，直接跳过（防止 BullMQ + setImmediate 双触发）
   try {
@@ -55,6 +60,7 @@ export async function processStyleGeneration(
               model: modelId,
               prompt: opt.prompt,
               aspectRatio,
+              referenceImages: userRefUrls.length > 0 ? userRefUrls : undefined,
             })
             console.log(`[STYLE-GEN-EXIT] generateImage 返回，风格 ${idx + 1}: ${opt.styleName}, isMock=${!!isMock}, usedModel=${usedModel}`)
 

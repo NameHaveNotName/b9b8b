@@ -28,12 +28,18 @@ async function generateCharacterPrompts(
 
   const refs = await getProjectReferences(project.id).catch(() => [])
   const refLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
-  const refHint = refs.length > 0
-    ? `\n\n【用户上传的人物参考图】用户上传了 ${refs.length} 张人物参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}。在生成 imagePrompt 时：1) 如果角色形象匹配某个参考图中的人物，可以直接写'参考图1中的女性角色'或'参考图2中的男性角色'，无需重新详细描述外貌特征、服装、发型等。2) 参考图将作为图生图的 image 输入，AI 会根据参考图直接生成匹配的形象，所以你不需要在提示词中重复描写。`
-    : ''
+  const refInstructions = refs.length > 0
+    ? `【用户上传了 ${refs.length} 张人物参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}】\n` +
+      `1. 你必须仔细分析参考图中每个人物的：整体造型、头部装饰/发型、面部特征、服装颜色与款式、标志性配件、身材比例、材质质感。\n` +
+      `2. 为每个角色生成 imagePrompt 时，必须用文字准确复现参考图中的核心视觉特征（例如：蓝色球形身体、白色面部、头顶三叉皇冠、红色领结；或黑色齐耳短发、蓝色针织开衫、白色百褶裙）。\n` +
+      `3. 禁止在 imagePrompt 中写"参考图1""参考图2""类似参考图"等占位描述；必须用具体、可视觉化的英文形容词和名词。\n` +
+      `4. 如果某个角色明显对应某张带标签的参考图（如角色名"海宝"对应标签"海宝"），必须优先保证该角色的颜色、体型、服装、头饰/发型与参考图一致，不能擅自改动。\n` +
+      `5. 风格上需要在参考图形象的基础上，融合 framework.styleGuide/visualStyle 的全局视觉风格关键词，但不能为了风格化而丢失角色的核心识别特征。`
+    : '【无人物参考图】请根据 framework.characters 中的 description 生成 imagePrompt，确保描述具体可视觉化。'
 
   const prompt = loadPromptTemplate('character', {
-    USER_INPUT: JSON.stringify(framework) + refHint
+    USER_INPUT: JSON.stringify(framework),
+    REFERENCE_INSTRUCTIONS: refInstructions,
   })
   const textClient = await getTextClient()
   const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
@@ -346,12 +352,17 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const userRefUrlsCompat = refsCompat.filter(r => r.url).map(r => r.url)
     const refLabelsCompat = refsCompat.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
 
-    const refHintCompat = refsCompat.length > 0
-      ? `\n\n【用户上传的人物参考图】用户上传了 ${refsCompat.length} 张人物参考图${refLabelsCompat.length > 0 ? `，标签：${refLabelsCompat.join('、')}` : ''}。在生成 imagePrompt 时可以直接引用参考图中的人物形象，无需重新描述外貌特征。`
-      : ''
+    const refInstructionsCompat = refsCompat.length > 0
+      ? `【用户上传了 ${refsCompat.length} 张人物参考图${refLabelsCompat.length > 0 ? `，标签：${refLabelsCompat.join('、')}` : ''}】\n` +
+        `1. 你必须仔细分析参考图中每个人物的：整体造型、头部装饰/发型、面部特征、服装颜色与款式、标志性配件、身材比例、材质质感。\n` +
+        `2. 为每个角色生成 imagePrompt 时，必须用文字准确复现参考图中的核心视觉特征。\n` +
+        `3. 禁止在 imagePrompt 中写"参考图1""参考图2"等占位描述；必须用具体、可视觉化的英文形容词和名词。\n` +
+        `4. 如果某个角色明显对应某张带标签的参考图（如角色名"海宝"对应标签"海宝"），必须优先保证该角色的颜色、体型、服装、头饰/发型与参考图一致。`
+      : '【无人物参考图】请根据 framework.characters 中的 description 生成 imagePrompt。'
 
     const prompt = loadPromptTemplate('character', {
-      USER_INPUT: JSON.stringify(framework) + refHintCompat
+      USER_INPUT: JSON.stringify(framework),
+      REFERENCE_INSTRUCTIONS: refInstructionsCompat,
     })
     const textClient = await getTextClient()
     const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
