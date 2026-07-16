@@ -222,6 +222,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const { w: svgW, h: svgH } = sizeMap[aspectRatio] || sizeMap['16:9']
 
       const shotAssets = []
+      const shotsWithFirstFrame = []
       for (const promptItem of currentPrompts) {
         const shot = currentAllShots.find((s: any) => s.shotId === promptItem.shotId) || {}
         const charColors = (promptItem.characters || []).map((cid: string, idx: number) => {
@@ -278,6 +279,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           }
         })
         shotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url, actNumber: promptItem.actNumber })
+        shotsWithFirstFrame.push({ ...shot, firstFrameUrl: url })
       }
 
       // 从 project.framework 读取 acts 用于动态 actsSummary
@@ -293,7 +295,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         : []
 
       const outputData = {
-        shots: currentAllShots,
+        shots: shotsWithFirstFrame,
         prompts: currentPrompts,
         shotAssets: shotAssets,
         mode: existingOutput.mode || 'keyframe',
@@ -303,9 +305,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       }
 
       await completeStep(step.id, outputData)
+      // 占位图也是首帧，标记至少一个首帧已生成
+      await prisma.project.update({
+        where: { id: params.id },
+        data: { stepStoryboardFirstframeDone: true },
+      })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[STORYBOARD-IMAGE] 用户确认，开始生图，共 ${currentPrompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
-      return NextResponse.json({ success: true, data: { shots: currentAllShots, count: currentAllShots.length } })
+      return NextResponse.json({ success: true, data: { shots: shotsWithFirstFrame, count: shotsWithFirstFrame.length } })
     } catch (e: any) {
       await failStep(step.id, e.message)
       await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
@@ -577,18 +584,22 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         }
       })
 
-      // 合并 shotAssets
+      // 合并 shotAssets 并回写对应 shot 的 firstFrameUrl
       const newShotAsset = { shotId: shotPrompt.shotId, assetId: asset.id, url, actNumber }
       const mergedShotAssets = [
         ...cleanedShotAssets.filter((s: any) => !(s.shotId === shotPrompt.shotId && s.actNumber === actNumber)),
         newShotAsset,
       ]
+      const mergedShots = (existingOutput.shots || []).map((s: any) =>
+        s.shotId === shotPrompt.shotId ? { ...s, firstFrameUrl: url } : s
+      )
 
       const processedCount = mergedShotAssets.filter((s: any) => s.actNumber === actNumber && actShotIds.has(s.shotId)).length
       const remainingCount = actPrompts.length - processedCount
 
       const nextOutput = {
         ...existingOutput,
+        shots: mergedShots,
         shotAssets: mergedShotAssets,
         shotPrompts: currentShotPrompts,
         aspectRatio,
@@ -601,6 +612,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           status: remainingCount === 0 && step.status === 'PENDING' ? 'COMPLETED' as any : step.status,
           outputData: nextOutput,
         },
+      })
+
+      // 只要生成过任一真实首帧，就解锁尾帧/直生视频步骤
+      await prisma.project.update({
+        where: { id: params.id },
+        data: { stepStoryboardFirstframeDone: true },
       })
 
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
@@ -667,6 +684,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // 为每个 shot 生成分镜草图
     const shotAssets = []
+    const shotsWithFirstFrame = []
     for (const shot of allShots) {
       const charColors = (shot.characters || []).map((cid: string, idx: number) => {
         const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6']
@@ -722,12 +740,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           metadata: { shotId: shot.shotId, type: 'storyboard', characters: shot.characters, duration: shot.duration, actNumber: shot.actNumber },
         }
       })
-      shotAssets.push({ shot, assetId: asset.id, url })
+      shotAssets.push({ shotId: shot.shotId, assetId: asset.id, url, actNumber: shot.actNumber })
+      shotsWithFirstFrame.push({ ...shot, firstFrameUrl: url })
     }
 
     const outputData = {
-      shots: allShots,
-      shotAssets: shotAssets.map((s) => ({ shotId: s.shot.shotId, assetId: s.assetId, actNumber: s.shot.actNumber })),
+      shots: shotsWithFirstFrame,
+      shotAssets: shotAssets,
       // [WORKFLOW-FIX] 保存模式到 outputData
       mode: body?.mode || 'keyframe',
       actsSummary: acts.map((act: any) => ({
@@ -739,6 +758,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
 
     await completeStep(step.id, outputData)
+    // 占位图也是首帧，标记至少一个首帧已生成
+    await prisma.project.update({
+      where: { id: params.id },
+      data: { stepStoryboardFirstframeDone: true },
+    })
     await logOperation({
       userId,
       projectId: params.id,
@@ -747,7 +771,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       cost: STEP_COSTS.storyboard,
       status: 'success',
     })
-    return NextResponse.json({ success: true, data: { shots: allShots, count: allShots.length } })
+    return NextResponse.json({ success: true, data: { shots: shotsWithFirstFrame, count: shotsWithFirstFrame.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)
     await logOperation({

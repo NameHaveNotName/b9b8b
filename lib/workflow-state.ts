@@ -130,11 +130,12 @@ export const STEP_CONFIG: Record<StepId, StepConfig> = {
     hideCondition: () => false,
   },
   ending: {
-    unlockCondition: (p) => p.stepStoryboardDone,
+    // 2026-07-16: 只要有至少一个首帧生成，即可进入尾帧/直生视频步骤
+    unlockCondition: (p) => p.stepStoryboardFirstframeDone,
     hideCondition: () => false,
   },
   direct: {
-    unlockCondition: (p) => p.stepEndingDone,
+    unlockCondition: (p) => p.stepStoryboardFirstframeDone,
     hideCondition: () => false,
   },
 }

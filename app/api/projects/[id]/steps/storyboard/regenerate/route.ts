@@ -136,16 +136,29 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     })
 
     const newShotAssets = shotAssets.filter((a: any) => !(a.shotId === shotId && a.actNumber === targetActNumber))
-    newShotAssets.push({ shotId: targetShot.shotId, assetId: newAsset.id, actNumber: targetActNumber })
+    newShotAssets.push({ shotId: targetShot.shotId, assetId: newAsset.id, url, actNumber: targetActNumber })
+
+    const newShots = shots.map((s: any) =>
+      s.shotId === shotId && (actNo == null || s.actNumber === actNo)
+        ? { ...s, firstFrameUrl: url }
+        : s
+    )
 
     await prisma.workflowStep.update({
       where: { id: step.id },
       data: {
         outputData: {
           ...outputData,
+          shots: newShots,
           shotAssets: newShotAssets,
         },
       },
+    })
+
+    // 重新生成后仍保证首帧解锁状态
+    await prisma.project.update({
+      where: { id: params.id },
+      data: { stepStoryboardFirstframeDone: true },
     })
 
     console.log('[STORYBOARD-REGENERATE] 重新生成成功:', newAsset.id)
