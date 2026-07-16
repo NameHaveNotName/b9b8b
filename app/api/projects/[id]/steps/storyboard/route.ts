@@ -230,7 +230,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const shotAssets = []
       const shotsWithFirstFrame = []
       for (const promptItem of currentPrompts) {
-        const shot = currentAllShots.find((s: any) => s.shotId === promptItem.shotId) || {}
+        const shot = currentAllShots.find((s: any) => s.shotId === promptItem.shotId && s.actNumber === promptItem.actNumber) || {}
         const charColors = (promptItem.characters || []).map((cid: string, idx: number) => {
           const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6']
           return { id: cid, color: colors[idx % colors.length] }
@@ -352,8 +352,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       ...s,
       shotId: s.shotId || `shot_${String(i + 1).padStart(3, '0')}`,
     }))
-    const existingShotAssets: Array<{ shotId: string; assetId: string; url: string }> = existingOutput.shotAssets || []
-    const existingShotPrompts: Array<{ shotId: string; prompt: string; caption: string }> = existingOutput.shotPrompts || []
+    const existingShotAssets: Array<{ shotId: string; assetId: string; url: string; actNumber?: number }> = existingOutput.shotAssets || []
+    const existingShotPrompts: Array<{ shotId: string; actNumber?: number; prompt: string; caption: string }> = existingOutput.shotPrompts || []
 
     const actPrompts = prompts.filter((p: any) => p.actNumber === actNumber)
     if (actPrompts.length === 0) {
@@ -381,9 +381,16 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const textClient = await getTextClient()
 
       // ===== 阶段 A：确保该幕所有 shot 都有生图提示词 =====
+      // 使用 (actNumber, shotId) 复合键隔离不同幕的同名镜头
+      const promptKey = (p: any) => `${p.actNumber}|${p.shotId}`
+      const existingPromptKeys = new Set(
+        existingShotPrompts
+          .filter((sp: any) => sp.actNumber === actNumber)
+          .map(promptKey)
+      )
       const missingShotIds = actPrompts
+        .filter((p: any) => !existingPromptKeys.has(promptKey(p)))
         .map((p: any) => p.shotId)
-        .filter((sid: string) => !existingShotPrompts.some((sp: any) => sp.shotId === sid))
 
       let currentShotPrompts = [...existingShotPrompts]
 
@@ -399,7 +406,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         const newPrompts = await Promise.all(
           missingShotIds.map(async (sid: string) => {
             const promptItem = actPrompts.find((p: any) => p.shotId === sid)!
-            const shot = allShots.find((s: any) => s.shotId === sid) || {}
+            const shot = allShots.find((s: any) => s.shotId === sid && s.actNumber === actNumber) || {}
 
             const characterNames = (promptItem.characters || [])
               .map((cid: string) => {
@@ -430,6 +437,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
               const parsed = extractJsonFromMarkdown(resultText) || {}
               return {
                 shotId: sid,
+                actNumber,
                 prompt: parsed.prompt || promptItem.englishPrompt || '',
                 caption: parsed.caption || promptItem.chineseDesc || '',
               }
@@ -437,6 +445,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
               console.error(`[STORYBOARD-ACT] 镜头 ${sid} 提示词生成失败:`, err.message)
               return {
                 shotId: sid,
+                actNumber,
                 prompt: promptItem.englishPrompt || '',
                 caption: promptItem.chineseDesc || '',
               }
@@ -444,9 +453,9 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           })
         )
 
-        // 合并提示词：以新提示词覆盖同 shotId，保留其他幕的提示词
-        const promptMap = new Map(existingShotPrompts.map((p: any) => [p.shotId, p]))
-        for (const p of newPrompts) promptMap.set(p.shotId, p)
+        // 合并提示词：以新提示词覆盖同 (actNumber, shotId)，保留其他幕的提示词
+        const promptMap = new Map(existingShotPrompts.map((p: any) => [promptKey(p), p]))
+        for (const p of newPrompts) promptMap.set(promptKey(p), p)
         currentShotPrompts = Array.from(promptMap.values())
 
         // 立即保存 shotPrompts，同时规范化 shots/prompts，避免前后端 shotId 不一致
@@ -492,7 +501,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         })
       }
 
-      let shotPrompt = currentShotPrompts.find((p: any) => p.shotId === targetShotId)
+      let shotPrompt = currentShotPrompts.find((p: any) => p.actNumber === actNumber && p.shotId === targetShotId)
+      if (!shotPrompt) {
+        // 兼容旧数据：允许无 actNumber 的提示词回退
+        shotPrompt = currentShotPrompts.find((p: any) => p.actNumber === undefined && p.shotId === targetShotId)
+      }
       if (!shotPrompt) {
         // 防御性回退：从 actPrompts 直接构造（防止 shotId 类型/格式不一致导致找不到）
         const fallbackPromptItem = actPrompts.find((p: any) => p.shotId === targetShotId)
@@ -500,13 +513,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           console.warn(`[STORYBOARD-ACT] 未找到 ${targetShotId} 的 shotPrompt，使用 actPrompt 回退`)
           shotPrompt = {
             shotId: targetShotId,
+            actNumber,
             prompt: fallbackPromptItem.englishPrompt || '',
             caption: fallbackPromptItem.chineseDesc || '',
           }
         }
       }
       if (!shotPrompt) {
-        console.error(`[STORYBOARD-ACT] 镜头 ${targetShotId} 无可用提示词，currentShotPrompts:`, currentShotPrompts.map((p: any) => p.shotId), 'actPrompts:', actPrompts.map((p: any) => p.shotId))
+        console.error(`[STORYBOARD-ACT] 幕 ${actNumber} 镜头 ${targetShotId} 无可用提示词，currentShotPrompts:`, currentShotPrompts.map((p: any) => `${p.actNumber ?? '?'}/${p.shotId}`), 'actPrompts:', actPrompts.map((p: any) => `${p.actNumber}/${p.shotId}`))
         return NextResponse.json({ error: 'VALIDATION_003', message: `镜头 ${targetShotId} 没有对应的提示词` }, { status: 400 })
       }
 
@@ -519,7 +533,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         const prevAsset = cleanedShotAssets.find((s: any) => s.shotId === prevPrompt.shotId && s.actNumber === actNumber)
         if (prevAsset?.url) {
           previousShotImageUrl = prevAsset.url
-          previousShotDesc = allShots.find((s: any) => s.shotId === prevPrompt.shotId)?.description || prevPrompt.chineseDesc || ''
+          previousShotDesc = allShots.find((s: any) => s.shotId === prevPrompt.shotId && s.actNumber === actNumber)?.description || prevPrompt.chineseDesc || ''
           console.log(`[STORYBOARD-ACT] 上一镜头 ${prevPrompt.shotId} 已有图片，用作连贯参考`)
         }
       }
@@ -619,7 +633,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         newShotAsset,
       ]
       const mergedShots = allShots.map((s: any) =>
-        s.shotId === shotPrompt.shotId ? { ...s, firstFrameUrl: url } : s
+        s.shotId === shotPrompt.shotId && s.actNumber === actNumber ? { ...s, firstFrameUrl: url } : s
       )
 
       const processedCount = mergedShotAssets.filter((s: any) => s.actNumber === actNumber && actShotIds.has(s.shotId)).length
