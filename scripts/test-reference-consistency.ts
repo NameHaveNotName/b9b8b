@@ -65,17 +65,35 @@ async function main() {
     { name: '要求严格匹配参考图', test: p => /准确复现|保持一致|匹配.*参考图/.test(p) },
   ])
 
-  // 2. style-generation prompt with references
+  // 2. style-generation prompt with references, portrait 9:16
   const stylePrompt = loadPromptTemplate('style-generation', {
     STORY_BRIEF: '武康路旅游宣传片',
     VISUAL_KEYWORDS: '电影级3D渲染',
     MOOD: '温暖、向往',
     VISUAL_REFERENCES: VISUAL_REF_BLOCK,
+    CHARACTERS: `【角色设定】\n- 海宝（虚拟导游）：蓝色圆润可爱型吉祥物，头顶三叉皇冠\n- 海贝（虚拟导游）：黑色齐耳短发，蓝色开衫，白色百褶裙`,
+    ASPECT_RATIO: '9:16',
   })
   const stylePass = saveAndValidate('style_with_refs', stylePrompt, [
     { name: '包含视觉参考图说明', test: p => /视觉参考图/.test(p) },
+    { name: '包含角色设定', test: p => /海宝|海贝|蓝色开衫|三叉皇冠/.test(p) },
     { name: '要求保留核心视觉识别特征', test: p => /核心视觉识别特征|颜色、体型、服装、头饰/.test(p) },
-    { name: '禁止把角色改成另一个人', test: p => /不能把角色改成另一个人/.test(p) },
+    { name: '禁止把角色改成另一个人', test: p => /把角色改成另一个人/.test(p) },
+    { name: '使用 9:16 竖屏构图', test: p => /9:16|portrait orientation|vertical composition/.test(p) },
+    { name: '不再硬编码 16:9', test: p => !/16:9 横屏构图/.test(p) },
+  ])
+
+  // 3. style-generation prompt landscape 16:9
+  const styleLandscapePrompt = loadPromptTemplate('style-generation', {
+    STORY_BRIEF: '武康路旅游宣传片',
+    VISUAL_KEYWORDS: '电影级3D渲染',
+    MOOD: '温暖、向往',
+    VISUAL_REFERENCES: '【无视觉参考图】',
+    CHARACTERS: '【角色设定】无具体角色',
+    ASPECT_RATIO: '16:9',
+  })
+  const styleLandscapePass = saveAndValidate('style_landscape', styleLandscapePrompt, [
+    { name: '使用 16:9 横屏构图', test: p => /16:9|cinematic widescreen|horizontal frame/.test(p) },
   ])
 
   // 3. character prompt without references (fallback)
@@ -88,7 +106,7 @@ async function main() {
   ])
 
   console.log('\n' + '═'.repeat(60))
-  const allPass = characterPass && stylePass && characterNoRefPass
+  const allPass = characterPass && stylePass && styleLandscapePass && characterNoRefPass
   console.log(`📊 最终结果: ${allPass ? '✅ 全部通过' : '❌ 存在未通过项'}`)
   console.log('📁 详细 prompt 已保存到 .kimi/api-test-results/')
   console.log('═'.repeat(60))

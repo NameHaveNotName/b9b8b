@@ -55,10 +55,17 @@ export async function processStyleGeneration(
           console.log(`[STYLE-GEN] 风格 ${idx + 1}: ${opt.styleName} → 模型 ${modelConfig?.no || '?'} (${modelId})`)
 
           try {
-            console.log(`[STYLE-GEN-ENTER] 开始调用 generateImage，风格 ${idx + 1}: ${opt.styleName}, modelId=${modelId}, prompt长度=${opt.prompt?.length || 0}`)
+            const orientationHint = /^9:16|3:4|2:3|portrait/i.test(aspectRatio)
+              ? 'portrait orientation, vertical composition, tall frame. '
+              : /^16:9|21:9|4:3|landscape/i.test(aspectRatio)
+                ? 'landscape orientation, cinematic widescreen, horizontal frame. '
+                : ''
+            const finalPrompt = opt.prompt + (orientationHint ? ` ${orientationHint}` : '')
+
+            console.log(`[STYLE-GEN-ENTER] 开始调用 generateImage，风格 ${idx + 1}: ${opt.styleName}, modelId=${modelId}, prompt长度=${finalPrompt?.length || 0}`)
             const { buffer, model: usedModel, revisedPrompt, isMock, lastError } = await generateImage({
               model: modelId,
-              prompt: opt.prompt,
+              prompt: finalPrompt,
               aspectRatio,
               referenceImages: userRefUrls.length > 0 ? userRefUrls : undefined,
             })

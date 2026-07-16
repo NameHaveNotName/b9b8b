@@ -24,28 +24,50 @@ const styleQueue = createQueue('style-generation')
 async function generateStylePrompts(
   project: any,
   frameworkStep: any,
-  stepId: string
+  stepId: string,
+  aspectRatio: string = '16:9'
 ): Promise<{ prompts: any[]; styleOptions: any[] }> {
   const framework = project.framework || (frameworkStep.outputData as any)
   const storyBrief = framework?.synopsis || framework?.storyBrief || ''
   const visualKeywords = framework?.visualStyle || framework?.styleGuide || framework?.visualKeywords || ''
   const mood = framework?.mood || framework?.atmosphere || ''
+  const characters = framework?.characters || []
+  const characterBlock = characters.length > 0
+    ? `【角色设定】\n${characters.map((c: any) => `- ${c.name}（${c.role}）：${c.description || ''}`).join('\n')}`
+    : '【角色设定】无具体角色'
 
   const refs = await getProjectReferences(project.id).catch(() => [])
   const refLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
-  const visualRefBlock = refs.length > 0
+  const hasRefs = refs.length > 0
+  const visualRefBlock = hasRefs
     ? `【用户上传了 ${refs.length} 张视觉参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}】\n` +
       `请仔细分析这些参考图：如果图中包含角色/吉祥物/产品形象，在生成三种风格方案时，必须保留其核心视觉识别特征（颜色、体型、服装、头饰/发型、标志性配件），仅改变艺术媒介和渲染风格。三种风格方案应围绕同一组主体展开，方便用户对比不同风格下的同一角色/场景。`
-    : '【无视觉参考图】请基于故事梗概和视觉关键词生成三种风格方案。'
+    : '【无视觉参考图】请基于故事梗概、视觉关键词和角色设定生成三种风格方案。'
 
   const prompt = loadPromptTemplate('style-generation', {
     STORY_BRIEF: storyBrief,
     VISUAL_KEYWORDS: visualKeywords,
     MOOD: mood,
+    CHARACTERS: characterBlock,
     VISUAL_REFERENCES: visualRefBlock,
+    ASPECT_RATIO: aspectRatio,
   })
+
   const textClient = await getTextClient()
-  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+  let resultText: string
+  if (hasRefs) {
+    const refUrls = refs.filter(r => r.url).map(r => r.url)
+    console.log(`[STYLE-PROMPT-VISION] 使用多模态生成风格提示词，参考图 ${refUrls.length} 张，比例 ${aspectRatio}`)
+    resultText = await textClient.generateVision({
+      prompt,
+      imageUrls: refUrls,
+      imageLabels: refLabels,
+      temperature: 0.7,
+      maxTokens: 4096,
+    })
+  } else {
+    resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+  }
   const parsed = extractJsonFromMarkdown(resultText)
 
   let styleOptions: any[] = []
@@ -143,7 +165,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (action === 'generate-prompts') {
     try {
       console.log('[STYLE-PROMPT] 收到 generate-prompts 请求')
-      const { prompts } = await generateStylePrompts(project, frameworkStep, step.id)
+      const aspectRatio = body?.aspectRatio || '16:9'
+      const { prompts } = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio)
       return NextResponse.json({
         success: true,
         status: 'PROMPT_READY',
@@ -185,7 +208,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (resolvedPrompts.length === 0) {
       console.warn('[STYLE-IMAGE] No prompts found, auto-triggering prompt generation')
       try {
-        const generated = await generateStylePrompts(project, frameworkStep, step.id)
+        const generated = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio)
         resolvedPrompts = generated.prompts
         resolvedStyleOptions = generated.styleOptions
         console.log(`[STYLE-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
@@ -306,6 +329,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   // === 默认兼容：无 action 时走原有完整流程（向后兼容） ===
+  const aspectRatioCompat = body?.aspectRatio || '16:9'
+
   if (!force && step.status === 'COMPLETED' && step.outputData) {
     console.log('[STYLE] step already completed, returning cached result')
     return NextResponse.json({ success: true, data: step.outputData, cached: true })
@@ -351,20 +376,41 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const refsCompat = await getProjectReferences(params.id).catch(() => [])
     const refLabelsCompat = refsCompat.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
-    const visualRefBlockCompat = refsCompat.length > 0
+    const hasRefsCompat = refsCompat.length > 0
+    const visualRefBlockCompat = hasRefsCompat
       ? `【用户上传了 ${refsCompat.length} 张视觉参考图${refLabelsCompat.length > 0 ? `，标签：${refLabelsCompat.join('、')}` : ''}】\n` +
         `请仔细分析这些参考图：如果图中包含角色/吉祥物/产品形象，在生成三种风格方案时，必须保留其核心视觉识别特征（颜色、体型、服装、头饰/发型、标志性配件），仅改变艺术媒介和渲染风格。`
-      : '【无视觉参考图】请基于故事梗概和视觉关键词生成三种风格方案。'
+      : '【无视觉参考图】请基于故事梗概、视觉关键词和角色设定生成三种风格方案。'
+
+    const charactersCompat = framework?.characters || []
+    const characterBlockCompat = charactersCompat.length > 0
+      ? `【角色设定】\n${charactersCompat.map((c: any) => `- ${c.name}（${c.role}）：${c.description || ''}`).join('\n')}`
+      : '【角色设定】无具体角色'
 
     // 1. 用文本模板生成 3 组风格提示词
     const prompt = loadPromptTemplate('style-generation', {
       STORY_BRIEF: storyBrief,
       VISUAL_KEYWORDS: visualKeywords,
       MOOD: mood,
+      CHARACTERS: characterBlockCompat,
       VISUAL_REFERENCES: visualRefBlockCompat,
+      ASPECT_RATIO: aspectRatioCompat,
     })
     const textClient = await getTextClient()
-    const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+    let resultText: string
+    if (hasRefsCompat) {
+      const refUrlsCompat = refsCompat.filter(r => r.url).map(r => r.url)
+      console.log(`[STYLE-PROMPT-VISION] 使用多模态生成风格提示词，参考图 ${refUrlsCompat.length} 张，比例 ${aspectRatioCompat}`)
+      resultText = await textClient.generateVision({
+        prompt,
+        imageUrls: refUrlsCompat,
+        imageLabels: refLabelsCompat,
+        temperature: 0.7,
+        maxTokens: 4096,
+      })
+    } else {
+      resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+    }
     const parsed = extractJsonFromMarkdown(resultText)
 
     // 解析风格选项
@@ -436,7 +482,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         (async () => {
           console.log(`[STYLE] waitUntil 回调开始执行（compat），stepId=${step.id}`)
           try {
-            await processStyleGeneration(step.id, params.id, styleOptions, undefined, undefined)
+            await processStyleGeneration(step.id, params.id, styleOptions, aspectRatioCompat, undefined)
             console.log(`[STYLE] waitUntil 回调成功完成（compat），stepId=${step.id}`)
           } catch (e: any) {
             // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED

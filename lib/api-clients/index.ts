@@ -175,11 +175,17 @@ export async function getImageClient(): Promise<ImageClient> {
           ? 'Keep the character appearance, colors, outfit and iconic accessories consistent with the provided reference image(s). '
           : ''
 
+        const ar = aspectRatio || '16:9'
+        const orientationHint = /^9:16|3:4|2:3|portrait/i.test(ar)
+          ? 'portrait orientation, vertical composition, tall frame. '
+          : /^16:9|21:9|4:3|landscape/i.test(ar)
+            ? 'landscape orientation, cinematic widescreen, horizontal frame. '
+            : ''
+
         const results: StyleSample[] = []
         for (let i = 0; i < count; i++) {
-          const prompt = (basePrompt || variations[i] || styleTag) + (refHint ? `. ${refHint}` : '')
+          const prompt = (basePrompt || variations[i] || styleTag) + (refHint ? `. ${refHint}` : '') + (orientationHint ? ` ${orientationHint}` : '')
           const model = imageModel || IMAGE_MODELS.primary
-          const ar = aspectRatio || '16:9'
           console.log(`[MODEL-SELECT] [generateStyleSamples] 模型: ${model}, 比例: ${ar}`)
           const { buffer, isMock, lastError } = await generateImage({
             model,
@@ -200,8 +206,14 @@ export async function getImageClient(): Promise<ImageClient> {
         const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
         const styleHint = _stylePrompt ? `Style reference: ${_stylePrompt}. ` : ''
         const refHint = hasUserRefs ? 'Strictly match the character appearance, colors, outfit, hairstyle and iconic accessories from the provided reference image(s). ' : ''
-        const prompt = `${styleHint}${refHint}${character.description || character.name || ''}, solo, single person, only one character. Avoid: multiple people, crowd, group shot. Keep all iconic visual elements from the reference consistent.`
-        console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${aspectRatio || '16:9'}`)
+        const ar = aspectRatio || '16:9'
+        const orientationHint = /^9:16|3:4|2:3|portrait/i.test(ar)
+          ? 'portrait orientation, vertical composition, full body shot, tall frame, character centered vertically. '
+          : /^16:9|21:9|4:3|landscape/i.test(ar)
+            ? 'landscape orientation, cinematic widescreen, horizontal frame. '
+            : ''
+        const prompt = `${styleHint}${refHint}${orientationHint}${character.description || character.name || ''}, solo, single person, only one character. Avoid: multiple people, crowd, group shot. Keep all iconic visual elements from the reference consistent.`
+        console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${ar}`)
         const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: style=${!!styleRefUrl} user=${hasUserRefs} (${userReferenceUrls?.map((u: string) => u.slice(0, 30)).join(', ')})`)
         const { buffer, isMock, lastError } = await generateImage({
@@ -209,7 +221,7 @@ export async function getImageClient(): Promise<ImageClient> {
           prompt,
           referenceImageUrl: styleRefUrl,
           referenceImages: hasUserRefs ? userReferenceUrls : undefined,
-          aspectRatio: aspectRatio || '16:9',
+          aspectRatio: ar,
           watermark: false,
         })
 
