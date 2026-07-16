@@ -105,6 +105,7 @@ export async function canExecuteStep(projectId: string, targetStep: WorkflowStep
         stepCharacterDone: true,
         stepConceptDone: true,
         stepStoryboardDone: true,
+        stepStoryboardFirstframeDone: true,
         stepTrailerDone: true,
         stepEndingDone: true,
         stepDirectDone: true,
@@ -118,12 +119,21 @@ export async function canExecuteStep(projectId: string, targetStep: WorkflowStep
         stepCharacterDone: project.stepCharacterDone ?? false,
         stepConceptDone: project.stepConceptDone ?? false,
         stepStoryboardDone: project.stepStoryboardDone ?? false,
-        stepStoryboardFirstframeDone: project.stepStoryboardDone ?? false,
+        stepStoryboardFirstframeDone: project.stepStoryboardFirstframeDone ?? false,
         stepTrailerDone: project.stepTrailerDone ?? false,
         stepEndingDone: project.stepEndingDone ?? false,
         stepDirectDone: project.stepDirectDone ?? false,
       };
       const dagOk = STEP_CONFIG[stepId].unlockCondition(state);
+
+      // 兼容旧项目/状态未同步：如果实际分镜中已有首帧，也允许进入尾帧/直生视频
+      if ((targetStep === 'KEYFRAMES' || targetStep === 'VIDEO_DIRECT') && !dagOk) {
+        const storyboardStep = steps.find((s) => s.stepType === 'STORYBOARD');
+        const shots = (storyboardStep?.outputData as any)?.shots || [];
+        const hasFirstFrame = shots.some((shot: any) => shot.firstFrameUrl);
+        if (hasFirstFrame) return true;
+      }
+
       return linearOk || dagOk;
     }
   }

@@ -152,7 +152,16 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         const isDone = displayState.isDone || stepRecord.status === 'COMPLETED'
         const isFailed = stepRecord.status === 'FAILED'
         const isProcessing = stepRecord.status === 'PROCESSING'
-        const canRun = isDone || isFailed || isProcessing || displayState.isAvailable
+
+        // 兼容旧项目/状态未同步：实际分镜已有首帧时也视为可用
+        let isAvailable = displayState.isAvailable
+        if ((stepType === 'KEYFRAMES' || stepType === 'VIDEO_DIRECT') && !isAvailable) {
+          const storyboardStep = steps.find((s: any) => s.stepType === 'STORYBOARD')
+          const shots = storyboardStep?.outputData?.shots || []
+          isAvailable = shots.some((shot: any) => shot.firstFrameUrl)
+        }
+
+        const canRun = isDone || isFailed || isProcessing || isAvailable
         if (!canRun) {
           const stepLabel = STEP_LABELS[stepType] || stepType
           const reason = !displayState.isUnlocked
@@ -1010,6 +1019,14 @@ function StepContent({
   const stepId = prismaTypeToStepId(step.stepType)
   const displayState = stepId ? getStepDisplayState(stepId, project) : null
 
+  // 兼容旧项目/状态未同步：实际分镜已有首帧时也视为可用
+  let isAvailable = displayState?.isAvailable ?? false
+  if ((step.stepType === 'KEYFRAMES' || step.stepType === 'VIDEO_DIRECT') && !isAvailable) {
+    const storyboardStep = project?.steps?.find((s: any) => s.stepType === 'STORYBOARD')
+    const shots = storyboardStep?.outputData?.shots || []
+    isAvailable = shots.some((shot: any) => shot.firstFrameUrl)
+  }
+
   switch (step.stepType) {
     case 'IDEATION':
       return (
@@ -1106,7 +1123,8 @@ function StepContent({
           executing={executing}
           onExecute={onExecute}
           mutate={mutate}
-  readOnly={readOnly}
+          isAvailable={isAvailable}
+          readOnly={readOnly}
         />
       )
     case 'VIDEO_DIRECT':
@@ -4422,6 +4440,7 @@ function KeyframesPanel({
   executing,
   onExecute,
   mutate,
+  isAvailable,
   readOnly,
 }: {
   step: any
@@ -4429,6 +4448,7 @@ function KeyframesPanel({
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
   mutate: () => Promise<any>
+  isAvailable?: boolean
   readOnly?: boolean
 }) {
   const isExecuting = executing === step.stepType
