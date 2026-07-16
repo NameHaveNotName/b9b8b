@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import useSWR from 'swr'
-import { LoaderCircle, Play, RefreshCw, Film, Music } from 'lucide-react'
+import { LoaderCircle, Play, RefreshCw, Film, Music, Check } from 'lucide-react'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 
@@ -44,8 +44,15 @@ export default function VideoDirectPanel({
     { refreshInterval: 3000 }
   )
 
+  // 读取分镜信息用于按幕分组和显示 shot 详情
+  const { data: storyboardRes } = useSWR(
+    `/api/projects/${projectId}/steps/storyboard`,
+    fetcher
+  )
+
   const segments = segmentData?.segments || []
   const summary = segmentData?.summary
+  const shots = storyboardRes?.outputData?.shots || []
 
   // 从 step.outputData 读取合成结果
   const stepOutput = (step?.outputData as any) || {}
@@ -57,6 +64,18 @@ export default function VideoDirectPanel({
   const isExecuting = executing === 'VIDEO_DIRECT'
 
   const totalDuration = segments.reduce((sum: number, s: any) => sum + (s.duration || 5), 0)
+
+  // 按幕分组片段（与分镜设计/生成尾帧一致的纵向卡片布局）
+  const segmentsByAct = useMemo(() => {
+    const grouped = new Map<number, any[]>()
+    for (const segment of segments) {
+      const shot = shots.find((s: any) => s.shotId === segment.shotId)
+      const act = shot?.actNumber || 0
+      if (!grouped.has(act)) grouped.set(act, [])
+      grouped.get(act)!.push(segment)
+    }
+    return Array.from(grouped.entries()).sort((a, b) => a[0] - b[0])
+  }, [segments, shots])
 
   const handleGenerateBgm = useCallback(async () => {
     setIsGeneratingBgm(true)
@@ -154,48 +173,74 @@ export default function VideoDirectPanel({
 
         <div>
           <h3 className="mb-3 text-sm font-semibold text-stone-700">分镜片段</h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {segments.map((segment: any, index: number) => (
-              <div
-                key={segment.id}
-                className={`overflow-hidden rounded-lg border ${
-                  highlightedSegmentId === segment.id
-                    ? 'border-emerald-400 ring-2 ring-emerald-100'
-                    : 'border-stone-200'
-                } bg-white transition cursor-pointer`}
-                onDoubleClick={() => handleDoubleClick(index)}
-              >
-                <div className="relative aspect-video bg-stone-100">
-                  {segment.videoUrl ? (
-                    <video
-                      src={segment.videoUrl}
-                      muted
-                      playsInline
-                      className="h-full w-full object-cover"
-                      preload="metadata"
-                    />
-                  ) : (
-                    <div className="flex h-full flex-col items-center justify-center">
-                      <span className="font-mono text-sm font-bold text-stone-400">
-                        {segment.shotId}
-                      </span>
-                      <span className="mt-1 text-xs text-stone-400">待生成</span>
-                    </div>
-                  )}
-                </div>
-                <div className="p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs text-stone-500">{segment.shotId}</span>
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">
-                      已完成
-                    </span>
+          {/* 纵向分镜表卡片 */}
+          <div className="space-y-6">
+            {segmentsByAct.map(([actNumber, actSegments]) => (
+              <div key={actNumber} className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 bg-stone-50">
+                  <div>
+                    <h3 className="text-sm font-semibold text-stone-800">第 {actNumber} 幕</h3>
+                    <span className="text-xs text-stone-500">{actSegments.length} 个片段</span>
                   </div>
-                  <p className="mt-1 text-sm font-medium text-stone-800 line-clamp-1">
-                    {segment.caption || '无描述'}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-stone-400 line-clamp-2">
-                    {segment.prompt?.slice(0, 80)}...
-                  </p>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                    <Check className="h-3 w-3" /> 已完成
+                  </span>
+                </div>
+                <div className="divide-y divide-stone-100">
+                  {actSegments.map((segment: any, index: number) => {
+                    const shot = shots.find((s: any) => s.shotId === segment.shotId)
+                    return (
+                      <div
+                        key={segment.id}
+                        className={`flex flex-col sm:flex-row gap-4 px-4 py-3 transition cursor-pointer ${
+                          highlightedSegmentId === segment.id
+                            ? 'bg-emerald-50/50'
+                            : ''
+                        }`}
+                        onDoubleClick={() => handleDoubleClick(index)}
+                      >
+                        {/* 左侧：片段信息 */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-mono text-[11px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
+                              {segment.shotId}
+                            </span>
+                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">
+                              已完成
+                            </span>
+                          </div>
+                          <p className="text-sm text-stone-600 leading-relaxed mb-2">
+                            {segment.caption || shot?.description || '无描述'}
+                          </p>
+                          <p className="text-[11px] text-stone-400 line-clamp-2 mb-2">
+                            {segment.prompt?.slice(0, 120)}...
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500">
+                            <span>
+                              <span className="text-stone-400">时长</span> {segment.duration || 5}s
+                            </span>
+                            {shot?.cameraMove && (
+                              <span>
+                                <span className="text-stone-400">运镜</span> {shot.cameraMove}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {/* 右侧：视频预览 */}
+                        <div className="w-full sm:w-56 shrink-0">
+                          <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
+                            <video
+                              src={segment.videoUrl}
+                              muted
+                              playsInline
+                              className="h-full w-full rounded object-cover"
+                              preload="metadata"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             ))}
@@ -279,100 +324,168 @@ export default function VideoDirectPanel({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {segments.map((segment: any) => (
-            <div
-              key={segment.id}
-              className="overflow-hidden rounded-lg border border-stone-200 bg-white transition hover:shadow-sm"
-            >
-              <div className="relative aspect-video bg-stone-100">
-                {segment.status === 'completed' && segment.videoUrl ? (
-                  <video
-                    src={segment.videoUrl}
-                    muted
-                    playsInline
-                    className="h-full w-full object-cover"
-                    preload="metadata"
-                  />
-                ) : segment.status === 'generating' ? (
-                  <div className="flex h-full flex-col items-center justify-center">
-                    <LoaderCircle className="h-6 w-6 animate-spin text-stone-400" />
-                    <span className="mt-2 text-xs text-stone-500">生成中...</span>
+        {/* 纵向分镜表卡片：按幕分组，左侧信息 + 右侧视频预览 */}
+        <div className="space-y-6">
+          {segmentsByAct.map(([actNumber, actSegments]) => {
+            const completedCount = actSegments.filter((s: any) => s.status === 'completed').length
+            const totalCount = actSegments.length
+            const allCompleted = completedCount === totalCount && totalCount > 0
+            const someCompleted = completedCount > 0 && completedCount < totalCount
+
+            return (
+              <div key={actNumber} className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+                {/* 幕头部 */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 bg-stone-50">
+                  <div>
+                    <h3 className="text-sm font-semibold text-stone-800">第 {actNumber} 幕</h3>
+                    <span className="text-xs text-stone-500">{totalCount} 个片段</span>
                   </div>
-                ) : segment.status === 'failed' ? (
-                  <div className="flex h-full flex-col items-center justify-center">
-                    <span className="text-xs text-red-500">生成失败</span>
-                    {segment.errorMessage && (
-                      <span className="mt-1 max-w-[80%] text-center text-[10px] text-red-400 line-clamp-2">
-                        {segment.errorMessage}
+                  <div className="flex items-center gap-2">
+                    {allCompleted && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                        <Check className="h-3 w-3" /> 已完成
+                      </span>
+                    )}
+                    {someCompleted && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                        部分生成 {completedCount}/{totalCount}
+                      </span>
+                    )}
+                    {!completedCount && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-500">
+                        未生成
                       </span>
                     )}
                   </div>
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center">
-                    <span className="font-mono text-sm font-bold text-stone-400">
-                      {segment.shotId}
-                    </span>
-                    <span className="mt-1 text-xs text-stone-400">待生成</span>
-                  </div>
-                )}
-              </div>
+                </div>
 
-              <div className="p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-stone-500">{segment.shotId}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] ${
-                      segment.status === 'completed'
-                        ? 'bg-emerald-50 text-emerald-700'
-                        : segment.status === 'generating'
-                        ? 'bg-amber-50 text-amber-700'
-                        : segment.status === 'failed'
-                        ? 'bg-red-50 text-red-700'
-                        : 'bg-stone-100 text-stone-500'
-                    }`}
-                  >
-                    {segment.status === 'completed'
-                      ? '已完成'
-                      : segment.status === 'generating'
-                      ? '生成中'
-                      : segment.status === 'failed'
-                      ? '失败'
-                      : '待生成'}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm font-medium text-stone-800 line-clamp-1">
-                  {segment.caption || '无描述'}
-                </p>
-                <p className="mt-0.5 text-[11px] text-stone-400 line-clamp-2">
-                  {segment.prompt?.slice(0, 80)}...
-                </p>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-stone-400">{segment.duration || 5}s</span>
-                  {segment.status === 'pending' && (
-                    <button
-                      onClick={() => handleGenerateSegment(segment.id)}
-                      disabled={isExecuting}
-                      className="flex items-center gap-1 rounded bg-stone-800 px-2 py-1 text-[10px] text-white transition hover:bg-stone-700 disabled:opacity-50"
-                    >
-                      <Play className="h-3 w-3" />
-                      生成
-                    </button>
-                  )}
-                  {segment.status === 'failed' && (
-                    <button
-                      onClick={() => handleGenerateSegment(segment.id)}
-                      disabled={isExecuting}
-                      className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] text-white transition hover:bg-red-700 disabled:opacity-50"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      重试
-                    </button>
-                  )}
+                {/* 片段纵向列表 */}
+                <div className="divide-y divide-stone-100">
+                  {actSegments.map((segment: any) => {
+                    const shot = shots.find((s: any) => s.shotId === segment.shotId)
+                    return (
+                      <div
+                        key={segment.id}
+                        className="flex flex-col sm:flex-row gap-4 px-4 py-3"
+                      >
+                        {/* 左侧：片段信息 */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-mono text-[11px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
+                              {segment.shotId}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] ${
+                                segment.status === 'completed'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : segment.status === 'generating'
+                                  ? 'bg-amber-50 text-amber-700'
+                                  : segment.status === 'failed'
+                                  ? 'bg-red-50 text-red-700'
+                                  : 'bg-stone-100 text-stone-500'
+                              }`}
+                            >
+                              {segment.status === 'completed'
+                                ? '已完成'
+                                : segment.status === 'generating'
+                                ? '生成中'
+                                : segment.status === 'failed'
+                                ? '失败'
+                                : '待生成'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-stone-600 leading-relaxed mb-2">
+                            {segment.caption || shot?.description || '无描述'}
+                          </p>
+                          <p className="text-[11px] text-stone-400 line-clamp-2 mb-2">
+                            {segment.prompt?.slice(0, 120)}...
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500 mb-2">
+                            <span>
+                              <span className="text-stone-400">时长</span> {segment.duration || 5}s
+                            </span>
+                            {shot?.cameraMove && (
+                              <span>
+                                <span className="text-stone-400">运镜</span> {shot.cameraMove}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {segment.status === 'pending' && (
+                              <button
+                                onClick={() => handleGenerateSegment(segment.id)}
+                                disabled={isExecuting}
+                                className="flex items-center gap-1 rounded bg-stone-800 px-2 py-1 text-[10px] text-white transition hover:bg-stone-700 disabled:opacity-50"
+                              >
+                                <Play className="h-3 w-3" />
+                                生成
+                              </button>
+                            )}
+                            {segment.status === 'failed' && (
+                              <button
+                                onClick={() => handleGenerateSegment(segment.id)}
+                                disabled={isExecuting}
+                                className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] text-white transition hover:bg-red-700 disabled:opacity-50"
+                              >
+                                <RefreshCw className="h-3 w-3" />
+                                重试
+                              </button>
+                            )}
+                            {segment.status === 'generating' && (
+                              <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+                                <LoaderCircle className="h-3 w-3 animate-spin" />
+                                生成中
+                              </span>
+                            )}
+                          </div>
+                          {segment.errorMessage && (
+                            <p className="mt-2 text-[11px] text-red-500">
+                              {segment.errorMessage}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* 右侧：视频预览 */}
+                        <div className="w-full sm:w-56 shrink-0">
+                          {segment.status === 'completed' && segment.videoUrl ? (
+                            <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
+                              <video
+                                src={segment.videoUrl}
+                                muted
+                                playsInline
+                                className="h-full w-full rounded object-cover"
+                                preload="metadata"
+                                controls
+                              />
+                            </div>
+                          ) : segment.status === 'generating' ? (
+                            <div className="flex h-full min-h-[96px] flex-col items-center justify-center rounded bg-stone-100" style={{ aspectRatio: '16/9' }}>
+                              <LoaderCircle className="h-6 w-6 animate-spin text-stone-400" />
+                              <span className="mt-2 text-xs text-stone-500">生成中...</span>
+                            </div>
+                          ) : segment.status === 'failed' ? (
+                            <div className="flex h-full min-h-[96px] flex-col items-center justify-center rounded bg-red-50" style={{ aspectRatio: '16/9' }}>
+                              <span className="text-xs text-red-500">生成失败</span>
+                              <span className="mt-1 max-w-[80%] text-center text-[10px] text-red-400 line-clamp-2">
+                                {segment.errorMessage || '请重试'}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex h-full min-h-[96px] flex-col items-center justify-center rounded border-2 border-dashed border-stone-300 bg-stone-100" style={{ aspectRatio: '16/9' }}>
+                              <span className="font-mono text-sm font-bold text-stone-600">
+                                {segment.shotId}
+                              </span>
+                              <span className="mt-1 text-xs text-stone-400">待生成</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     )
