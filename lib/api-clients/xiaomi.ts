@@ -912,9 +912,8 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
         }
       }
 
-      const lastError = e
-      const mock = await generateMockImage(params.prompt)
-      return { ...mock, isMock: true, lastError: String(lastError?.message || lastError || 'unknown') }
+      // 降级也失败，不直接 mock，让主循环尝试 fallback 模型链
+      console.warn(`[GPT-EDIT] gpt-image-2 失败，交给主循环尝试其他模型`)
     }
   }
 
@@ -969,83 +968,57 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
 
   let lastError: any = null
 
-  // 工作指令.txt（P1 2026-05-24）：429 限流重试参数（指数退避：1s → 2s → 4s）
   const RATE_LIMIT_MAX_RETRIES = 3
+  const hasRefs = !!(params.referenceImageUrl || (params.referenceImages && params.referenceImages.length > 0))
 
-  for (const tryModel of modelsToTry) {
-    const subParams = { ...params, model: tryModel }
-    for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
-      try {
-        console.log(`[_generateImageInner] About to call callXiaomiImageOnce, model=${tryModel}, attempt=${attempt + 1}/${BACKOFF_MS.length + 1}, prompt=${subParams.prompt?.slice(0, 60)}...`)
-        const raw = await callXiaomiImageOnce(subParams)
-        console.log(`[_generateImageInner] callXiaomiImageOnce returned OK, model=${tryModel}`)
-        const buffer = await rawToBuffer(raw)
-        return {
-          buffer,
-          url: raw.url || '',
-          model: tryModel,
-          revisedPrompt: raw.revisedPrompt,
-          isMock: false,
-        }
-      } catch (e: any) {
-        lastError = e
+  // Phase 1: 尝试所有模型（带参考图）→ Phase 2: 移除参考图后重试 → Mock 兜底
+  for (const phase of [false, true]) {
+    if (phase && !hasRefs) break
+    if (phase) {
+      console.warn(`[Image] Phase 1 全部失败，移除参考图后重试所有模型`)
+      params = { ...params, referenceImageUrl: undefined, referenceImages: undefined }
+    }
+    for (const tryModel of modelsToTry) {
+      const subParams = { ...params, model: tryModel }
+      for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
+        try {
+          console.log(`[Image] model=${tryModel} phase=${phase ? 2 : 1} attempt=${attempt + 1}/${BACKOFF_MS.length + 1}`)
+          const raw = await callXiaomiImageOnce(subParams)
+          const buffer = await rawToBuffer(raw)
+          return { buffer, url: raw.url || '', model: tryModel, revisedPrompt: raw.revisedPrompt, isMock: false }
+        } catch (e: any) {
+          lastError = e
 
-        // 工作指令.txt（P1 2026-05-24）：429 限流专用指数退避重试
-        if (e instanceof XiaomiHttpError && e.status === 429) {
-          let retries = 0
-          while (retries < RATE_LIMIT_MAX_RETRIES) {
-            try {
-              const raw = await callXiaomiImageOnce(subParams)
-              const buffer = await rawToBuffer(raw)
-              return {
-                buffer,
-                url: raw.url || '',
-                model: tryModel,
-                revisedPrompt: raw.revisedPrompt,
-                isMock: false,
+          // 429 限流重试
+          if (e instanceof XiaomiHttpError && e.status === 429) {
+            let retries = 0
+            while (retries < RATE_LIMIT_MAX_RETRIES) {
+              try {
+                const raw = await callXiaomiImageOnce(subParams)
+                const buffer = await rawToBuffer(raw)
+                return { buffer, url: raw.url || '', model: tryModel, revisedPrompt: raw.revisedPrompt, isMock: false }
+              } catch (retryErr: any) {
+                retries++
+                if (retryErr instanceof XiaomiHttpError && retryErr.status === 429 && retries < RATE_LIMIT_MAX_RETRIES) {
+                  const delay = Math.pow(2, retries - 1) * 1000
+                  console.warn(`[Image] 429 rate limit, retry ${retries}/${RATE_LIMIT_MAX_RETRIES}, waiting ${delay}ms`)
+                  await new Promise((r) => setTimeout(r, delay))
+                  continue
+                }
+                lastError = retryErr
+                break
               }
-            } catch (retryErr: any) {
-              retries++
-              if (retryErr instanceof XiaomiHttpError && retryErr.status === 429 && retries < RATE_LIMIT_MAX_RETRIES) {
-                const delay = Math.pow(2, retries - 1) * 1000
-                console.warn(`[Image] 429 rate limit, retry ${retries}/${RATE_LIMIT_MAX_RETRIES}, waiting ${delay}ms`)
-                await new Promise((r) => setTimeout(r, delay))
-                continue
-              }
-              lastError = retryErr
-              break
             }
+            console.warn(`[Image] model=${tryModel} 429 retries exhausted`)
+            break
           }
-          console.warn(`[Image] model=${tryModel} 429 retries exhausted`)
-          break
-        }
 
-        // "does not support image input" — 移除参考图后重试
-        const errMsg = String(e?.message || '')
-        if (/does not support image input/i.test(errMsg) && (subParams.referenceImageUrl || subParams.referenceImages?.length)) {
-          console.warn(`[Image] model=${tryModel} 不支持 image 字段, 移除参考图重试`)
-          const stripped = { ...subParams, referenceImageUrl: undefined, referenceImages: undefined }
-          try {
-            const raw = await callXiaomiImageOnce(stripped)
-            const buffer = await rawToBuffer(raw)
-            return { buffer, url: raw.url || '', model: tryModel, revisedPrompt: raw.revisedPrompt, isMock: false }
-          } catch (strippedErr: any) {
-            console.warn(`[Image] 移除参考图后仍然失败: ${strippedErr?.message}`)
-            lastError = strippedErr
-          }
-          // 参考图移除后也走了，不再重试该模型的其它 attempt
-          break
+          const retryable = isRetryableError(e)
+          console.warn(`[Image] model=${tryModel} attempt=${attempt + 1}/${BACKOFF_MS.length + 1} ${retryable ? 'retryable' : 'non-retryable'} error: ${e.message?.slice(0, 120)}`)
+          if (!retryable) break
+          if (attempt === BACKOFF_MS.length) break
+          await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]))
         }
-
-        const retryable = isRetryableError(e)
-        console.warn(
-          `[Image] model=${tryModel} attempt=${attempt + 1}/${BACKOFF_MS.length + 1} ${
-            retryable ? 'retryable' : 'non-retryable'
-          } error: ${e.message}`
-        )
-        if (!retryable) break
-        if (attempt === BACKOFF_MS.length) break
-        await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]))
       }
     }
   }
