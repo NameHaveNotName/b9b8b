@@ -11,6 +11,7 @@ interface VideoDirectPanelProps {
   projectId: string
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
+  isAvailable?: boolean
   readOnly?: boolean
 }
 
@@ -28,6 +29,7 @@ export default function VideoDirectPanel({
   projectId,
   executing,
   onExecute,
+  isAvailable = true,
   readOnly,
 }: VideoDirectPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -414,13 +416,21 @@ export default function VideoDirectPanel({
       )
     }
 
+    const isLocked = !isAvailable && !readOnly
     return (
       <div className="space-y-4">
+        {isLocked && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm text-amber-800">
+              直生视频需要先完成分镜设计并生成至少一个首帧。请先前往「分镜设计」步骤生成首帧。
+            </p>
+          </div>
+        )}
         <div className="flex justify-center">
           <div className="relative inline-block">
             <button
               onClick={handleGeneratePrompts}
-              disabled={isExecuting}
+              disabled={isExecuting || isLocked}
               className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
             >
               {isExecuting ? (

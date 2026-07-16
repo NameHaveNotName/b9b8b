@@ -144,6 +144,26 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         body = { directionIndex: idx }
       }
 
+      // 防御：未解锁步骤不允许执行，避免后端返回 WORKFLOW_002
+      const stepId = prismaTypeToStepId(stepType)
+      const stepRecord = steps.find((s: any) => s.stepType === stepType)
+      if (stepId && project && stepRecord) {
+        const displayState = getStepDisplayState(stepId, project)
+        const isDone = displayState.isDone || stepRecord.status === 'COMPLETED'
+        const isFailed = stepRecord.status === 'FAILED'
+        const isProcessing = stepRecord.status === 'PROCESSING'
+        const canRun = isDone || isFailed || isProcessing || displayState.isAvailable
+        if (!canRun) {
+          const stepLabel = STEP_LABELS[stepType] || stepType
+          const reason = !displayState.isUnlocked
+            ? '前置步骤尚未完成'
+            : '该步骤当前不可用'
+          setLastError(`「${stepLabel}」未解锁：${reason}，请先完成必要的前置步骤`)
+          setExecuting(null)
+          return
+        }
+      }
+
       // 调试日志
       console.log(`[executeStep] starting ${stepType}`, { body, bodyJson: JSON.stringify(body), isExecuting: executing })
 
@@ -987,6 +1007,9 @@ function StepContent({
   selectedIdx: number | null
   setSelectedIdx: (idx: number | null) => void
 }) {
+  const stepId = prismaTypeToStepId(step.stepType)
+  const displayState = stepId ? getStepDisplayState(stepId, project) : null
+
   switch (step.stepType) {
     case 'IDEATION':
       return (
@@ -1093,7 +1116,8 @@ function StepContent({
           projectId={project.id}
           executing={executing}
           onExecute={onExecute}
-  readOnly={readOnly}
+          isAvailable={displayState?.isAvailable ?? false}
+          readOnly={readOnly}
         />
       )
     case 'VIDEO_RENDER':
