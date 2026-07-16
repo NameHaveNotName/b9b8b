@@ -26,6 +26,24 @@ async function getStoryboardAndKeyframes(projectId: string) {
   return { shots, keyframes }
 }
 
+/** 清理因上次服务器超时而卡在 generating 的片段 */
+async function resetStaleGeneratingSegments(projectId: string, staleMinutes = 15) {
+  const staleThreshold = new Date(Date.now() - staleMinutes * 60 * 1000)
+  const result = await prisma.videoSegment.updateMany({
+    where: {
+      projectId,
+      stepName: 'VIDEO_DIRECT',
+      status: 'generating',
+      updatedAt: { lt: staleThreshold },
+    },
+    data: { status: 'failed', errorMessage: '生成超时，请重试' },
+  })
+  if (result.count > 0) {
+    console.log(`[VIDEO-DIRECT] 清理 ${result.count} 个超时卡住的生成中片段`)
+  }
+  return result.count
+}
+
 /** 后台生成单个 segment */
 async function backgroundGenerateDirectSegment(
   segmentId: string,
@@ -224,6 +242,9 @@ async function handleGenerateDirectPrompts(projectId: string, stepId: string) {
 
 /** 单段生成 */
 async function handleGenerateDirectSegment(projectId: string, stepId: string, body: any) {
+  // 先清理上次超时卡住的片段（包括当前段）
+  await resetStaleGeneratingSegments(projectId)
+
   const segmentId = body?.segmentId
   if (!segmentId) {
     return NextResponse.json({ error: 'MISSING_SEGMENT_ID' }, { status: 400 })
@@ -277,25 +298,24 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
 
 /** 批量生成 */
 async function handleGenerateAllDirectSegments(projectId: string, stepId: string, body: any) {
+  // 先清理上次超时卡住的片段
+  const resetCount = await resetStaleGeneratingSegments(projectId)
+
   const pendingSegments = await prisma.videoSegment.findMany({
     where: { projectId, stepName: 'VIDEO_DIRECT', status: 'pending' },
     orderBy: { sequence: 'asc' },
   })
 
   if (pendingSegments.length === 0) {
-    return NextResponse.json({ success: true, message: '没有待生成的片段', count: 0 })
+    return NextResponse.json({
+      success: true,
+      message: resetCount > 0 ? `已清理 ${resetCount} 个超时片段，当前没有待生成片段` : '没有待生成的片段',
+      count: 0,
+      resetCount,
+    })
   }
 
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
-
-  await Promise.all(
-    pendingSegments.map((seg) =>
-      prisma.videoSegment.update({
-        where: { id: seg.id },
-        data: { status: 'generating', errorMessage: null },
-      })
-    )
-  )
 
   waitUntil((async () => {
     for (const segment of pendingSegments) {
@@ -308,6 +328,13 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
         })
         continue
       }
+
+      // 逐段标记为生成中，避免服务器超时导致剩余片段全部卡 generating
+      await prisma.videoSegment.update({
+        where: { id: segment.id },
+        data: { status: 'generating', errorMessage: null },
+      })
+
       const kf = keyframes.find((k: any) => k.shotId === segment.shotId)
       const lastFrameUrl = kf?.lastFrameUrl || null
       await backgroundGenerateDirectSegment(
@@ -325,9 +352,10 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
   return NextResponse.json({
     success: true,
     count: pendingSegments.length,
+    resetCount,
     segmentIds: pendingSegments.map((s) => s.id),
     status: 'generating',
-    message: `已启动 ${pendingSegments.length} 个片段的批量生成`,
+    message: `已启动 ${pendingSegments.length} 个片段的批量生成${resetCount > 0 ? `（已清理 ${resetCount} 个超时片段）` : ''}`,
   })
 }
 
