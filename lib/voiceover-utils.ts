@@ -5,9 +5,9 @@ import {
   generateSpeechMinimax,
   MinimaxTtsError,
   MINIMAX_DEFAULT_VOICE_ID,
-  MINIMAX_TTS_VOICES,
   getMinimaxVoiceCatalogPrompt,
 } from '@/lib/api-clients/minimax-tts'
+import { isValidMinimaxVoiceId } from '@/lib/voice-config'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 
 /** 从 storyboard Step 读取 shots */
@@ -160,9 +160,8 @@ export async function generateVoiceoverScripts(
   })
 
   // 校验 voiceId：如果 LLM 返回了不在列表中的 ID，则使用默认旁白音色
-  const validVoiceIds = new Set(MINIMAX_TTS_VOICES.map((v) => v.id))
   const resolveVoiceId = (voiceId?: string, speaker?: string): string => {
-    if (voiceId && validVoiceIds.has(voiceId)) return voiceId
+    if (isValidMinimaxVoiceId(voiceId)) return voiceId as string
     if (speaker === '旁白' || !speaker) return MINIMAX_DEFAULT_VOICE_ID
     return MINIMAX_DEFAULT_VOICE_ID
   }
@@ -229,7 +228,8 @@ export async function generateVoiceoverAudio(segmentId: string, voiceId?: string
   })
 
   try {
-    const effectiveVoiceId = voiceId || segment.voiceId || MINIMAX_DEFAULT_VOICE_ID
+    const candidateVoiceId = voiceId || segment.voiceId || MINIMAX_DEFAULT_VOICE_ID
+    const effectiveVoiceId = isValidMinimaxVoiceId(candidateVoiceId) ? candidateVoiceId : MINIMAX_DEFAULT_VOICE_ID
     const result = await generateSpeechMinimax(segment.text, {
       voiceId: effectiveVoiceId,
       outputFormat: 'url',

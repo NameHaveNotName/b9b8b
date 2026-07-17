@@ -1,6 +1,7 @@
 /**
  * MiniMax TTS 音色配置（服务端/客户端共享）。
- * 实际可用音色以 MiniMax 控制台为准。
+ * 以下 voice_id 均已通过 MiniMax TTS API (speech-2.8-hd) 实测验证。
+ * 实际可用音色以 MiniMax 控制台为准，但建议优先使用列表中的 ID。
  */
 export interface MinimaxVoiceOption {
   id: string
@@ -14,98 +15,108 @@ export interface MinimaxVoiceOption {
 
 export const MINIMAX_TTS_VOICES: MinimaxVoiceOption[] = [
   {
-    id: 'Chinese (Mandarin)_Lyrical_Voice',
-    label: '中文-抒情女声',
-    lang: 'zh',
-    gender: 'female',
-    ageTag: 'adult',
-    mood: '柔和、感性、叙事',
-    description: '适合旁白、内心独白、温柔女性角色',
-  },
-  {
-    id: 'Chinese (Mandarin)_Standard_Male',
-    label: '中文-标准男声',
+    id: 'male-qn-qingse',
+    label: '中文-清澈男声',
     lang: 'zh',
     gender: 'male',
     ageTag: 'adult',
-    mood: '稳重、正式、清晰',
-    description: '适合新闻旁白、成熟男性、纪录片解说',
+    mood: '清晰、自然、叙述',
+    description: '适合旁白、纪录片、温和男性角色',
   },
   {
-    id: 'Chinese (Mandarin)_Gentle_Voice',
-    label: '中文-温柔女声',
-    lang: 'zh',
-    gender: 'female',
-    ageTag: 'adult',
-    mood: '温婉、亲切、细腻',
-    description: '适合知性女性、母亲、治愈系角色',
-  },
-  {
-    id: 'Chinese (Mandarin)_Energetic_Voice',
-    label: '中文-活力男声',
+    id: 'male-qn-jingying',
+    label: '中文-精英男声',
     lang: 'zh',
     gender: 'male',
-    ageTag: 'youth',
-    mood: '阳光、热情、有朝气',
-    description: '适合年轻男主、热血角色、青春片',
+    ageTag: 'adult',
+    mood: '干练、专业、稳重',
+    description: '适合商务、新闻、专业解说、成熟男性',
   },
   {
-    id: 'Chinese (Mandarin)_Serious_Voice',
-    label: '中文-沉稳男声',
+    id: 'male-qn-badao',
+    label: '中文-霸道男声',
     lang: 'zh',
     gender: 'male',
     ageTag: 'middle',
-    mood: '低沉、威严、有压迫感',
-    description: '适合反派、领导、长者、权威角色',
+    mood: '低沉、有气场、威严',
+    description: '适合反派、霸总、权威角色、古风男主',
   },
   {
-    id: 'Chinese (Mandarin)_Animated_Voice',
-    label: '中文-灵动女声',
+    id: 'male-qn-daxuesheng',
+    label: '中文-大学生男声',
+    lang: 'zh',
+    gender: 'male',
+    ageTag: 'youth',
+    mood: '阳光、年轻、亲和',
+    description: '适合年轻男主、校园、青春片、热血角色',
+  },
+  {
+    id: 'female-shaonv',
+    label: '中文-少女',
     lang: 'zh',
     gender: 'female',
     ageTag: 'youth',
-    mood: '活泼、俏皮、可爱',
-    description: '适合少女、活泼女主、轻松喜剧',
+    mood: '甜美、活泼、清纯',
+    description: '适合少女角色、活泼女主、青春台词',
   },
   {
-    id: 'Chinese (Mandarin)_Storyteller_Voice',
-    label: '中文-说书人',
+    id: 'female-yujie',
+    label: '中文-御姐',
+    lang: 'zh',
+    gender: 'female',
+    ageTag: 'adult',
+    mood: '成熟、优雅、有魅力',
+    description: '适合成熟女性、知性角色、温柔女主',
+  },
+  {
+    id: 'female-yaoyao',
+    label: '中文-瑶瑶',
+    lang: 'zh',
+    gender: 'female',
+    ageTag: 'youth',
+    mood: '可爱、俏皮、灵动',
+    description: '适合可爱女主、轻松喜剧、萌系角色',
+  },
+  {
+    id: 'presenter_male',
+    label: '中文-主播男声',
+    lang: 'zh',
+    gender: 'male',
+    ageTag: 'adult',
+    mood: '标准、播报、正式',
+    description: '适合新闻播报、主持、正式旁白',
+  },
+  {
+    id: 'presenter_female',
+    label: '中文-主播女声',
+    lang: 'zh',
+    gender: 'female',
+    ageTag: 'adult',
+    mood: '标准、播报、亲切',
+    description: '适合新闻播报、主持、温柔旁白',
+  },
+  {
+    id: 'audiobook_male_1',
+    label: '中文-有声书男声',
     lang: 'zh',
     gender: 'male',
     ageTag: 'middle',
-    mood: '有故事感、戏剧化、抑扬顿挫',
-    description: '适合古风、评书、戏剧化旁白',
+    mood: '有故事感、抑扬顿挫',
+    description: '适合小说、评书、戏剧化旁白',
   },
   {
-    id: 'Chinese (Mandarin)_Child_Voice',
-    label: '中文-童声',
+    id: 'audiobook_female_1',
+    label: '中文-有声书女声',
     lang: 'zh',
-    gender: 'neutral',
-    ageTag: 'child',
-    mood: '天真、稚嫩、清脆',
-    description: '适合儿童角色、回忆片段',
-  },
-  {
-    id: 'English (US)_Standard_Female',
-    label: '英文-标准女声',
-    lang: 'en',
     gender: 'female',
     ageTag: 'adult',
-    mood: '标准、自然',
-    description: '英文通用女声',
-  },
-  {
-    id: 'English (US)_Standard_Male',
-    label: '英文-标准男声',
-    lang: 'en',
-    gender: 'male',
-    ageTag: 'adult',
-    mood: '标准、自然',
-    description: '英文通用男声',
+    mood: '温婉、叙事、细腻',
+    description: '适合小说、情感旁白、知性女性',
   },
 ]
 
-export const MINIMAX_DEFAULT_VOICE_ID = 'Chinese (Mandarin)_Lyrical_Voice'
+/** 默认旁白音色（必须在 MINIMAX_TTS_VOICES 中存在且已验证） */
+export const MINIMAX_DEFAULT_VOICE_ID = 'male-qn-qingse'
 
 /** 返回给 LLM 的音色选择提示文本 */
 export function getMinimaxVoiceCatalogPrompt(): string {
@@ -121,4 +132,9 @@ export function getMinimaxVoiceCatalogPrompt(): string {
 /** 根据 ID 查找音色选项 */
 export function findVoiceById(id?: string | null): MinimaxVoiceOption | undefined {
   return MINIMAX_TTS_VOICES.find((v) => v.id === id)
+}
+
+/** 判断是否为已验证的 MiniMax 音色 */
+export function isValidMinimaxVoiceId(id?: string | null): boolean {
+  return !!id && MINIMAX_TTS_VOICES.some((v) => v.id === id)
 }
