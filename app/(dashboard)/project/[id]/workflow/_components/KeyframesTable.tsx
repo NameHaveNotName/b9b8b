@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -18,7 +18,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, Image as ImageIcon, Maximize2, Play, Loader2 } from 'lucide-react'
+import { GripVertical, Image as ImageIcon, Play, Loader2, Check } from 'lucide-react'
 import ImageLightbox from '@/components/generation/ImageLightbox'
 import type { Shot } from '@/app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable'
 
@@ -35,10 +35,10 @@ const CAMERA_MOVES = ['推镜头', '拉镜头', '摇镜头', '移镜头', '跟�
 const DURATIONS = [3, 5, 7]
 
 /* ============================================================
-   可排序行（表格视图）
+   可排序卡片（纵向卡片视图，按幕分组）
    ============================================================ */
 
-function SortableRow({
+function KeyframeCard({
   shot,
   characterMap,
   onUpdate,
@@ -62,17 +62,13 @@ function SortableRow({
     isDragging,
   } = useSortable({ id: shot.shotId })
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  }
-
   const [editingDesc, setEditingDesc] = useState(false)
   const [descValue, setDescValue] = useState(shot.description)
   const [editingAction, setEditingAction] = useState(false)
   const [actionValue, setActionValue] = useState(shot.actionChange || '')
   const [lightboxOpen, setLightboxOpen] = useState<'first' | 'last' | null>(null)
+
+  const firstFrameUrl = shot.mode === 'reference' ? shot.referenceImageUrl : shot.firstFrameUrl
 
   function saveDesc() {
     setEditingDesc(false)
@@ -88,124 +84,121 @@ function SortableRow({
     }
   }
 
-  // 根据当前模式获取首帧 URL
-  const firstFrameUrl = shot.mode === 'reference'
-    ? shot.referenceImageUrl
-    : shot.firstFrameUrl
-
   return (
     <div
       ref={setNodeRef}
-      style={style}
-      className={`flex items-center gap-3 rounded-lg border bg-white p-3 transition ${
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      className={`rounded-lg border bg-white p-4 transition ${
         isDragging ? 'border-amber-300 shadow-lg' : 'border-stone-200'
       }`}
     >
-      {/* 拖拽手柄 */}
-      <button
-        {...attributes}
-        {...listeners}
-        className="shrink-0 cursor-grab rounded p-1 text-stone-400 transition hover:bg-stone-100 active:cursor-grabbing"
-      >
-        <GripVertical className="h-4 w-4" />
-      </button>
+      {/* 顶部：拖拽手柄 + Shot ID + 首帧/尾帧缩略图 */}
+      <div className="flex items-start gap-3 mb-3">
+        {/* 拖拽手柄 */}
+        <button
+          {...attributes}
+          {...listeners}
+          className="mt-1 shrink-0 cursor-grab rounded p-1 text-stone-400 transition hover:bg-stone-100 active:cursor-grabbing"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
 
-      {/* 首帧缩略图（只读，正常亮度） */}
-      <div className="group relative shrink-0">
-        {firstFrameUrl ? (
-          <>
-            <img
-              src={firstFrameUrl}
-              alt="首帧"
-              className="h-16 w-24 cursor-zoom-in rounded-md object-cover"
-              loading="lazy"
-              onClick={() => setLightboxOpen('first')}
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.onerror = null;
-                target.style.display = 'none';
-                const placeholder = document.createElement('div');
-                placeholder.className = 'flex h-16 w-24 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500';
-                placeholder.textContent = '加载失败';
-                target.parentNode?.insertBefore(placeholder, target.nextSibling);
-              }}
-            />
-            <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 transition group-hover:bg-black/20">
-              <Maximize2 className="h-3.5 w-3.5 scale-90 text-white opacity-0 transition group-hover:scale-100 group-hover:opacity-100" />
-            </div>
-          </>
-        ) : (
-          <div className="flex h-16 w-24 items-center justify-center rounded-md bg-stone-100">
-            <ImageIcon className="h-5 w-5 text-stone-300" />
-          </div>
-        )}
-        <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-white">首帧</span>
-      </div>
+        {/* Shot ID */}
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded">
+            {shot.shotId}
+          </span>
+          {shot.lastFrameUrl && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+              <Check className="h-3 w-3" /> 尾帧已生成
+            </span>
+          )}
+        </div>
 
-      {/* 尾帧缩略图（可生成） */}
-      <div className="group relative shrink-0">
-        {shot.lastFrameUrl ? (
-          <>
-            <img
-              src={shot.lastFrameUrl}
-              alt="尾帧"
-              className="h-16 w-24 cursor-zoom-in rounded-md object-cover"
-              loading="lazy"
-              onClick={() => setLightboxOpen('last')}
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.onerror = null;
-                target.style.display = 'none';
-                const placeholder = document.createElement('div');
-                placeholder.className = 'flex h-16 w-24 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500';
-                placeholder.textContent = '加载失败';
-                target.parentNode?.insertBefore(placeholder, target.nextSibling);
-              }}
-            />
-            <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 transition group-hover:bg-black/20">
-              <Maximize2 className="h-3.5 w-3.5 scale-90 text-white opacity-0 transition group-hover:scale-100 group-hover:opacity-100" />
-            </div>
-          </>
-        ) : (
-          <button
-            onClick={() => onGenerate(shot.shotId)}
-            disabled={!!generatingShotId}
-            className="flex h-16 w-24 flex-col items-center justify-center rounded-md border border-dashed border-amber-300 bg-amber-50/50 text-amber-600 transition hover:bg-amber-100 disabled:opacity-50"
-          >
-            {generatingShotId === shot.shotId ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
+        {/* 首帧 + 尾帧缩略图 */}
+        <div className="ml-auto flex shrink-0 gap-2">
+          {/* 首帧 */}
+          <div className="relative">
+            {firstFrameUrl ? (
               <>
-                <Play className="h-3.5 w-3.5" />
-                <span className="text-[8px]">生成尾帧</span>
+                <img
+                  src={firstFrameUrl}
+                  alt="首帧"
+                  className="h-14 w-20 cursor-zoom-in rounded-md object-cover"
+                  loading="lazy"
+                  onClick={() => setLightboxOpen('first')}
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement
+                    target.onerror = null
+                    target.style.display = 'none'
+                    const placeholder = document.createElement('div')
+                    placeholder.className = 'flex h-14 w-20 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500'
+                    placeholder.textContent = '加载失败'
+                    target.parentNode?.insertBefore(placeholder, target.nextSibling)
+                  }}
+                />
+                <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-white">首帧</span>
               </>
+            ) : (
+              <div className="flex h-14 w-20 items-center justify-center rounded-md bg-stone-100">
+                <ImageIcon className="h-5 w-5 text-stone-300" />
+                <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-white">首帧</span>
+              </div>
             )}
-          </button>
-        )}
-        <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-white">尾帧</span>
+          </div>
+
+          {/* 尾帧 */}
+          <div className="relative">
+            {shot.lastFrameUrl ? (
+              <>
+                <img
+                  src={shot.lastFrameUrl}
+                  alt="尾帧"
+                  className="h-14 w-20 cursor-zoom-in rounded-md object-cover"
+                  loading="lazy"
+                  onClick={() => setLightboxOpen('last')}
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement
+                    target.onerror = null
+                    target.style.display = 'none'
+                    const placeholder = document.createElement('div')
+                    placeholder.className = 'flex h-14 w-20 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500'
+                    placeholder.textContent = '加载失败'
+                    target.parentNode?.insertBefore(placeholder, target.nextSibling)
+                  }}
+                />
+                <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-white">尾帧</span>
+              </>
+            ) : (
+              <button
+                onClick={() => onGenerate(shot.shotId)}
+                disabled={!!generatingShotId}
+                className="flex h-14 w-20 flex-col items-center justify-center rounded-md border border-dashed border-amber-300 bg-amber-50/50 text-amber-600 transition hover:bg-amber-100 disabled:opacity-50"
+              >
+                {generatingShotId === shot.shotId ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Play className="h-3.5 w-3.5" />
+                    <span className="text-[8px] mt-0.5">生成尾帧</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Shot ID */}
-      <div className="w-20 shrink-0 font-mono text-xs text-stone-500">
-        {shot.shotId}
-      </div>
-
-      {/* 描述（可编辑） */}
-      <div className="min-w-0 flex-1">
+      {/* 描述 */}
+      <div className="mb-3 pl-7">
         {editingDesc ? (
           <textarea
             value={descValue}
             onChange={(e) => setDescValue(e.target.value)}
             onBlur={saveDesc}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                saveDesc()
-              }
-              if (e.key === 'Escape') {
-                setEditingDesc(false)
-                setDescValue(shot.description)
-              }
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveDesc() }
+              if (e.key === 'Escape') { setEditingDesc(false); setDescValue(shot.description) }
             }}
             className="w-full resize-none rounded-md border border-stone-300 p-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
             autoFocus
@@ -213,107 +206,88 @@ function SortableRow({
           />
         ) : (
           <p
-            onClick={() => {
-              setEditingDesc(true)
-              setDescValue(shot.description)
-            }}
-            className="cursor-text rounded p-1 text-sm leading-relaxed text-stone-600 transition hover:bg-stone-50"
+            onClick={() => { setEditingDesc(true); setDescValue(shot.description) }}
+            className="cursor-text text-sm leading-relaxed text-stone-600 transition hover:bg-stone-50 rounded p-1 -m-1"
           >
             {shot.description}
           </p>
         )}
       </div>
 
-      {/* 运镜下拉 */}
-      <select
-        value={shot.cameraMove}
-        onChange={(e) => onUpdate({ ...shot, cameraMove: e.target.value })}
-        className="w-20 shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 focus:border-amber-500 focus:outline-none"
-      >
-        {CAMERA_MOVES.map((m) => (
-          <option key={m} value={m}>
-            {m}
-          </option>
-        ))}
-      </select>
+      {/* 底部：运镜 + 时长 + 角色 + 动作变化 */}
+      <div className="pl-7 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+        {/* 运镜 */}
+        <select
+          value={shot.cameraMove}
+          onChange={(e) => onUpdate({ ...shot, cameraMove: e.target.value })}
+          className="rounded border border-stone-200 bg-white px-2 py-1 text-stone-600 focus:border-amber-500 focus:outline-none"
+        >
+          {CAMERA_MOVES.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
 
-      {/* 时长下拉 */}
-      <select
-        value={shot.duration}
-        onChange={(e) => onUpdate({ ...shot, duration: Number(e.target.value) })}
-        className="w-14 shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 focus:border-amber-500 focus:outline-none"
-      >
-        {DURATIONS.map((d) => (
-          <option key={d} value={d}>
-            {d}s
-          </option>
-        ))}
-      </select>
+        {/* 时长 */}
+        <select
+          value={shot.duration}
+          onChange={(e) => onUpdate({ ...shot, duration: Number(e.target.value) })}
+          className="rounded border border-stone-200 bg-white px-2 py-1 text-stone-600 focus:border-amber-500 focus:outline-none"
+        >
+          {DURATIONS.map((d) => (
+            <option key={d} value={d}>{d}s</option>
+          ))}
+        </select>
 
-      {/* 角色 Badge */}
-      <div className="flex w-28 shrink-0 flex-wrap gap-1">
-        {shot.characters.map((cid) => (
-          <span
-            key={cid}
-            className="truncate rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-600"
-            title={characterMap[cid] || cid}
-          >
-            {characterMap[cid] || cid}
-          </span>
-        ))}
-      </div>
-
-      {/* 动作变化描述（可编辑） */}
-      <div className="w-40 shrink-0">
-        {editingAction ? (
-          <textarea
-            value={actionValue}
-            onChange={(e) => setActionValue(e.target.value)}
-            onBlur={saveActionChange}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                saveActionChange()
-              }
-              if (e.key === 'Escape') {
-                setEditingAction(false)
-                setActionValue(shot.actionChange || '')
-              }
-            }}
-            className="w-full resize-none rounded-md border border-stone-300 p-1.5 text-xs focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-            autoFocus
-            rows={2}
-            placeholder="首帧→尾帧变化..."
-          />
-        ) : (
-          <p
-            onClick={() => {
-              setEditingAction(true)
-              setActionValue(shot.actionChange || '')
-            }}
-            className="cursor-text rounded p-1 text-xs leading-relaxed text-stone-500 transition hover:bg-stone-50"
-          >
-            {shot.actionChange || '点击添加动作变化...'}
-          </p>
+        {/* 角色 */}
+        {shot.characters.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {shot.characters.map((cid) => (
+              <span
+                key={cid}
+                className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600"
+                title={characterMap[cid] || cid}
+              >
+                {characterMap[cid] || cid}
+              </span>
+            ))}
+          </div>
         )}
+
+        {/* 动作变化 */}
+        <div className="ml-auto">
+          {editingAction ? (
+            <div className="flex items-center gap-1">
+              <input
+                value={actionValue}
+                onChange={(e) => setActionValue(e.target.value)}
+                onBlur={saveActionChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); saveActionChange() }
+                  if (e.key === 'Escape') { setEditingAction(false); setActionValue(shot.actionChange || '') }
+                }}
+                className="w-40 rounded border border-stone-300 px-2 py-1 text-xs focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                placeholder="首帧→尾帧变化..."
+                autoFocus
+              />
+            </div>
+          ) : (
+            <button
+              onClick={() => { setEditingAction(true); setActionValue(shot.actionChange || '') }}
+              className="text-stone-400 hover:text-stone-600 transition text-xs"
+              title="点击编辑动作变化"
+            >
+              {shot.actionChange || '+ 动作变化'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 图片灯箱 */}
       {firstFrameUrl && lightboxOpen === 'first' && (
-        <ImageLightbox
-          src={firstFrameUrl}
-          alt={`${shot.shotId} 首帧`}
-          isOpen={true}
-          onClose={() => setLightboxOpen(null)}
-        />
+        <ImageLightbox src={firstFrameUrl} alt={`${shot.shotId} 首帧`} isOpen={true} onClose={() => setLightboxOpen(null)} />
       )}
       {shot.lastFrameUrl && lightboxOpen === 'last' && (
-        <ImageLightbox
-          src={shot.lastFrameUrl}
-          alt={`${shot.shotId} 尾帧`}
-          isOpen={true}
-          onClose={() => setLightboxOpen(null)}
-        />
+        <ImageLightbox src={shot.lastFrameUrl} alt={`${shot.shotId} 尾帧`} isOpen={true} onClose={() => setLightboxOpen(null)} />
       )}
     </div>
   )
@@ -325,7 +299,6 @@ function SortableRow({
 
 export default function KeyframesTable({
   shots,
-  assets,
   characterMap,
   projectId,
   onShotsChange,
@@ -339,6 +312,16 @@ export default function KeyframesTable({
       coordinateGetter: sortableKeyboardCoordinates,
     })
   )
+
+  const shotsByAct = useMemo(() => {
+    const grouped = new Map<number, Shot[]>()
+    for (const shot of shots) {
+      const act = shot.actNumber || 0
+      if (!grouped.has(act)) grouped.set(act, [])
+      grouped.get(act)!.push(shot)
+    }
+    return Array.from(grouped.entries()).sort((a, b) => a[0] - b[0])
+  }, [shots])
 
   // 保存到 STORYBOARD 路由（单一数据源）
   async function saveShots(nextShots: Shot[]) {
@@ -370,7 +353,6 @@ export default function KeyframesTable({
       if (!res.ok || !result.success) {
         throw new Error(result.message || result.error || `HTTP ${res.status}`)
       }
-      // 更新 shot 的 lastFrameUrl
       const next = shots.map((s) =>
         s.shotId === shotId ? { ...s, lastFrameUrl: result.lastFrameUrl } : s
       )
@@ -385,12 +367,14 @@ export default function KeyframesTable({
     }
   }
 
-  function handleDragEnd(event: DragEndEvent) {
+  function handleDragEnd(event: DragEndEvent, actNumber: number, actShots: Shot[]) {
     const { active, over } = event
     if (over && active.id !== over.id) {
-      const oldIndex = shots.findIndex((s) => s.shotId === active.id)
-      const newIndex = shots.findIndex((s) => s.shotId === over.id)
-      const next = arrayMove(shots, oldIndex, newIndex)
+      const oldIndex = actShots.findIndex((s) => s.shotId === active.id)
+      const newIndex = actShots.findIndex((s) => s.shotId === over.id)
+      const reorderedAct = arrayMove(actShots, oldIndex, newIndex)
+      // 替换原 shots 数组中对应 act 的 shots
+      const next = shots.map((s) => s.actNumber === actNumber ? reorderedAct.shift()! : s)
       onShotsChange(next)
       saveShots(next)
     }
@@ -413,45 +397,70 @@ export default function KeyframesTable({
   }
 
   return (
-    <div className="space-y-4">
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext
-          items={shots.map((s) => s.shotId)}
-          strategy={verticalListSortingStrategy}
-        >
-          <div className="flex flex-col gap-2">
-              {/* 表头 */}
-              <div className="hidden items-center gap-3 px-3 text-xs font-medium text-stone-400 md:flex">
-                <div className="w-6 shrink-0" />
-                <div className="w-24 shrink-0">首帧</div>
-                <div className="w-24 shrink-0">尾帧</div>
-                <div className="w-20 shrink-0">镜头ID</div>
-                <div className="min-w-0 flex-1">描述（双击编辑）</div>
-                <div className="w-20 shrink-0">运镜</div>
-                <div className="w-14 shrink-0">时长</div>
-                <div className="w-28 shrink-0">角色</div>
-                <div className="w-40 shrink-0">动作变化（双击编辑）</div>
-                <div className="w-8 shrink-0" />
-              </div>
+    <div className="space-y-6">
+      {shotsByAct.map(([actNumber, actShots]) => {
+        const generatedCount = actShots.filter((s) => s.lastFrameUrl).length
+        const totalCount = actShots.length
+        const allGenerated = generatedCount === totalCount && totalCount > 0
+        const someGenerated = generatedCount > 0 && generatedCount < totalCount
 
-              {shots.map((shot) => (
-                <SortableRow
-                  key={shot.shotId}
-                  shot={shot}
-                  characterMap={characterMap}
-                  onUpdate={handleUpdateShot}
-                  onGenerate={handleGenerateLastFrame}
-                  generatingShotId={generatingShotId}
-                  onActionChange={onActionChange}
-                />
-              ))}
+        return (
+          <div key={actNumber} className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+            {/* 幕头部 */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 bg-stone-50">
+              <div>
+                <h3 className="text-sm font-semibold text-stone-800">第 {actNumber} 幕</h3>
+                <span className="text-xs text-stone-500">{totalCount} 个镜头</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {allGenerated && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                    <Check className="h-3 w-3" /> 全部完成
+                  </span>
+                )}
+                {someGenerated && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                    已生成 {generatedCount}/{totalCount}
+                  </span>
+                )}
+                {!generatedCount && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-500">
+                    未生成
+                  </span>
+                )}
+              </div>
             </div>
-        </SortableContext>
-      </DndContext>
+
+            {/* 分镜卡片列表 */}
+            <div className="divide-y divide-stone-100">
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(e) => handleDragEnd(e, actNumber, actShots)}
+              >
+                <SortableContext
+                  items={actShots.map((s) => s.shotId)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
+                    {actShots.map((shot) => (
+                      <KeyframeCard
+                        key={shot.shotId}
+                        shot={shot}
+                        characterMap={characterMap}
+                        onUpdate={handleUpdateShot}
+                        onGenerate={handleGenerateLastFrame}
+                        generatingShotId={generatingShotId}
+                        onActionChange={onActionChange}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
