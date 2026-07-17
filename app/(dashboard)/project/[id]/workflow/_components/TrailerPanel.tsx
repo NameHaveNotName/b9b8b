@@ -47,6 +47,7 @@ function SegmentCard({
   isExecuting,
   aspectRatio,
 }: SegmentCardProps) {
+  const [expandedPrompt, setExpandedPrompt] = useState(false)
   const statusConfig: Record<string, { label: string; className: string }> = {
     completed: { label: '已完成', className: 'bg-emerald-50 text-emerald-700' },
     generating: { label: '生成中', className: 'bg-amber-50 text-amber-700' },
@@ -113,9 +114,22 @@ function SegmentCard({
         <p className="text-sm font-semibold text-stone-800 line-clamp-1">
           {segment.caption || '无描述'}
         </p>
-        <p className="mt-1 text-xs text-stone-500 line-clamp-2">
-          {segment.prompt?.slice(0, 120)}...
-        </p>
+        {segment.prompt && (
+          <div className="mt-1">
+            <button
+              onClick={() => setExpandedPrompt((v) => !v)}
+              className="w-full text-left"
+              title={expandedPrompt ? '收起英文提示词' : '展开英文提示词'}
+            >
+              <p className={`text-xs text-stone-500 ${expandedPrompt ? '' : 'line-clamp-2'}`}>
+                {segment.prompt}
+              </p>
+              <span className="mt-0.5 text-[10px] text-stone-300">
+                {expandedPrompt ? '收起' : '展开全文'}
+              </span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 右侧详情区 */}

@@ -329,6 +329,15 @@ export default function VideoDirectPanel({
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null)
   const [isComposing, setIsComposing] = useState(false)
   const [isGeneratingBgm, setIsGeneratingBgm] = useState(false)
+  const [expandedPromptIds, setExpandedPromptIds] = useState<Set<string>>(new Set())
+
+  function togglePromptExpand(id: string) {
+    setExpandedPromptIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
 
   // 配音相关状态
   const [voiceoverMode, setVoiceoverMode] = useState(false)
@@ -378,16 +387,24 @@ export default function VideoDirectPanel({
   const totalDuration = segments.reduce((sum: number, s: any) => sum + (s.duration || 5), 0)
 
   // 按幕分组片段（与分镜设计/生成尾帧一致的纵向卡片布局）
+  const findShotForSegment = useCallback((segment: any) => {
+    if (typeof segment?.sequence === 'number' && shots[segment.sequence]) {
+      return shots[segment.sequence]
+    }
+    return shots.find((s: any) => s.shotId === segment.shotId && s.actNumber === segment.actNumber)
+      || shots.find((s: any) => s.shotId === segment.shotId)
+  }, [shots])
+
   const segmentsByAct = useMemo(() => {
     const grouped = new Map<number, any[]>()
     for (const segment of segments) {
-      const shot = shots.find((s: any) => s.shotId === segment.shotId)
+      const shot = findShotForSegment(segment)
       const act = shot?.actNumber || 0
       if (!grouped.has(act)) grouped.set(act, [])
       grouped.get(act)!.push(segment)
     }
     return Array.from(grouped.entries()).sort((a, b) => a[0] - b[0])
-  }, [segments, shots])
+  }, [segments, shots, findShotForSegment])
 
   const handleGenerateBgm = useCallback(async () => {
     setIsGeneratingBgm(true)
@@ -608,7 +625,7 @@ export default function VideoDirectPanel({
                 </div>
                 <div className="divide-y divide-stone-100">
                   {actSegments.map((segment: any, index: number) => {
-                    const shot = shots.find((s: any) => s.shotId === segment.shotId)
+                    const shot = findShotForSegment(segment)
                     return (
                       <div
                         key={segment.id}
@@ -632,9 +649,22 @@ export default function VideoDirectPanel({
                           <p className="text-sm text-stone-600 leading-relaxed mb-2">
                             {segment.caption || shot?.description || '无描述'}
                           </p>
-                          <p className="text-[11px] text-stone-400 line-clamp-2 mb-2">
-                            {segment.prompt?.slice(0, 120)}...
-                          </p>
+                          {segment.prompt && (
+                            <div className="mb-2">
+                              <button
+                                onClick={() => togglePromptExpand(segment.id)}
+                                className="w-full text-left"
+                                title={expandedPromptIds.has(segment.id) ? '收起英文提示词' : '展开英文提示词'}
+                              >
+                                <p className={`text-[11px] text-stone-400 ${expandedPromptIds.has(segment.id) ? '' : 'line-clamp-2'}`}>
+                                  {segment.prompt}
+                                </p>
+                                <span className="mt-0.5 text-[10px] text-stone-300">
+                                  {expandedPromptIds.has(segment.id) ? '收起' : '展开全文'}
+                                </span>
+                              </button>
+                            </div>
+                          )}
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500">
                             <span>
                               <span className="text-stone-400">时长</span> {segment.duration || 5}s
@@ -843,7 +873,7 @@ export default function VideoDirectPanel({
                 {/* 片段纵向列表 */}
                 <div className="divide-y divide-stone-100">
                   {actSegments.map((segment: any) => {
-                    const shot = shots.find((s: any) => s.shotId === segment.shotId)
+                    const shot = findShotForSegment(segment)
                     return (
                       <div
                         key={segment.id}
@@ -878,9 +908,22 @@ export default function VideoDirectPanel({
                           <p className="text-sm text-stone-600 leading-relaxed mb-2">
                             {segment.caption || shot?.description || '无描述'}
                           </p>
-                          <p className="text-[11px] text-stone-400 line-clamp-2 mb-2">
-                            {segment.prompt?.slice(0, 120)}...
-                          </p>
+                          {segment.prompt && (
+                            <div className="mb-2">
+                              <button
+                                onClick={() => togglePromptExpand(segment.id)}
+                                className="w-full text-left"
+                                title={expandedPromptIds.has(segment.id) ? '收起英文提示词' : '展开英文提示词'}
+                              >
+                                <p className={`text-[11px] text-stone-400 ${expandedPromptIds.has(segment.id) ? '' : 'line-clamp-2'}`}>
+                                  {segment.prompt}
+                                </p>
+                                <span className="mt-0.5 text-[10px] text-stone-300">
+                                  {expandedPromptIds.has(segment.id) ? '收起' : '展开全文'}
+                                </span>
+                              </button>
+                            </div>
+                          )}
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500 mb-2">
                             <span>
                               <span className="text-stone-400">时长</span> {segment.duration || 5}s

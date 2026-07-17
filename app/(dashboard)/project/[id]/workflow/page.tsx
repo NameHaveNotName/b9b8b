@@ -702,6 +702,13 @@ function WorkflowInspectorDrawerWrapper({
     }
   }, [openInspector, buildConfirmFromCurrentStep, buildFeedbackFromStep])
 
+  useEffect(() => {
+    if (!currentStep) return
+    if (currentStep.status !== 'PROCESSING' && confirmData) {
+      setConfirmData(null)
+    }
+  }, [currentStep?.status])
+
   return (
     <>
       {/* 副工作台入口按钮 — 始终可见 */}
