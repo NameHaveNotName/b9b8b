@@ -6,6 +6,8 @@ import { getTextClient } from '@/lib/api-clients'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
 import fs from 'fs'
 import path from 'path'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const ALLOWED_TYPES = ['text/plain', 'text/markdown', 'application/octet-stream']
@@ -97,12 +99,17 @@ ${text.slice(0, 30000)}
 }
 
 export async function POST(req: Request) {
-  try {
-    const userId = await getCurrentUserId()
-    if (!userId) {
-      return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    }
+  const userId = await getCurrentUserId()
+  if (!userId) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
 
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
+  try {
     const formData = await req.formData()
     const file = formData.get('file') as File | null
 
@@ -177,6 +184,8 @@ export async function POST(req: Request) {
       }
     }
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { success: true })
+
     return NextResponse.json({
       success: true,
       fileName: file.name,
@@ -188,6 +197,7 @@ export async function POST(req: Request) {
     })
   } catch (e: any) {
     console.error('[FRAMEWORK-IMPORT] POST error:', e)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { success: false, errorMessage: e.message })
     return NextResponse.json(
       { error: 'SERVER_001', message: e.message || '导入失败' },
       { status: 500 }

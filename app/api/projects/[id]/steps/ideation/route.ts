@@ -8,7 +8,8 @@ import { getProjectReferences } from '@/lib/style-ref'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { createStep, startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -59,7 +60,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ success: true, data: step!.outputData, cached: true })
   }
 
-  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

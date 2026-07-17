@@ -8,7 +8,8 @@ import { getTextClient } from '@/lib/api-clients'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep } from '@/lib/workflow-executor'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 import { runDeepening } from '@/lib/framework-deepen'
 
 const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: string; shots: string; desc: string }> = {
@@ -144,7 +145,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].framework
     : ''
 
-  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK + GENERATION_COSTS.FRAMEWORK_DEEPEN_ALL)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

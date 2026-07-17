@@ -3,7 +3,7 @@ import useSWR from 'swr'
 import { LoaderCircle, Play, RefreshCw, Film, Music, Check, Mic, Volume2, Edit2, Save, X, Type, MonitorPlay } from 'lucide-react'
 import { MINIMAX_TTS_VOICES, MINIMAX_DEFAULT_VOICE_ID, findVoiceById } from '@/lib/voice-config'
 import CostBadge from '@/components/CostBadge'
-import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -111,18 +111,21 @@ function VoiceoverSplitView({
               </option>
             ))}
           </select>
-          <button
-            onClick={onGenerateAllAudio}
-            disabled={isGeneratingVoice || (summary?.pending || 0) === 0}
-            className="flex items-center gap-1 rounded-md bg-stone-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-700 disabled:opacity-50"
-          >
-            {isGeneratingVoice ? (
-              <LoaderCircle className="h-3 w-3 animate-spin" />
-            ) : (
-              <Volume2 className="h-3 w-3" />
-            )}
-            全部生成音频
-          </button>
+          <div className="relative inline-block">
+            <button
+              onClick={onGenerateAllAudio}
+              disabled={isGeneratingVoice || (summary?.pending || 0) === 0}
+              className="flex items-center gap-1 rounded-md bg-stone-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-700 disabled:opacity-50"
+            >
+              {isGeneratingVoice ? (
+                <LoaderCircle className="h-3 w-3 animate-spin" />
+              ) : (
+                <Volume2 className="h-3 w-3" />
+              )}
+              全部生成音频
+            </button>
+            <CostBadge cost={calculateBatchCost(GENERATION_COSTS.VOICEOVER_AUDIO_SEGMENT, summary?.pending || 0)} />
+          </div>
         </div>
       </div>
 
@@ -715,18 +718,21 @@ export default function VideoDirectPanel({
               </button>
             )}
             {summary?.pending > 0 && (
-              <button
-                onClick={handleGenerateAll}
-                disabled={isExecuting}
-                className="flex items-center gap-1 rounded-md bg-stone-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-              >
-                {isExecuting ? (
-                  <LoaderCircle className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Play className="h-3 w-3" />
-                )}
-                批量生成
-              </button>
+              <div className="relative inline-block">
+                <button
+                  onClick={handleGenerateAll}
+                  disabled={isExecuting}
+                  className="flex items-center gap-1 rounded-md bg-stone-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+                >
+                  {isExecuting ? (
+                    <LoaderCircle className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Play className="h-3 w-3" />
+                  )}
+                  批量生成
+                </button>
+                <CostBadge cost={calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, summary?.pending || 0)} />
+              </div>
             )}
             {/* 生成背景音乐 */}
             {musicUrl ? (
@@ -738,19 +744,22 @@ export default function VideoDirectPanel({
                 {musicIsMock ? '静音' : '已生成 BGM'}
               </button>
             ) : (
-              <button
-                onClick={handleGenerateBgm}
-                disabled={isExecuting || isGeneratingBgm || segments.length === 0}
-                className="flex items-center gap-1 rounded-md bg-stone-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-600 disabled:opacity-50"
-                title="先生成至少一个视频片段"
-              >
-                {isGeneratingBgm ? (
-                  <LoaderCircle className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Music className="h-3 w-3" />
-                )}
-                生成 BGM
-              </button>
+              <div className="relative inline-block">
+                <button
+                  onClick={handleGenerateBgm}
+                  disabled={isExecuting || isGeneratingBgm || segments.length === 0}
+                  className="flex items-center gap-1 rounded-md bg-stone-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-600 disabled:opacity-50"
+                  title="先生成至少一个视频片段"
+                >
+                  {isGeneratingBgm ? (
+                    <LoaderCircle className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Music className="h-3 w-3" />
+                  )}
+                  生成 BGM
+                </button>
+                <CostBadge cost={GENERATION_COSTS.BGM} />
+              </div>
             )}
             {allCompleted && (
               <button
@@ -1031,20 +1040,23 @@ export default function VideoDirectPanel({
                 </>
               )}
             </button>
-            <CostBadge cost={DEFAULT_GENERATE_COST} />
+            <CostBadge cost={GENERATION_COSTS.IDEA_DIFFUSION} />
           </div>
-          <button
-            onClick={handleGenerateVoiceoverScripts}
-            disabled={isGeneratingScripts || shots.length === 0}
-            className="flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-6 py-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
-          >
-            {isGeneratingScripts ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Type className="h-4 w-4" />
-            )}
-            生成配音文案
-          </button>
+          <div className="relative inline-block">
+            <button
+              onClick={handleGenerateVoiceoverScripts}
+              disabled={isGeneratingScripts || shots.length === 0}
+              className="flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-6 py-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
+            >
+              {isGeneratingScripts ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <Type className="h-4 w-4" />
+              )}
+              生成配音文案
+            </button>
+            <CostBadge cost={GENERATION_COSTS.VOICEOVER_SCRIPTS} />
+          </div>
         </div>
       </div>
     )

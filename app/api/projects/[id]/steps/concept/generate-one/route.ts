@@ -8,6 +8,8 @@ import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { markProjectStepDone } from '@/lib/workflow-executor'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 /**
  * 概念图分批生成：按 act 串行生成该幕的 1-2 张图片。
@@ -44,6 +46,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const prompts: any[] = outputData.prompts || []
   console.log('[CONCEPT-GEN] outputData prompts count:', prompts.length, 'actProgress:', JSON.stringify(outputData.actProgress))
 
+  const actPrompts = prompts.filter((p: any) => p.actNumber === actNumber)
+  const batchCost = calculateBatchCost(GENERATION_COSTS.CONCEPT_ART, actPrompts.length)
+  const pointsCheck = await checkPoints(batchCost)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   // 标记该 act 为 PROCESSING
   const actProgress: Record<string, string> = outputData.actProgress || {}
   actProgress[String(actNumber)] = 'PROCESSING'
@@ -64,6 +73,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   // 同步执行：串行生成该 act 的所有场景（每幕 1-2 张，CPU ~10-20s）
   try {
     await _generateAct(params.id, step.id, outputData, actNumber, aspectRatio, imageModel)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({ status: 'COMPLETED', actNumber })
   } catch (err: any) {
     console.error('[CONCEPT-GEN] act', actNumber, '生成异常:', err?.message)
@@ -74,6 +84,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         data: { outputData: { ...outputData, actProgress: failProgress } },
       })
       .catch(() => {})
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: err?.message })
     return NextResponse.json({ error: 'GEN_001', message: err?.message }, { status: 500 })
   }
 }

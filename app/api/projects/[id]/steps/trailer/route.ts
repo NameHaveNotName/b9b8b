@@ -8,7 +8,8 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { startStep, completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled } from '@/lib/workflow-executor'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 // ============================================================
 // 向后兼容：旧版一键生成宣传片
@@ -243,12 +244,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // -------------------- 新版：单段生成 --------------------
     if (action === 'generate-segment-video') {
-      return handleGenerateSegment(params.id, step.id, body)
+      return handleGenerateSegment(params.id, step.id, body, userId)
     }
 
     // -------------------- 新版：批量生成 --------------------
     if (action === 'generate-all-segments') {
-      return handleGenerateAllSegments(params.id, step.id, body)
+      return handleGenerateAllSegments(params.id, step.id, body, userId)
     }
 
     // -------------------- 新版：合成视频 --------------------
@@ -258,7 +259,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // -------------------- 新版：生成背景音乐 --------------------
     if (action === 'generate-bgm') {
-      return handleGenerateBgm(params.id, step.id)
+      return handleGenerateBgm(params.id, step.id, userId)
     }
 
     return NextResponse.json({ error: 'UNKNOWN_ACTION', message: `未知 action: ${action}` }, { status: 400 })
@@ -314,7 +315,7 @@ async function handleLegacyTrailer(
     return NextResponse.json({ success: true, message: '宣传片生成任务已在进行中', status: 'PROCESSING' })
   }
 
-  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.TRAILER)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -373,10 +374,17 @@ async function handleLegacyTrailer(
 async function handleGeneratePrompts(projectId: string, stepId: string, callerUserId: string) {
   // 防御性保存：避免某些 minifier/运行时对 catch 块中参数引用的异常行为
   const userId = callerUserId
+
+  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   try {
     const conceptImages = await getConceptImages(projectId)
     if (conceptImages.length === 0) {
       console.warn('[TRAILER-PROMPTS] 未找到概念图，降级走 legacy 路径')
+      // 降级路径由 legacy 自己扣点，这里不扣
       return handleLegacyTrailer(projectId, stepId, false, userId)
     }
 
@@ -396,6 +404,8 @@ async function handleGeneratePrompts(projectId: string, stepId: string, callerUs
       },
     })
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+
     return NextResponse.json({
       success: true,
       status: 'PROMPT_READY',
@@ -409,12 +419,13 @@ async function handleGeneratePrompts(projectId: string, stepId: string, callerUs
       return handleLegacyTrailer(projectId, stepId, false, userId)
     }
     console.error('[TRAILER-PROMPTS] 失败:', e)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }
 
 /** 单段生成 */
-async function handleGenerateSegment(projectId: string, stepId: string, body: any) {
+async function handleGenerateSegment(projectId: string, stepId: string, body: any, userId: string) {
   const segmentId = body?.segmentId
   if (!segmentId) {
     return NextResponse.json({ error: 'MISSING_SEGMENT_ID' }, { status: 400 })
@@ -433,6 +444,11 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
 
   if (segment.status === 'completed') {
     return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
+  }
+
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
   // 获取概念图 URL（shotId 复用为 concept asset id）
@@ -456,6 +472,9 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
     return NextResponse.json({ success: true, message: '该片段正在生成中或已完成', status: 'generating' })
   }
 
+  // 异步视频生成：先扣点，再启动后台任务
+  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, assetId: segmentId, success: true })
+
   // 后台生成
   waitUntil(backgroundGenerateSegment(
     segmentId,
@@ -477,7 +496,7 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
 }
 
 /** 批量生成 */
-async function handleGenerateAllSegments(projectId: string, stepId: string, body: any) {
+async function handleGenerateAllSegments(projectId: string, stepId: string, body: any, userId: string) {
   const pendingSegments = await prisma.videoSegment.findMany({
     where: { projectId, stepName: 'TRAILER', status: 'pending' },
     orderBy: { sequence: 'asc' },
@@ -486,6 +505,14 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
   if (pendingSegments.length === 0) {
     return NextResponse.json({ success: true, message: '没有待生成的片段', count: 0 })
   }
+
+  const batchCost = calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, pendingSegments.length)
+  const pointsCheck = await checkPoints(batchCost)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
+  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
 
   const conceptImages = await getConceptImages(projectId)
 
@@ -564,7 +591,12 @@ async function handleComposeVideo(projectId: string, stepId: string, body?: any)
 }
 
 /** 生成背景音乐 */
-async function handleGenerateBgm(projectId: string, stepId: string) {
+async function handleGenerateBgm(projectId: string, stepId: string, userId: string) {
+  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   // 计算总时长（所有已完成片段之和）
   const segments = await prisma.videoSegment.findMany({
     where: { projectId, stepName: 'TRAILER', status: 'completed' },
@@ -577,56 +609,64 @@ async function handleGenerateBgm(projectId: string, stepId: string) {
 
   const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
 
-  // 读取框架数据
-  const fwStep = await prisma.workflowStep.findUnique({
-    where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
-  })
-  const fw = (fwStep?.outputData as any) || {}
-  const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
-  const acts = Array.isArray(fw.acts) ? fw.acts : []
-
-  const { generateTrailerBgm } = await import('@/lib/bgm-generator')
-  const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
-    tempDir: '/tmp',
-    durationSec: totalDuration,
-    storyBrief,
-    acts,
-  })
-
-  // 上传 BGM 到 R2
-  const { uploadFile, getSignedFileUrl } = await import('@/lib/r2')
-  const fsPromises = await import('fs').then(m => m.promises)
-  const bgmBuf = await fsPromises.readFile(bgmPath)
-  const bgmKey = `projects/${projectId}/bgm_${Date.now()}.${bgmExt}`
-  let musicUrl: string | null = null
   try {
-    await uploadFile(bgmKey, bgmBuf, bgmMime)
-    musicUrl = await getSignedFileUrl(bgmKey, 3600 * 24 * 7)
-    console.log(`[BGM] 上传完成 key=${bgmKey}`)
-  } catch (err: any) {
-    console.warn(`[BGM] 上传失败: ${err?.message}`)
-  }
+    // 读取框架数据
+    const fwStep = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
+    })
+    const fw = (fwStep?.outputData as any) || {}
+    const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
+    const acts = Array.isArray(fw.acts) ? fw.acts : []
 
-  // 保存到 step outputData
-  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
-  const existingOutput = (step?.outputData as any) || {}
-  const updatedOutput = {
-    ...existingOutput,
-    musicUrl,
-    musicIsMock: bgmIsMock,
-    bgmGeneratedAt: new Date().toISOString(),
-  }
-  await prisma.workflowStep.update({
-    where: { id: stepId },
-    data: { outputData: updatedOutput },
-  })
+    const { generateTrailerBgm } = await import('@/lib/bgm-generator')
+    const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
+      tempDir: '/tmp',
+      durationSec: totalDuration,
+      storyBrief,
+      acts,
+    })
 
-  return NextResponse.json({
-    success: true,
-    musicUrl,
-    musicIsMock: bgmIsMock,
-    message: bgmIsMock ? '生成了静音（API 密钥未配置或服务不可用）' : '背景音乐生成成功',
-  })
+    // 上传 BGM 到 R2
+    const { uploadFile, getSignedFileUrl } = await import('@/lib/r2')
+    const fsPromises = await import('fs').then(m => m.promises)
+    const bgmBuf = await fsPromises.readFile(bgmPath)
+    const bgmKey = `projects/${projectId}/bgm_${Date.now()}.${bgmExt}`
+    let musicUrl: string | null = null
+    try {
+      await uploadFile(bgmKey, bgmBuf, bgmMime)
+      musicUrl = await getSignedFileUrl(bgmKey, 3600 * 24 * 7)
+      console.log(`[BGM] 上传完成 key=${bgmKey}`)
+    } catch (err: any) {
+      console.warn(`[BGM] 上传失败: ${err?.message}`)
+    }
+
+    // 保存到 step outputData
+    const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+    const existingOutput = (step?.outputData as any) || {}
+    const updatedOutput = {
+      ...existingOutput,
+      musicUrl,
+      musicIsMock: bgmIsMock,
+      bgmGeneratedAt: new Date().toISOString(),
+    }
+    await prisma.workflowStep.update({
+      where: { id: stepId },
+      data: { outputData: updatedOutput },
+    })
+
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+
+    return NextResponse.json({
+      success: true,
+      musicUrl,
+      musicIsMock: bgmIsMock,
+      message: bgmIsMock ? '生成了静音（API 密钥未配置或服务不可用）' : '背景音乐生成成功',
+    })
+  } catch (e: any) {
+    console.error('[TRAILER-BGM] 失败:', e)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: e.message })
+    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+  }
 }
 
 // ============================================================

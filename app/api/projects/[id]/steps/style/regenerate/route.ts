@@ -5,7 +5,8 @@ import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from '@/lib/models-config'
-import { checkPoints, deductPointsAndLog, DEFAULT_REGENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -48,7 +49,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const targetStyle = styleOptions[targetIndex]
   console.log(`[STYLE-REGENERATE] 重新生成风格: styleId=${styleId}, name=${targetStyle.styleName}`)
 
-  const pointsCheck = await checkPoints(DEFAULT_REGENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.STYLE_UNIFY)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

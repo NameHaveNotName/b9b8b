@@ -4,7 +4,7 @@ import { LoaderCircle, Play, RefreshCw, Film, Music } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ASPECT_RATIO_OPTIONS } from '@/lib/models-config'
 import CostBadge from '@/components/CostBadge'
-import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -366,19 +366,22 @@ export default function TrailerPanel({
                 {musicIsMock ? '静音' : '已生成 BGM'}
               </button>
             ) : (
-              <button
-                onClick={handleGenerateBgm}
-                disabled={isExecuting || isGeneratingBgm || segments.length === 0}
-                className="flex items-center gap-1 rounded-md bg-stone-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-600 disabled:opacity-50"
-                title="先生成至少一个视频片段"
-              >
-                {isGeneratingBgm ? (
-                  <LoaderCircle className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Music className="h-3 w-3" />
-                )}
-                生成 BGM
-              </button>
+              <div className="relative inline-block">
+                <button
+                  onClick={handleGenerateBgm}
+                  disabled={isExecuting || isGeneratingBgm || segments.length === 0}
+                  className="flex items-center gap-1 rounded-md bg-stone-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-600 disabled:opacity-50"
+                  title="先生成至少一个视频片段"
+                >
+                  {isGeneratingBgm ? (
+                    <LoaderCircle className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Music className="h-3 w-3" />
+                  )}
+                  生成 BGM
+                </button>
+                <CostBadge cost={GENERATION_COSTS.BGM} />
+              </div>
             )}
             {allCompleted && (
               <button
@@ -475,7 +478,7 @@ export default function TrailerPanel({
               </>
             )}
           </button>
-          <CostBadge cost={DEFAULT_GENERATE_COST} />
+            <CostBadge cost={GENERATION_COSTS.TRAILER} />
         </div>
       </div>
     )

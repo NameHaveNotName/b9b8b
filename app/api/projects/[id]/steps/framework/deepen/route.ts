@@ -4,7 +4,8 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 import {
   deepenCharacters,
   deepenSynopsis,
@@ -50,7 +51,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const ideationOutput = (ideationStep?.outputData as any) || {}
   const projectTag = ideationOutput?.projectTag || ''
 
-  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足' }, { status: 403 })
   }

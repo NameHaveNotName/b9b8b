@@ -5,6 +5,8 @@ import { checkProjectAccess, getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 interface EvaluationResult {
   retentionScore: number
@@ -103,12 +105,17 @@ ${currentCreative}${prevContext}
 }
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  try {
-    const userId = await getCurrentUserId()
-    if (!userId) {
-      return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    }
+  const userId = await getCurrentUserId()
+  if (!userId) {
+    return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
+  }
 
+  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
+  try {
     const project = await prisma.project.findUnique({ where: { id: params.id } })
     if (!project) {
       return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
@@ -149,12 +156,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       })
     }
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, success: true })
+
     return NextResponse.json({
       success: true,
       evaluation,
     })
   } catch (e: any) {
     console.error('[IDEATION-EVALUATE] Error:', e.message)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, success: false, errorMessage: e.message })
     return NextResponse.json(
       { error: 'SERVER_001', message: e.message || '评估失败' },
       { status: 500 }

@@ -8,7 +8,8 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -64,6 +65,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   // === generate-prompts: 只生成尾帧提示词，不生图 ===
   if (action === 'generate-prompts') {
+    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT)
+    if (!promptPointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+    }
+
     try {
       console.log('[KEYFRAMES-PROMPT] 收到 generate-prompts 请求')
 
@@ -127,6 +133,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         },
       })
 
+      await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[KEYFRAMES-PROMPT] 生成 ${prompts.length} 条提示词，等待用户确认`)
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
@@ -136,13 +143,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         : e.message
       console.error(`[KEYFRAMES-PROMPT] 失败: ${errorMessage}`, e?.stack?.slice(0, 300))
       await failStep(step.id, errorMessage)
+      await deductPointsAndLog(userId, promptPointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage })
       return NextResponse.json({ error: 'API_001', message: errorMessage }, { status: 500 })
     }
   }
 
   // === generate-images: 读取已保存提示词，执行生图 ===
   if (action === 'generate-images') {
-    const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.KEYFRAME)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -253,6 +261,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   }
 
   // === 默认兼容：无 action 时走原有完整流程 ===
+  const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.KEYFRAME
+  const pointsCheck = await checkPoints(totalCost)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
 
   try {
     const imageClient = await getImageClient()
@@ -334,9 +347,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     console.log(`[KEYFRAMES-xxx] 尾帧生成完成, 数量: ${results.length}`)
     await completeStep(step.id, { results, keyframes: results, count: results.length })
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({ success: true, data: { results, count: results.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

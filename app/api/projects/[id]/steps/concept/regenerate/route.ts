@@ -7,7 +7,8 @@ import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
-import { checkPoints, deductPointsAndLog, DEFAULT_REGENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -55,7 +56,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   console.log(`[CONCEPT-REGENERATE] 重新生成概念图: assetId=${assetId}, act=${actNumber}, scene=${sceneIndex}`)
 
-  const pointsCheck = await checkPoints(DEFAULT_REGENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.CONCEPT_ART)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

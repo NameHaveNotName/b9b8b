@@ -10,7 +10,8 @@ import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { runDeepening } from '@/lib/framework-deepen'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: string; shots: string; desc: string }> = {
   sketch: { label: '速写', range: '1-3分钟', acts: '1-2幕', shots: '10-20镜', desc: '极快节奏，单一场景/单一冲突' },
@@ -149,7 +150,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ success: true, data: step.outputData, cached: true })
   }
 
-  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK + GENERATION_COSTS.FRAMEWORK_DEEPEN_ALL)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

@@ -8,9 +8,8 @@ import { IMAGE_MODELS } from '@/lib/models-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
-import { logOperation } from '@/lib/operations'
-import { STEP_COSTS } from '@/lib/points-config'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 /**
  * 生成角色提示词（供 generate-prompts 和 generate-images 共用）
@@ -123,9 +122,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   // === generate-prompts: 只生成提示词，不生图 ===
   if (action === 'generate-prompts') {
+    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT)
+    if (!promptPointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+    }
+
     try {
       console.log('[CHARACTER-PROMPT] 收到 generate-prompts 请求')
       const { prompts } = await generateCharacterPrompts(project, frameworkStep, step.id)
+      await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
       const isAbort = e?.name === 'AbortError' || /aborted|timeout|timed out/i.test(e?.message || '')
@@ -134,17 +139,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         : e.message
       console.error(`[CHARACTER-PROMPT] 失败: ${errorMessage}`, e?.stack?.slice(0, 300))
       await failStep(step.id, errorMessage)
+      await deductPointsAndLog(userId, promptPointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage })
       return NextResponse.json({ error: 'API_001', message: errorMessage }, { status: 500 })
     }
   }
 
   // === generate-images: 读取已保存提示词，执行生图 ===
   if (action === 'generate-images') {
-    const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
-    if (!pointsCheck.ok) {
-      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
-    }
-
     const aspectRatio = body?.aspectRatio || '16:9'
     const imageModel = body?.imageModel
     console.log(`[ASPECT-RATIO] [CHARACTER-IMAGE] 用户选择比例: ${aspectRatio}`)
@@ -159,10 +160,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     let resolvedPrompts = prompts
     if (resolvedPrompts.length === 0) {
       console.warn('[CHARACTER-IMAGE] No prompts found, auto-triggering prompt generation')
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT)
+      if (!promptPointsCheck.ok) {
+        return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+      }
       try {
         const generated = await generateCharacterPrompts(project, frameworkStep, step.id)
         resolvedPrompts = generated.prompts
         console.log(`[CHARACTER-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
+        await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       } catch (promptErr: any) {
         const isAbort = promptErr?.name === 'AbortError' || /aborted|timeout|timed out/i.test(promptErr?.message || '')
         const errorMessage = isAbort
@@ -170,8 +176,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           : promptErr.message
         console.error(`[CHARACTER-IMAGE] Auto-prompt generation failed: ${errorMessage}`, promptErr?.stack?.slice(0, 300))
         await failStep(step.id, errorMessage)
+        await deductPointsAndLog(userId, promptPointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage })
         return NextResponse.json({ error: 'API_001', message: errorMessage }, { status: 500 })
       }
+    }
+
+    const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN)
+    if (!pointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
 
     // force=true 时清空旧资产（必须重新读取最新 outputData，避免覆盖自动生成的 prompts）
@@ -313,6 +325,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     })
   }
 
+  const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.CHARACTER_DESIGN
+  const pointsCheck = await checkPoints(totalCost)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   await startStep(step.id)
 
   try {
@@ -424,39 +442,16 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     if (portraits.length === 0) {
       const errMsg = `所有角色生图均失败${failedCharacters.length > 0 ? '（' + failedCharacters.join(', ') + '）' : ''}`
       await failStep(step.id, errMsg)
-      await logOperation({
-        userId,
-        projectId: params.id,
-        workflowStepId: step.id,
-        actionType: 'generate',
-        cost: 0,
-        status: 'failed',
-        metadata: { error: errMsg },
-      })
+      await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: errMsg })
       return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
     }
 
     await completeStep(step.id, { portraits, characterCount: portraits.length })
-    await logOperation({
-      userId,
-      projectId: params.id,
-      workflowStepId: step.id,
-      actionType: 'generate',
-      cost: STEP_COSTS.character,
-      status: 'success',
-    })
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({ success: true, data: { portraits, characterCount: portraits.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)
-    await logOperation({
-      userId,
-      projectId: params.id,
-      workflowStepId: step.id,
-      actionType: 'generate',
-      cost: 0,
-      status: 'failed',
-      metadata: { error: e.message },
-    })
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

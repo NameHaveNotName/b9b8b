@@ -7,7 +7,8 @@ import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
-import { checkPoints, deductPointsAndLog, DEFAULT_REGENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -60,7 +61,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   console.log(`[CHARACTER-REGENERATE] 重新生成角色: assetId=${assetId}, char=${character?.name}, 使用提示词来源=${latestPrompt ? 'prompts.englishPrompt' : 'character.description'}`)
 
-  const pointsCheck = await checkPoints(DEFAULT_REGENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

@@ -6,7 +6,8 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 /**
  * 单条尾帧生成 API
@@ -69,7 +70,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   console.log('[KEYFRAMES-GENERATE-LAST] shotId:', shot.shotId, 'description:', shot.description?.slice(0, 60))
 
-  const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.KEYFRAME)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

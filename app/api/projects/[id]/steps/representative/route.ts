@@ -7,8 +7,8 @@ import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getStyleRefUrl } from '@/lib/style-ref'
-import { logOperation } from '@/lib/operations'
-import { STEP_COSTS } from '@/lib/points-config'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
@@ -43,10 +43,16 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: 'WORKFLOW_004' }, { status: 400 })
   }
 
+  const shots = (storyboardStep.outputData as any)?.shots || []
+  const batchCost = calculateBatchCost(GENERATION_COSTS.KEYFRAME, shots.length)
+  const pointsCheck = await checkPoints(batchCost)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   await startStep(step.id)
 
   try {
-    const shots = (storyboardStep.outputData as any)?.shots || []
     const framework = project.framework as any
     const characters = framework?.characters || []
     const imageClient = await getImageClient()
@@ -129,26 +135,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
 
     await completeStep(step.id, { results, count: results.length })
-    await logOperation({
-      userId,
-      projectId: params.id,
-      workflowStepId: step.id,
-      actionType: 'generate',
-      cost: STEP_COSTS.trailer,
-      status: 'success',
-    })
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({ success: true, data: { results, count: results.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)
-    await logOperation({
-      userId,
-      projectId: params.id,
-      workflowStepId: step.id,
-      actionType: 'generate',
-      cost: 0,
-      status: 'failed',
-      metadata: { error: e.message },
-    })
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

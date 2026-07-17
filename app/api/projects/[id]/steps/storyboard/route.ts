@@ -11,9 +11,8 @@ import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import sharp from 'sharp'
 import { IMAGE_MODELS } from '@/lib/models-config'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
-import { logOperation } from '@/lib/operations'
-import { STEP_COSTS } from '@/lib/points-config'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 
 async function generateStoryboardByAct(textClient: any, framework: any, act: any, tagInstructions?: string) {
@@ -63,6 +62,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   // === generate-prompts: 只生成分镜提示词，不生成草图 ===
   if (action === 'generate-prompts') {
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS)
+    if (!pointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+    }
+
     try {
       console.log('[STORYBOARD-PROMPT] 收到 generate-prompts 请求')
 
@@ -120,6 +124,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         },
       })
 
+      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[STORYBOARD-PROMPT] 生成 ${prompts.length} 条提示词，等待用户确认`)
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts, shots: allShots })
     } catch (e: any) {
@@ -129,17 +134,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         : e.message
       console.error(`[STORYBOARD-PROMPT] 失败: ${errorMessage}`, e?.stack?.slice(0, 300))
       await failStep(step.id, errorMessage)
+      await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage })
       return NextResponse.json({ error: 'API_001', message: errorMessage }, { status: 500 })
     }
   }
 
   // === generate-images: 读取已保存提示词，生成草图 ===
   if (action === 'generate-images') {
-    const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
-    if (!pointsCheck.ok) {
-      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
-    }
-
     const aspectRatio = body?.aspectRatio || '16:9'
     const imageModel = body?.imageModel
     console.log(`[ASPECT-RATIO] [STORYBOARD-IMAGE] 用户选择比例: ${aspectRatio}`)
@@ -155,6 +156,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     let currentPrompts = prompts
     if (prompts.length === 0) {
       console.log('[STORYBOARD-IMAGE] No prompts found, auto-generating prompts first...')
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS)
+      if (!promptPointsCheck.ok) {
+        return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+      }
       const framework = project.framework as any
       const acts = Array.isArray(framework?.acts) ? framework.acts : []
       const textClient = await getTextClient()
@@ -199,7 +204,13 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           },
         },
       })
+      await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[STORYBOARD-IMAGE] Auto-generated ${currentPrompts.length} prompts, proceeding to generate images...`)
+    }
+
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_IMAGES)
+    if (!pointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
 
     if (force) {
@@ -338,7 +349,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const imageModel = body?.imageModel
     console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，shotId: ${shotId || 'auto'}，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
 
-    const pointsCheck = await checkPoints(DEFAULT_GENERATE_COST)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_ACT_IMAGE)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -708,6 +719,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     })
   }
 
+  const totalCost = GENERATION_COSTS.STORYBOARD_PROMPTS + GENERATION_COSTS.STORYBOARD_IMAGES
+  const pointsCheck = await checkPoints(totalCost)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   await startStep(step.id)
 
   try {
@@ -812,26 +829,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       where: { id: params.id },
       data: { stepStoryboardFirstframeDone: true },
     })
-    await logOperation({
-      userId,
-      projectId: params.id,
-      workflowStepId: step.id,
-      actionType: 'generate',
-      cost: STEP_COSTS.storyboard,
-      status: 'success',
-    })
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({ success: true, data: { shots: shotsWithFirstFrame, count: shotsWithFirstFrame.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)
-    await logOperation({
-      userId,
-      projectId: params.id,
-      workflowStepId: step.id,
-      actionType: 'generate',
-      cost: 0,
-      status: 'failed',
-      metadata: { error: e.message },
-    })
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

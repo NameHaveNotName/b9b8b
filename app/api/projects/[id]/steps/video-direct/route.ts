@@ -8,7 +8,8 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { startStep, canExecuteStep } from '@/lib/workflow-executor'
-import { checkPoints, deductPointsAndLog, DEFAULT_GENERATE_COST } from '@/lib/points'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 /** 获取 storyboard shots 和 keyframes */
 async function getStoryboardAndKeyframes(projectId: string) {
@@ -175,17 +176,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   // -------------------- 新版：生成 Segment Prompts --------------------
   if (action === 'generate-segment-prompts') {
-    return handleGenerateDirectPrompts(params.id, step.id)
+    return handleGenerateDirectPrompts(params.id, step.id, userId)
   }
 
   // -------------------- 新版：单段生成 --------------------
   if (action === 'generate-segment-video') {
-    return handleGenerateDirectSegment(params.id, step.id, body)
+    return handleGenerateDirectSegment(params.id, step.id, body, userId)
   }
 
   // -------------------- 新版：批量生成 --------------------
   if (action === 'generate-all-segments') {
-    return handleGenerateAllDirectSegments(params.id, step.id, body)
+    return handleGenerateAllDirectSegments(params.id, step.id, body, userId)
   }
 
   // -------------------- 新版：合成视频 --------------------
@@ -195,7 +196,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   // -------------------- 新版：生成背景音乐 --------------------
   if (action === 'generate-bgm') {
-    return handleGenerateDirectBgm(params.id, step.id)
+    return handleGenerateDirectBgm(params.id, step.id, userId)
   }
 
   return NextResponse.json({ error: 'UNKNOWN_ACTION', message: `未知 action: ${action}` }, { status: 400 })
@@ -206,7 +207,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 // ============================================================
 
 /** 生成 Segment Prompts */
-async function handleGenerateDirectPrompts(projectId: string, stepId: string) {
+async function handleGenerateDirectPrompts(projectId: string, stepId: string, userId: string) {
+  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   try {
     const { shots } = await getStoryboardAndKeyframes(projectId)
     if (shots.length === 0) {
@@ -228,6 +234,8 @@ async function handleGenerateDirectPrompts(projectId: string, stepId: string) {
       },
     })
 
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+
     return NextResponse.json({
       success: true,
       status: 'PROMPT_READY',
@@ -236,12 +244,13 @@ async function handleGenerateDirectPrompts(projectId: string, stepId: string) {
     })
   } catch (e: any) {
     console.error('[VIDEO-DIRECT-PROMPTS] 失败:', e)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }
 
 /** 单段生成 */
-async function handleGenerateDirectSegment(projectId: string, stepId: string, body: any) {
+async function handleGenerateDirectSegment(projectId: string, stepId: string, body: any, userId: string) {
   // 先清理上次超时卡住的片段（包括当前段）
   await resetStaleGeneratingSegments(projectId)
 
@@ -264,6 +273,11 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
     return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
   }
 
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
   const shot = shots.find((s: any) => s.shotId === segment.shotId)
   const firstFrameUrl = shot?.firstFrameUrl || ''
@@ -277,6 +291,9 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
     where: { id: segmentId },
     data: { status: 'generating', errorMessage: null },
   })
+
+  // 异步视频生成：先扣点，再启动后台任务
+  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, assetId: segmentId, success: true })
 
   waitUntil(backgroundGenerateDirectSegment(
     segmentId,
@@ -297,7 +314,7 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
 }
 
 /** 批量生成 */
-async function handleGenerateAllDirectSegments(projectId: string, stepId: string, body: any) {
+async function handleGenerateAllDirectSegments(projectId: string, stepId: string, body: any, userId: string) {
   // 先清理上次超时卡住的片段
   const resetCount = await resetStaleGeneratingSegments(projectId)
 
@@ -314,6 +331,14 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
       resetCount,
     })
   }
+
+  const batchCost = calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, pendingSegments.length)
+  const pointsCheck = await checkPoints(batchCost)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
+  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
 
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
 
@@ -389,7 +414,12 @@ async function handleComposeDirectVideo(projectId: string, stepId: string) {
 }
 
 /** 生成直生视频背景音乐（复用 bgm-generator） */
-async function handleGenerateDirectBgm(projectId: string, stepId: string) {
+async function handleGenerateDirectBgm(projectId: string, stepId: string, userId: string) {
+  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   const segments = await prisma.videoSegment.findMany({
     where: { projectId, stepName: 'VIDEO_DIRECT', status: 'completed' },
     orderBy: { sequence: 'asc' },
@@ -401,52 +431,60 @@ async function handleGenerateDirectBgm(projectId: string, stepId: string) {
 
   const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
 
-  const fwStep = await prisma.workflowStep.findUnique({
-    where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
-  })
-  const fw = (fwStep?.outputData as any) || {}
-  const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
-  const acts = Array.isArray(fw.acts) ? fw.acts : []
-
-  const { generateTrailerBgm } = await import('@/lib/bgm-generator')
-  const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
-    tempDir: '/tmp',
-    durationSec: totalDuration,
-    storyBrief,
-    acts,
-  })
-
-  const { uploadFile, getSignedFileUrl } = await import('@/lib/r2')
-  const fsPromises = await import('fs').then(m => m.promises)
-  const bgmBuf = await fsPromises.readFile(bgmPath)
-  const bgmKey = `projects/${projectId}/bgm_${Date.now()}.${bgmExt}`
-  let musicUrl: string | null = null
   try {
-    await uploadFile(bgmKey, bgmBuf, bgmMime)
-    musicUrl = await getSignedFileUrl(bgmKey, 3600 * 24 * 7)
-  } catch (err: any) {
-    console.warn(`[BGM] 上传失败: ${err?.message}`)
-  }
+    const fwStep = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
+    })
+    const fw = (fwStep?.outputData as any) || {}
+    const storyBrief = fw.synopsis || fw.storyBrief || fw.summary || ''
+    const acts = Array.isArray(fw.acts) ? fw.acts : []
 
-  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
-  const existingOutput = (step?.outputData as any) || {}
-  const updatedOutput = {
-    ...existingOutput,
-    musicUrl,
-    musicIsMock: bgmIsMock,
-    bgmGeneratedAt: new Date().toISOString(),
-  }
-  await prisma.workflowStep.update({
-    where: { id: stepId },
-    data: { outputData: updatedOutput },
-  })
+    const { generateTrailerBgm } = await import('@/lib/bgm-generator')
+    const { bgmPath, bgmExt, bgmMime, bgmIsMock } = await generateTrailerBgm({
+      tempDir: '/tmp',
+      durationSec: totalDuration,
+      storyBrief,
+      acts,
+    })
 
-  return NextResponse.json({
-    success: true,
-    musicUrl,
-    musicIsMock: bgmIsMock,
-    message: bgmIsMock ? '生成了静音（API 密钥未配置）' : '背景音乐生成成功',
-  })
+    const { uploadFile, getSignedFileUrl } = await import('@/lib/r2')
+    const fsPromises = await import('fs').then(m => m.promises)
+    const bgmBuf = await fsPromises.readFile(bgmPath)
+    const bgmKey = `projects/${projectId}/bgm_${Date.now()}.${bgmExt}`
+    let musicUrl: string | null = null
+    try {
+      await uploadFile(bgmKey, bgmBuf, bgmMime)
+      musicUrl = await getSignedFileUrl(bgmKey, 3600 * 24 * 7)
+    } catch (err: any) {
+      console.warn(`[BGM] 上传失败: ${err?.message}`)
+    }
+
+    const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+    const existingOutput = (step?.outputData as any) || {}
+    const updatedOutput = {
+      ...existingOutput,
+      musicUrl,
+      musicIsMock: bgmIsMock,
+      bgmGeneratedAt: new Date().toISOString(),
+    }
+    await prisma.workflowStep.update({
+      where: { id: stepId },
+      data: { outputData: updatedOutput },
+    })
+
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+
+    return NextResponse.json({
+      success: true,
+      musicUrl,
+      musicIsMock: bgmIsMock,
+      message: bgmIsMock ? '生成了静音（API 密钥未配置）' : '背景音乐生成成功',
+    })
+  } catch (e: any) {
+    console.error('[VIDEO-DIRECT-BGM] 失败:', e)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: e.message })
+    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+  }
 }
 
 // ============================================================

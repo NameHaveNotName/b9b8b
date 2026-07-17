@@ -66,7 +66,8 @@ export async function deductPointsAndLog(
     metadata: meta.errorMessage ? { error: meta.errorMessage } : undefined,
   })
 
-  if (cost <= 0) {
+  // 只有操作成功时才扣点；失败时只记录日志，不扣点
+  if (cost <= 0 || meta.success === false) {
     return
   }
 

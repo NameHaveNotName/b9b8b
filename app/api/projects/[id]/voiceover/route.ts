@@ -12,6 +12,8 @@ import {
   getFramework,
   resetStaleGeneratingVoiceovers,
 } from '@/lib/voiceover-utils'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 /**
  * GET /api/projects/:id/voiceover?stepName=VIDEO_DIRECT
@@ -110,15 +112,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   console.log(`[VOICEOVER-POST] action=${action} projectId=${params.id} stepName=${stepName}`)
 
   if (action === 'generate-scripts') {
-    return handleGenerateScripts(params.id, stepName)
+    return handleGenerateScripts(params.id, stepName, userId)
   }
 
   if (action === 'generate-audio') {
-    return handleGenerateAudio(body)
+    return handleGenerateAudio(body, userId)
   }
 
   if (action === 'generate-all-audio') {
-    return handleGenerateAllAudio(params.id, stepName, body)
+    return handleGenerateAllAudio(params.id, stepName, body, userId)
   }
 
   if (action === 'update-text') {
@@ -132,7 +134,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   return NextResponse.json({ error: 'UNKNOWN_ACTION', message: `未知 action: ${action}` }, { status: 400 })
 }
 
-async function handleGenerateScripts(projectId: string, stepName: string) {
+async function handleGenerateScripts(projectId: string, stepName: string, userId: string) {
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VOICEOVER_SCRIPTS)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   try {
     const framework = await getFramework(projectId)
     const shots = await getStoryboardShots(projectId)
@@ -142,6 +149,7 @@ async function handleGenerateScripts(projectId: string, stepName: string) {
     }
 
     const segments = await generateVoiceoverScripts(projectId, stepName, framework, shots)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, success: true })
 
     return NextResponse.json({
       success: true,
@@ -151,37 +159,64 @@ async function handleGenerateScripts(projectId: string, stepName: string) {
     })
   } catch (e: any) {
     console.error('[VOICEOVER-SCRIPTS] 失败:', e)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }
 
-async function handleGenerateAudio(body: any) {
+async function handleGenerateAudio(body: any, userId: string) {
   const segmentId = body?.segmentId
   if (!segmentId) {
     return NextResponse.json({ error: 'MISSING_SEGMENT_ID' }, { status: 400 })
   }
 
+  const segment = await prisma.voiceoverSegment.findUnique({
+    where: { id: segmentId },
+  })
+  if (!segment) {
+    return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
+  }
+
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VOICEOVER_AUDIO_SEGMENT)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   try {
-    const segment = await prisma.voiceoverSegment.findUnique({
-      where: { id: segmentId },
-    })
-    if (!segment) {
-      return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
-    }
     await resetStaleGeneratingVoiceovers(segment.projectId)
     const updated = await generateVoiceoverAudio(segmentId, body?.voiceId)
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: segment.projectId, assetId: segmentId, success: true })
     return NextResponse.json({
       success: true,
       segment: updated,
       message: '配音生成成功',
     })
   } catch (e: any) {
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: segment.projectId, assetId: segmentId, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'AUDIO_001', message: e.message }, { status: 500 })
   }
 }
 
-async function handleGenerateAllAudio(projectId: string, stepName: string, body: any) {
+async function handleGenerateAllAudio(projectId: string, stepName: string, body: any, userId: string) {
+  await resetStaleGeneratingVoiceovers(projectId)
+
+  const pendingSegments = await prisma.voiceoverSegment.findMany({
+    where: { projectId, stepName, status: 'pending' },
+    orderBy: { sequence: 'asc' },
+  })
+
+  if (pendingSegments.length === 0) {
+    return NextResponse.json({ success: true, segmentIds: [], count: 0, message: '没有待生成的配音音频' })
+  }
+
+  const batchCost = calculateBatchCost(GENERATION_COSTS.VOICEOVER_AUDIO_SEGMENT, pendingSegments.length)
+  const pointsCheck = await checkPoints(batchCost)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   try {
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, success: true })
     const segmentIds = await generateAllVoiceoverAudio(projectId, stepName, body?.voiceId)
     return NextResponse.json({
       success: true,
@@ -190,6 +225,7 @@ async function handleGenerateAllAudio(projectId: string, stepName: string, body:
       message: `已生成 ${segmentIds.length} 条配音音频`,
     })
   } catch (e: any) {
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'AUDIO_002', message: e.message }, { status: 500 })
   }
 }
