@@ -1,7 +1,13 @@
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
-import { generateSpeechMinimax, MinimaxTtsError } from '@/lib/api-clients/minimax-tts'
+import {
+  generateSpeechMinimax,
+  MinimaxTtsError,
+  MINIMAX_DEFAULT_VOICE_ID,
+  MINIMAX_TTS_VOICES,
+  getMinimaxVoiceCatalogPrompt,
+} from '@/lib/api-clients/minimax-tts'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 
 /** 从 storyboard Step 读取 shots */
@@ -66,6 +72,7 @@ interface VoiceoverScriptItem {
   shotId: string
   text: string
   speaker?: string
+  voiceId?: string
   sequence?: number
   notes?: string
 }
@@ -110,6 +117,7 @@ export async function generateVoiceoverScripts(
   const prompt = loadPromptTemplate('voiceover-narration', {
     STORY_BRIEF: storyBrief,
     SHOTS_JSON: shotsJson,
+    VOICE_CATALOG: getMinimaxVoiceCatalogPrompt(),
     DURATION: '5',
     WORD_COUNT: '25',
   })
@@ -151,6 +159,14 @@ export async function generateVoiceoverScripts(
     if (typeof s.sequence !== 'number') s.sequence = idx + 1
   })
 
+  // 校验 voiceId：如果 LLM 返回了不在列表中的 ID，则使用默认旁白音色
+  const validVoiceIds = new Set(MINIMAX_TTS_VOICES.map((v) => v.id))
+  const resolveVoiceId = (voiceId?: string, speaker?: string): string => {
+    if (voiceId && validVoiceIds.has(voiceId)) return voiceId
+    if (speaker === '旁白' || !speaker) return MINIMAX_DEFAULT_VOICE_ID
+    return MINIMAX_DEFAULT_VOICE_ID
+  }
+
   // 创建数据库记录
   const created = await prisma.voiceoverSegment.createMany({
     data: validSegments.map((s) => ({
@@ -159,6 +175,7 @@ export async function generateVoiceoverScripts(
       stepName,
       text: s.text,
       speaker: s.speaker || '旁白',
+      voiceId: resolveVoiceId(s.voiceId, s.speaker),
       sequence: s.sequence || 0,
       status: 'pending',
     })),
@@ -212,8 +229,9 @@ export async function generateVoiceoverAudio(segmentId: string, voiceId?: string
   })
 
   try {
+    const effectiveVoiceId = voiceId || segment.voiceId || MINIMAX_DEFAULT_VOICE_ID
     const result = await generateSpeechMinimax(segment.text, {
-      voiceId: voiceId || 'Chinese (Mandarin)_Lyrical_Voice',
+      voiceId: effectiveVoiceId,
       outputFormat: 'url',
     })
 
@@ -228,6 +246,7 @@ export async function generateVoiceoverAudio(segmentId: string, voiceId?: string
       data: {
         audioUrl: url,
         storageKey,
+        voiceId: effectiveVoiceId,
         status: 'completed',
         duration: result.durationMs || 0,
       },
@@ -246,7 +265,7 @@ export async function generateVoiceoverAudio(segmentId: string, voiceId?: string
           shotId: segment.shotId,
           stepName: segment.stepName,
           duration: result.durationMs,
-          voiceId: voiceId || 'Chinese (Mandarin)_Lyrical_Voice',
+          voiceId: effectiveVoiceId,
         },
       },
     })

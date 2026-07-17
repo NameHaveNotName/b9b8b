@@ -325,6 +325,7 @@ model VoiceoverSegment {
   stepName     String   @map("step_name") // 'VIDEO_DIRECT' | 'TRAILER'
   text         String   @db.Text         // 配音文案/旁白
   speaker      String?  // 说话人/角色名（如“旁白”）
+  voiceId      String?  @map("voice_id")  // MiniMax 音色 ID（AI 按角色人设自动分配）
   audioUrl     String?  @map("audio_url") // 生成后的音频 URL（R2 签名 URL）
   storageKey   String?  @map("storage_key") // R2 存储 key
   status       String   @default("pending") @map("status") // pending | generating | completed | failed

@@ -211,15 +211,11 @@ export async function generateSpeechMinimax(
   }
 }
 
-/**
- * 推荐的中文/英文常用音色列表（MiniMax）。
- * 实际可用音色以 MiniMax 控制台为准。
- */
-export const MINIMAX_TTS_VOICES = [
-  { id: 'Chinese (Mandarin)_Lyrical_Voice', label: '中文-抒情女声', lang: 'zh' },
-  { id: 'Chinese (Mandarin)_Standard_Male', label: '中文-标准男声', lang: 'zh' },
-  { id: 'Chinese (Mandarin)_Gentle_Voice', label: '中文-温柔女声', lang: 'zh' },
-  { id: 'Chinese (Mandarin)_Energetic_Voice', label: '中文-活力男声', lang: 'zh' },
-  { id: 'English (US)_Standard_Female', label: '英文-标准女声', lang: 'en' },
-  { id: 'English (US)_Standard_Male', label: '英文-标准男声', lang: 'en' },
-]
+export {
+  MINIMAX_TTS_VOICES,
+  MINIMAX_DEFAULT_VOICE_ID,
+  getMinimaxVoiceCatalogPrompt,
+  findVoiceById,
+  type MinimaxVoiceOption,
+} from '@/lib/voice-config'
+

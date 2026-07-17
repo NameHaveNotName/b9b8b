@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react'
 import useSWR from 'swr'
 import { LoaderCircle, Play, RefreshCw, Film, Music, Check, Mic, Volume2, Edit2, Save, X, Type, MonitorPlay } from 'lucide-react'
+import { MINIMAX_TTS_VOICES, MINIMAX_DEFAULT_VOICE_ID, findVoiceById } from '@/lib/voice-config'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 
@@ -24,14 +25,7 @@ function ProcessingBlock({ message }: { message: string }) {
   )
 }
 
-const VOICE_OPTIONS = [
-  { id: 'Chinese (Mandarin)_Lyrical_Voice', label: '中文-抒情女声' },
-  { id: 'Chinese (Mandarin)_Standard_Male', label: '中文-标准男声' },
-  { id: 'Chinese (Mandarin)_Gentle_Voice', label: '中文-温柔女声' },
-  { id: 'Chinese (Mandarin)_Energetic_Voice', label: '中文-活力男声' },
-  { id: 'English (US)_Standard_Female', label: '英文-标准女声' },
-  { id: 'English (US)_Standard_Male', label: '英文-标准男声' },
-]
+
 
 function VoiceoverSplitView({
   shots,
@@ -42,12 +36,18 @@ function VoiceoverSplitView({
   onGenerateAudio,
   onGenerateAllAudio,
   onUpdateText,
+  onUpdateVoice,
   isGeneratingVoice,
   editingSegmentId,
   editingText,
+  editingVoiceSegmentId,
+  editingVoiceId,
   onStartEditing,
   onCancelEditing,
   onEditingTextChange,
+  onStartEditingVoice,
+  onCancelEditingVoice,
+  onEditingVoiceChange,
 }: {
   shots: any[]
   segments: any[]
@@ -57,12 +57,18 @@ function VoiceoverSplitView({
   onGenerateAudio: (id: string) => void
   onGenerateAllAudio: () => void
   onUpdateText: (id: string, text: string) => void
+  onUpdateVoice: (id: string, voiceId: string) => void
   isGeneratingVoice: boolean
   editingSegmentId: string | null
   editingText: string
+  editingVoiceSegmentId: string | null
+  editingVoiceId: string
   onStartEditing: (s: any) => void
   onCancelEditing: () => void
   onEditingTextChange: (v: string) => void
+  onStartEditingVoice: (s: any) => void
+  onCancelEditingVoice: () => void
+  onEditingVoiceChange: (v: string) => void
 }) {
   const shotsByAct = useMemo(() => {
     const grouped = new Map<number, any[]>()
@@ -99,7 +105,7 @@ function VoiceoverSplitView({
             onChange={(e) => onVoiceChange(e.target.value)}
             className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs text-stone-700"
           >
-            {VOICE_OPTIONS.map((v) => (
+            {MINIMAX_TTS_VOICES.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.label}
               </option>
@@ -186,6 +192,47 @@ function VoiceoverSplitView({
                                   ? '失败'
                                   : '待生成'}
                               </span>
+                            </div>
+                            <div className="flex items-center gap-2 mb-2">
+                              {editingVoiceSegmentId === vo.id ? (
+                                <div className="flex flex-1 items-center gap-2">
+                                  <select
+                                    value={editingVoiceId}
+                                    onChange={(e) => onEditingVoiceChange(e.target.value)}
+                                    className="flex-1 rounded border border-stone-200 bg-white px-2 py-1 text-[11px] text-stone-700"
+                                  >
+                                    {MINIMAX_TTS_VOICES.map((v) => (
+                                      <option key={v.id} value={v.id}>
+                                        {v.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    onClick={onCancelEditingVoice}
+                                    className="rounded border border-stone-200 bg-white px-1.5 py-1 text-[10px] text-stone-600 transition hover:bg-stone-50"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => onUpdateVoice(vo.id, editingVoiceId)}
+                                    className="rounded bg-stone-800 px-1.5 py-1 text-[10px] font-medium text-white transition hover:bg-stone-700"
+                                  >
+                                    <Save className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <span className="text-[11px] text-stone-500">
+                                    音色：{findVoiceById(vo.voiceId)?.label || vo.voiceId || '默认'}
+                                  </span>
+                                  <button
+                                    onClick={() => onStartEditingVoice(vo)}
+                                    className="text-[10px] text-stone-400 underline hover:text-stone-600"
+                                  >
+                                    修改
+                                  </button>
+                                </>
+                              )}
                             </div>
                             {editingSegmentId === vo.id ? (
                               <div className="space-y-2">
@@ -284,9 +331,11 @@ export default function VideoDirectPanel({
   const [voiceoverMode, setVoiceoverMode] = useState(false)
   const [isGeneratingScripts, setIsGeneratingScripts] = useState(false)
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
-  const [selectedVoice, setSelectedVoice] = useState('Chinese (Mandarin)_Lyrical_Voice')
+  const [selectedVoice, setSelectedVoice] = useState(MINIMAX_DEFAULT_VOICE_ID)
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null)
   const [editingText, setEditingText] = useState('')
+  const [editingVoiceSegmentId, setEditingVoiceSegmentId] = useState<string | null>(null)
+  const [editingVoiceId, setEditingVoiceId] = useState(MINIMAX_DEFAULT_VOICE_ID)
 
   // 轮询 VideoSegment 数据
   const { data: segmentData } = useSWR(
@@ -426,6 +475,22 @@ export default function VideoDirectPanel({
     }
   }, [projectId, mutateVoiceover])
 
+  const handleUpdateVoiceoverVoice = useCallback(async (segmentId: string, voiceId: string) => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update-voice', segmentId, voiceId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || '保存失败')
+      await mutateVoiceover()
+      setEditingVoiceSegmentId(null)
+    } catch (e: any) {
+      console.error('[VOICEOVER] 保存音色失败:', e)
+    }
+  }, [projectId, mutateVoiceover])
+
   const startEditing = useCallback((segment: any) => {
     setEditingSegmentId(segment.id)
     setEditingText(segment.text)
@@ -434,6 +499,16 @@ export default function VideoDirectPanel({
   const cancelEditing = useCallback(() => {
     setEditingSegmentId(null)
     setEditingText('')
+  }, [])
+
+  const startEditingVoice = useCallback((segment: any) => {
+    setEditingVoiceSegmentId(segment.id)
+    setEditingVoiceId(segment.voiceId || MINIMAX_DEFAULT_VOICE_ID)
+  }, [])
+
+  const cancelEditingVoice = useCallback(() => {
+    setEditingVoiceSegmentId(null)
+    setEditingVoiceId(MINIMAX_DEFAULT_VOICE_ID)
   }, [])
 
   // 时间轴同步
@@ -705,12 +780,18 @@ export default function VideoDirectPanel({
             onGenerateAudio={handleGenerateVoiceoverAudio}
             onGenerateAllAudio={handleGenerateAllVoiceoverAudio}
             onUpdateText={handleUpdateVoiceoverText}
+            onUpdateVoice={handleUpdateVoiceoverVoice}
             isGeneratingVoice={isGeneratingVoice}
             editingSegmentId={editingSegmentId}
             editingText={editingText}
+            editingVoiceSegmentId={editingVoiceSegmentId}
+            editingVoiceId={editingVoiceId}
             onStartEditing={startEditing}
             onCancelEditing={cancelEditing}
             onEditingTextChange={setEditingText}
+            onStartEditingVoice={startEditingVoice}
+            onCancelEditingVoice={cancelEditingVoice}
+            onEditingVoiceChange={setEditingVoiceId}
           />
         )}
 

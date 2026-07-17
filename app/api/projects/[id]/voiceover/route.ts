@@ -125,6 +125,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return handleUpdateText(body)
   }
 
+  if (action === 'update-voice') {
+    return handleUpdateVoice(body)
+  }
+
   return NextResponse.json({ error: 'UNKNOWN_ACTION', message: `未知 action: ${action}` }, { status: 400 })
 }
 
@@ -205,5 +209,23 @@ async function handleUpdateText(body: any) {
     return NextResponse.json({ success: true, segment, message: '文案已更新' })
   } catch (e: any) {
     return NextResponse.json({ error: 'UPDATE_001', message: e.message }, { status: 500 })
+  }
+}
+
+async function handleUpdateVoice(body: any) {
+  const segmentId = body?.segmentId
+  const voiceId = body?.voiceId
+  if (!segmentId || typeof voiceId !== 'string' || voiceId.trim().length === 0) {
+    return NextResponse.json({ error: 'MISSING_PARAMS', message: '缺少 segmentId 或 voiceId' }, { status: 400 })
+  }
+
+  try {
+    const segment = await prisma.voiceoverSegment.update({
+      where: { id: segmentId },
+      data: { voiceId: voiceId.trim() },
+    })
+    return NextResponse.json({ success: true, segment, message: '音色已更新' })
+  } catch (e: any) {
+    return NextResponse.json({ error: 'UPDATE_002', message: e.message }, { status: 500 })
   }
 }
