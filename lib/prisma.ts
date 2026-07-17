@@ -146,6 +146,7 @@ const RELATIONS: Record<string, Record<string, { model: string; fk: string; sour
     steps: { model: 'workflowStep', fk: 'projectId' },
     assets: { model: 'asset', fk: 'projectId' },
     videoSegments: { model: 'videoSegment', fk: 'projectId' },
+    voiceoverSegments: { model: 'voiceoverSegment', fk: 'projectId' },
   },
   workflowStep: {
     resultAssets: { model: 'asset', fk: 'stepId' },

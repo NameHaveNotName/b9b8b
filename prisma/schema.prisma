@@ -145,6 +145,7 @@ model Project {
   comparisons       Comparison[]
   creativeIterations CreativeIteration[]
   videoSegments     VideoSegment[]
+  voiceoverSegments VoiceoverSegment[]
 
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
@@ -314,4 +315,28 @@ model CreativeIteration {
   // 注意：isCurrent 的唯一性由应用层保证（updateMany + create 的原子操作）
   @@index([projectId, versionNumber])
   @@map("creative_iterations")
+}
+
+model VoiceoverSegment {
+  id           String   @id @default(cuid())
+  projectId    String   @map("project_id")
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shotId       String   @map("shot_id") // 对应分镜 shotId
+  stepName     String   @map("step_name") // 'VIDEO_DIRECT' | 'TRAILER'
+  text         String   @db.Text         // 配音文案/旁白
+  speaker      String?  // 说话人/角色名（如“旁白”）
+  audioUrl     String?  @map("audio_url") // 生成后的音频 URL（R2 签名 URL）
+  storageKey   String?  @map("storage_key") // R2 存储 key
+  status       String   @default("pending") @map("status") // pending | generating | completed | failed
+  sequence     Int      @map("sequence") // 配音顺序
+  duration     Int?     @map("duration") // 音频时长（毫秒）
+  errorMessage String?  @map("error_message") // 失败原因
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([projectId, status])
+  @@index([projectId, stepName])
+  @@index([projectId, sequence])
+  @@index([projectId, shotId])
+  @@map("voiceover_segments")
 }

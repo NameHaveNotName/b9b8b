@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react'
 import useSWR from 'swr'
-import { LoaderCircle, Play, RefreshCw, Film, Music, Check } from 'lucide-react'
+import { LoaderCircle, Play, RefreshCw, Film, Music, Check, Mic, Volume2, Edit2, Save, X, Type, MonitorPlay } from 'lucide-react'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
 
@@ -24,6 +24,249 @@ function ProcessingBlock({ message }: { message: string }) {
   )
 }
 
+const VOICE_OPTIONS = [
+  { id: 'Chinese (Mandarin)_Lyrical_Voice', label: '中文-抒情女声' },
+  { id: 'Chinese (Mandarin)_Standard_Male', label: '中文-标准男声' },
+  { id: 'Chinese (Mandarin)_Gentle_Voice', label: '中文-温柔女声' },
+  { id: 'Chinese (Mandarin)_Energetic_Voice', label: '中文-活力男声' },
+  { id: 'English (US)_Standard_Female', label: '英文-标准女声' },
+  { id: 'English (US)_Standard_Male', label: '英文-标准男声' },
+]
+
+function VoiceoverSplitView({
+  shots,
+  segments,
+  summary,
+  selectedVoice,
+  onVoiceChange,
+  onGenerateAudio,
+  onGenerateAllAudio,
+  onUpdateText,
+  isGeneratingVoice,
+  editingSegmentId,
+  editingText,
+  onStartEditing,
+  onCancelEditing,
+  onEditingTextChange,
+}: {
+  shots: any[]
+  segments: any[]
+  summary: any
+  selectedVoice: string
+  onVoiceChange: (v: string) => void
+  onGenerateAudio: (id: string) => void
+  onGenerateAllAudio: () => void
+  onUpdateText: (id: string, text: string) => void
+  isGeneratingVoice: boolean
+  editingSegmentId: string | null
+  editingText: string
+  onStartEditing: (s: any) => void
+  onCancelEditing: () => void
+  onEditingTextChange: (v: string) => void
+}) {
+  const shotsByAct = useMemo(() => {
+    const grouped = new Map<number, any[]>()
+    for (const shot of shots) {
+      const act = shot.actNumber || 0
+      if (!grouped.has(act)) grouped.set(act, [])
+      grouped.get(act)!.push(shot)
+    }
+    return Array.from(grouped.entries()).sort((a, b) => a[0] - b[0])
+  }, [shots])
+
+  const voiceoversByShotId = useMemo(() => {
+    const map = new Map<string, any[]>()
+    for (const s of segments) {
+      if (!map.has(s.shotId)) map.set(s.shotId, [])
+      map.get(s.shotId)!.push(s)
+    }
+    return map
+  }, [segments])
+
+  return (
+    <div className="space-y-4">
+      {/* 配音控制栏 */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-stone-200 bg-white p-3">
+        <div>
+          <h4 className="text-sm font-semibold text-stone-700">配音表</h4>
+          <p className="text-xs text-stone-500">
+            {summary?.completed || 0} 已完成 · {summary?.pending || 0} 待生成 · {summary?.generating || 0} 生成中 · {summary?.failed || 0} 失败
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedVoice}
+            onChange={(e) => onVoiceChange(e.target.value)}
+            className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs text-stone-700"
+          >
+            {VOICE_OPTIONS.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={onGenerateAllAudio}
+            disabled={isGeneratingVoice || (summary?.pending || 0) === 0}
+            className="flex items-center gap-1 rounded-md bg-stone-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-700 disabled:opacity-50"
+          >
+            {isGeneratingVoice ? (
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+            ) : (
+              <Volume2 className="h-3 w-3" />
+            )}
+            全部生成音频
+          </button>
+        </div>
+      </div>
+
+      {/* 分屏表格：左侧分镜 / 右侧配音 */}
+      <div className="space-y-6">
+        {shotsByAct.map(([actNumber, actShots]) => (
+          <div key={actNumber} className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 bg-stone-50">
+              <h3 className="text-sm font-semibold text-stone-800">第 {actNumber} 幕</h3>
+              <span className="text-xs text-stone-500">{actShots.length} 个镜头</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-stone-100">
+              <div className="hidden sm:block bg-stone-50/50 px-4 py-2 text-xs font-medium text-stone-500">分镜</div>
+              <div className="hidden sm:block bg-stone-50/50 px-4 py-2 text-xs font-medium text-stone-500">配音</div>
+              {actShots.map((shot: any) => {
+                const shotVoiceovers = voiceoversByShotId.get(shot.shotId) || []
+                return (
+                  <Fragment key={shot.shotId}>
+                    {/* 分镜 */}
+                    <div className="px-4 py-3 border-b border-stone-100">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-[11px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
+                          {shot.shotId}
+                        </span>
+                        <span className="text-sm font-medium text-stone-800">{shot.sceneName}</span>
+                      </div>
+                      <p className="text-sm text-stone-600 leading-relaxed mb-2">{shot.description}</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-500">
+                        <span>
+                          <span className="text-stone-400">运镜</span> {shot.cameraMove}
+                        </span>
+                        <span>
+                          <span className="text-stone-400">时长</span> {shot.duration}s
+                        </span>
+                      </div>
+                    </div>
+                    {/* 配音 */}
+                    <div className="px-4 py-3 border-b border-stone-100 space-y-2">
+                      {shotVoiceovers.length === 0 ? (
+                        <div className="flex h-full min-h-[64px] flex-col items-center justify-center rounded border-2 border-dashed border-stone-200 bg-stone-50">
+                          <span className="text-xs text-stone-400">无配音</span>
+                        </div>
+                      ) : (
+                        shotVoiceovers.map((vo: any) => (
+                          <div key={vo.id} className="rounded border border-stone-100 bg-stone-50 p-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-mono text-[10px] text-stone-400 bg-white px-1.5 py-0.5 rounded">
+                                {vo.shotId}
+                              </span>
+                              <span className="text-xs font-medium text-stone-700">{vo.speaker || '旁白'}</span>
+                              <span
+                                className={`ml-auto rounded-full px-1.5 py-0.5 text-[10px] ${
+                                  vo.status === 'completed'
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : vo.status === 'generating'
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : vo.status === 'failed'
+                                    ? 'bg-red-100 text-red-700'
+                                    : 'bg-stone-200 text-stone-600'
+                                }`}
+                              >
+                                {vo.status === 'completed'
+                                  ? '已完成'
+                                  : vo.status === 'generating'
+                                  ? '生成中'
+                                  : vo.status === 'failed'
+                                  ? '失败'
+                                  : '待生成'}
+                              </span>
+                            </div>
+                            {editingSegmentId === vo.id ? (
+                              <div className="space-y-2">
+                                <textarea
+                                  value={editingText}
+                                  onChange={(e) => onEditingTextChange(e.target.value)}
+                                  className="w-full rounded border border-stone-200 px-2 py-1 text-xs text-stone-700"
+                                  rows={3}
+                                />
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={onCancelEditing}
+                                    className="flex items-center gap-1 rounded border border-stone-200 bg-white px-2 py-1 text-[10px] text-stone-600 transition hover:bg-stone-50"
+                                  >
+                                    <X className="h-3 w-3" /> 取消
+                                  </button>
+                                  <button
+                                    onClick={() => onUpdateText(vo.id, editingText)}
+                                    className="flex items-center gap-1 rounded bg-stone-800 px-2 py-1 text-[10px] font-medium text-white transition hover:bg-stone-700"
+                                  >
+                                    <Save className="h-3 w-3" /> 保存
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-stone-600 leading-relaxed mb-2">{vo.text}</p>
+                            )}
+                            {vo.status === 'completed' && vo.audioUrl && (
+                              <audio src={vo.audioUrl} controls className="w-full h-8" />
+                            )}
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
+                              {vo.status === 'pending' && (
+                                <button
+                                  onClick={() => onGenerateAudio(vo.id)}
+                                  disabled={isGeneratingVoice}
+                                  className="flex items-center gap-1 rounded bg-stone-700 px-2 py-1 text-[10px] text-white transition hover:bg-stone-600 disabled:opacity-50"
+                                >
+                                  <Volume2 className="h-3 w-3" /> 生成音频
+                                </button>
+                              )}
+                              {vo.status === 'failed' && (
+                                <button
+                                  onClick={() => onGenerateAudio(vo.id)}
+                                  disabled={isGeneratingVoice}
+                                  className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] text-white transition hover:bg-red-700 disabled:opacity-50"
+                                >
+                                  <RefreshCw className="h-3 w-3" /> 重试
+                                </button>
+                              )}
+                              {vo.status === 'generating' && (
+                                <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+                                  <LoaderCircle className="h-3 w-3 animate-spin" /> 生成中
+                                </span>
+                              )}
+                              {editingSegmentId !== vo.id && (
+                                <button
+                                  onClick={() => onStartEditing(vo)}
+                                  className="flex items-center gap-1 rounded border border-stone-200 bg-white px-2 py-1 text-[10px] text-stone-600 transition hover:bg-stone-50"
+                                >
+                                  <Edit2 className="h-3 w-3" /> 编辑
+                                </button>
+                              )}
+                            </div>
+                            {vo.errorMessage && (
+                              <p className="mt-1 text-[11px] text-red-500">{vo.errorMessage}</p>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </Fragment>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function VideoDirectPanel({
   step,
   projectId,
@@ -36,6 +279,14 @@ export default function VideoDirectPanel({
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null)
   const [isComposing, setIsComposing] = useState(false)
   const [isGeneratingBgm, setIsGeneratingBgm] = useState(false)
+
+  // 配音相关状态
+  const [voiceoverMode, setVoiceoverMode] = useState(false)
+  const [isGeneratingScripts, setIsGeneratingScripts] = useState(false)
+  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
+  const [selectedVoice, setSelectedVoice] = useState('Chinese (Mandarin)_Lyrical_Voice')
+  const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null)
+  const [editingText, setEditingText] = useState('')
 
   // 轮询 VideoSegment 数据
   const { data: segmentData } = useSWR(
@@ -50,9 +301,18 @@ export default function VideoDirectPanel({
     fetcher
   )
 
+  // 读取配音片段
+  const { data: voiceoverData, mutate: mutateVoiceover } = useSWR(
+    `/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`,
+    fetcher,
+    { refreshInterval: 3000 }
+  )
+
   const segments = segmentData?.segments || []
   const summary = segmentData?.summary
   const shots = storyboardRes?.outputData?.shots || []
+  const voiceoverSegments = voiceoverData?.segments || []
+  const voiceoverSummary = voiceoverData?.summary
 
   // 从 step.outputData 读取合成结果
   const stepOutput = (step?.outputData as any) || {}
@@ -93,6 +353,88 @@ export default function VideoDirectPanel({
       setIsGeneratingBgm(false)
     }
   }, [projectId])
+
+  // 配音操作
+  const handleGenerateVoiceoverScripts = useCallback(async () => {
+    setIsGeneratingScripts(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'generate-scripts', stepName: 'VIDEO_DIRECT' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || '生成失败')
+      await mutateVoiceover()
+      setVoiceoverMode(true)
+    } catch (e: any) {
+      console.error('[VOICEOVER] 生成文案失败:', e)
+    } finally {
+      setIsGeneratingScripts(false)
+    }
+  }, [projectId, mutateVoiceover])
+
+  const handleGenerateVoiceoverAudio = useCallback(async (segmentId: string) => {
+    setIsGeneratingVoice(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'generate-audio', segmentId, voiceId: selectedVoice, stepName: 'VIDEO_DIRECT' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || '生成失败')
+      await mutateVoiceover()
+    } catch (e: any) {
+      console.error('[VOICEOVER] 生成音频失败:', e)
+    } finally {
+      setIsGeneratingVoice(false)
+    }
+  }, [projectId, selectedVoice, mutateVoiceover])
+
+  const handleGenerateAllVoiceoverAudio = useCallback(async () => {
+    setIsGeneratingVoice(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'generate-all-audio', voiceId: selectedVoice, stepName: 'VIDEO_DIRECT' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || '生成失败')
+      await mutateVoiceover()
+    } catch (e: any) {
+      console.error('[VOICEOVER] 批量生成音频失败:', e)
+    } finally {
+      setIsGeneratingVoice(false)
+    }
+  }, [projectId, selectedVoice, mutateVoiceover])
+
+  const handleUpdateVoiceoverText = useCallback(async (segmentId: string, text: string) => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update-text', segmentId, text }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || '保存失败')
+      await mutateVoiceover()
+      setEditingSegmentId(null)
+    } catch (e: any) {
+      console.error('[VOICEOVER] 保存文案失败:', e)
+    }
+  }, [projectId, mutateVoiceover])
+
+  const startEditing = useCallback((segment: any) => {
+    setEditingSegmentId(segment.id)
+    setEditingText(segment.text)
+  }, [])
+
+  const cancelEditing = useCallback(() => {
+    setEditingSegmentId(null)
+    setEditingText('')
+  }, [])
 
   // 时间轴同步
   useEffect(() => {
@@ -259,7 +601,7 @@ export default function VideoDirectPanel({
   if (hasSegments) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-semibold text-stone-700">
               分镜片段 ({segments.length})
@@ -268,7 +610,35 @@ export default function VideoDirectPanel({
               {summary?.completed || 0} 已完成 · {summary?.pending || 0} 待生成 · {summary?.generating || 0} 生成中 · {summary?.failed || 0} 失败
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* 配音入口 */}
+            {voiceoverSegments.length > 0 ? (
+              <button
+                onClick={() => setVoiceoverMode((v) => !v)}
+                className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                  voiceoverMode
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                }`}
+              >
+                <MonitorPlay className="h-3 w-3" />
+                {voiceoverMode ? '退出分屏' : '配音分屏'}
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerateVoiceoverScripts}
+                disabled={isGeneratingScripts || shots.length === 0}
+                className="flex items-center gap-1 rounded-md bg-stone-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-600 disabled:opacity-50"
+                title="根据分镜生成配音文案"
+              >
+                {isGeneratingScripts ? (
+                  <LoaderCircle className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Type className="h-3 w-3" />
+                )}
+                生成配音文案
+              </button>
+            )}
             {summary?.pending > 0 && (
               <button
                 onClick={handleGenerateAll}
@@ -324,9 +694,30 @@ export default function VideoDirectPanel({
           </div>
         </div>
 
-        {/* 纵向分镜表卡片：按幕分组，左侧信息 + 右侧视频预览 */}
-        <div className="space-y-6">
-          {segmentsByAct.map(([actNumber, actSegments]) => {
+        {/* 配音分屏视图 */}
+        {voiceoverMode && voiceoverSegments.length > 0 && (
+          <VoiceoverSplitView
+            shots={shots}
+            segments={voiceoverSegments}
+            summary={voiceoverSummary}
+            selectedVoice={selectedVoice}
+            onVoiceChange={setSelectedVoice}
+            onGenerateAudio={handleGenerateVoiceoverAudio}
+            onGenerateAllAudio={handleGenerateAllVoiceoverAudio}
+            onUpdateText={handleUpdateVoiceoverText}
+            isGeneratingVoice={isGeneratingVoice}
+            editingSegmentId={editingSegmentId}
+            editingText={editingText}
+            onStartEditing={startEditing}
+            onCancelEditing={cancelEditing}
+            onEditingTextChange={setEditingText}
+          />
+        )}
+
+        {/* 纵向分镜表卡片：按幕分组，左侧信息 + 右侧视频预览（配音分屏模式下隐藏） */}
+        {!voiceoverMode && (
+          <div className="space-y-6">
+            {segmentsByAct.map(([actNumber, actSegments]) => {
             const completedCount = actSegments.filter((s: any) => s.status === 'completed').length
             const totalCount = actSegments.length
             const allCompleted = completedCount === totalCount && totalCount > 0
@@ -487,6 +878,7 @@ export default function VideoDirectPanel({
             )
           })}
         </div>
+        )}
       </div>
     )
   }
@@ -539,7 +931,7 @@ export default function VideoDirectPanel({
             </p>
           </div>
         )}
-        <div className="flex justify-center">
+        <div className="flex flex-wrap justify-center gap-3">
           <div className="relative inline-block">
             <button
               onClick={handleGeneratePrompts}
@@ -560,6 +952,18 @@ export default function VideoDirectPanel({
             </button>
             <CostBadge cost={DEFAULT_GENERATE_COST} />
           </div>
+          <button
+            onClick={handleGenerateVoiceoverScripts}
+            disabled={isGeneratingScripts || shots.length === 0}
+            className="flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-6 py-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
+          >
+            {isGeneratingScripts ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <Type className="h-4 w-4" />
+            )}
+            生成配音文案
+          </button>
         </div>
       </div>
     )
