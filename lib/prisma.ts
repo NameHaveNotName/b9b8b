@@ -604,8 +604,17 @@ function normalizeDatabaseUrl(url: string): string {
       // （应用运行时应使用连接池，而非直连 5432）
       u.port = '6543'
       console.warn('[PRISMA] DATABASE_URL 未指定端口，已自动使用 6543')
-      return u.toString()
     }
+    if (u.port === '5432') {
+      console.warn(
+        '[PRISMA] DATABASE_URL 使用了 5432 端口（Supabase session pooler），该端口在 Supabase 上连接数上限很低（通常 15），容易导致 EMAXCONSESSION。应用运行时应改为 6543 事务连接池。'
+      )
+    }
+    // 使用 Supabase 事务连接池时必须关闭 prepared statements
+    if (u.port === '6543' && !u.searchParams.has('pgbouncer')) {
+      u.searchParams.set('pgbouncer', 'true')
+    }
+    return u.toString()
   } catch {}
   return url
 }
