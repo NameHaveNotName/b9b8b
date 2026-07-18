@@ -4519,7 +4519,8 @@ function KeyframesPanel({
           ...s,
           lastFrameUrl: lastFrameMap[key] || s.lastFrameUrl,
           actionChange: actionChangeMap[key] || '',
-      }))
+        }
+      })
       setLocalShots(shotsWithAction)
     }
   }, [storyboardShots.length, Object.keys(lastFrameMap).length])
