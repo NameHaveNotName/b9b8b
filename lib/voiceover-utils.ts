@@ -223,7 +223,6 @@ export async function generateVoiceoverScripts(
     data: validSegments.map((s) => ({
       projectId,
       shotId: s.shotId,
-      actNumber: s.actNumber ?? shotIdToAct.get(s.shotId) ?? 0,
       stepName,
       text: s.text,
       speaker: s.speaker || '旁白',

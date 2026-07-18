@@ -83,9 +83,8 @@ function VoiceoverSplitView({
   const voiceoversByShotId = useMemo(() => {
     const map = new Map<string, any[]>()
     for (const s of segments) {
-      const key = `${s.actNumber || 0}|${s.shotId}`
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(s)
+      if (!map.has(s.shotId)) map.set(s.shotId, [])
+      map.get(s.shotId)!.push(s)
     }
     return map
   }, [segments])
@@ -142,8 +141,7 @@ function VoiceoverSplitView({
               <div className="hidden sm:block bg-stone-50/50 px-4 py-2 text-xs font-medium text-stone-500">分镜</div>
               <div className="hidden sm:block bg-stone-50/50 px-4 py-2 text-xs font-medium text-stone-500">配音</div>
               {actShots.map((shot: any) => {
-                const shotKey = `${shot.actNumber || 0}|${shot.shotId}`
-                const shotVoiceovers = voiceoversByShotId.get(shotKey) || []
+                const shotVoiceovers = voiceoversByShotId.get(shot.shotId) || []
                 return (
                   <Fragment key={shot.shotId}>
                     {/* 分镜 */}
