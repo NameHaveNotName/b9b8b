@@ -278,20 +278,22 @@ export async function getImageClient(): Promise<ImageClient> {
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
         const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${model}`)
-        const refImages: string[] = []
-        if (previousImageUrl) refImages.push(previousImageUrl)
+        const otherRefs: string[] = []
         if (characterImageUrls && characterImageUrls.length > 0) {
-          refImages.push(...characterImageUrls)
+          otherRefs.push(...characterImageUrls)
         }
-        if (styleRefUrl) refImages.push(styleRefUrl)
+        if (styleRefUrl) otherRefs.push(styleRefUrl)
         if (userReferenceUrls && userReferenceUrls.length > 0) {
-          refImages.push(...userReferenceUrls)
+          otherRefs.push(...userReferenceUrls)
         }
+        const primaryRef = previousImageUrl
+        const secondaryRefs = otherRefs.length > 0 ? otherRefs : undefined
+        console.log(`[KEYFRAME-REF] primary=${!!primaryRef}${primaryRef ? ` (${primaryRef.slice(0, 60)})` : ''}, secondary=${secondaryRefs?.length || 0}`)
         const { buffer } = await generateImage({
           model,
           prompt,
-          referenceImages: refImages.length > 1 ? refImages : undefined,
-          referenceImageUrl: refImages.length === 1 ? refImages[0] : undefined,
+          referenceImages: secondaryRefs,
+          referenceImageUrl: primaryRef,
           aspectRatio: aspectRatio || '16:9',
           watermark: false,
         })

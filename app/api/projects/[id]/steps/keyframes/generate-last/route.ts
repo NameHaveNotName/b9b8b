@@ -118,6 +118,9 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // 尾帧以当前镜头的首帧为参考，保持同一镜头内画面连贯
     const currentFirstFrameUrl: string | undefined = shot.firstFrameUrl || shot.referenceImageUrl || undefined
+    const aspectRatio = shot.metadata?.aspectRatio || '16:9'
+
+    console.log(`[KEYFRAMES-GENERATE-LAST] 首帧: ${currentFirstFrameUrl?.slice(0, 80)}, 比例: ${aspectRatio}`)
 
     // 调用图像生成
     const imageClient = await getImageClient()
@@ -126,7 +129,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       imagePrompt,
       styleRefUrl,
       'last',
-      undefined,
+      aspectRatio,
       undefined,
       undefined,
       userRefUrls,
