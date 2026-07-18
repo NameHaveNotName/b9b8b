@@ -79,6 +79,51 @@ interface VoiceoverScriptItem {
 }
 
 /**
+ * 根据角色描述确定每个角色的最佳音色。
+ * 使用 MiniMax M3 模型进行角色 → 音色匹配。
+ *
+ * @param characters 角色列表
+ * @returns 角色名称 → voiceId 的映射
+ */
+export async function determineCharacterVoiceAssignments(characters: any[]): Promise<Record<string, string>> {
+  if (!characters || characters.length === 0) {
+    return {}
+  }
+
+  const charactersJson = JSON.stringify(
+    characters.map((c) => ({
+      name: c.name || c.id || '未知角色',
+      description: c.description || '',
+    }))
+  )
+
+  const prompt = loadPromptTemplate('voice-assignment', {
+    VOICE_CATALOG: getMinimaxVoiceCatalogPrompt(),
+    CHARACTERS_JSON: charactersJson,
+  })
+
+  const textClient = await getTextClient()
+  const resultText = await textClient.generate(prompt, { temperature: 0.3, maxTokens: 2048 })
+
+  try {
+    const parsed = extractJsonFromMarkdown(resultText)
+    const voiceMap: Record<string, string> = {}
+
+    for (const [characterName, voiceId] of Object.entries(parsed || {})) {
+      if (typeof voiceId === 'string' && isValidMinimaxVoiceId(voiceId)) {
+        voiceMap[characterName] = voiceId
+      }
+    }
+
+    console.log('[VOICE-ASSIGNMENT] 音色分配结果:', JSON.stringify(voiceMap))
+    return voiceMap
+  } catch (e: any) {
+    console.error('[VOICE-ASSIGNMENT] 音色分配解析失败:', e?.message)
+    return {}
+  }
+}
+
+/**
  * 根据框架和分镜生成配音文案，并保存到 VoiceoverSegment。
  *
  * @param projectId 项目 ID
@@ -102,6 +147,11 @@ export async function generateVoiceoverScripts(
     where: { projectId, stepName },
   })
 
+  // Step 1: 为角色确定音色分配（使用 MiniMax M3）
+  const characters = framework?.characters || []
+  const characterVoiceMap = await determineCharacterVoiceAssignments(characters)
+  const characterVoiceJson = JSON.stringify(characterVoiceMap)
+
   const storyBrief = buildStoryBrief(framework)
   const shotsJson = JSON.stringify(
     shots.map((s) => ({
@@ -121,6 +171,7 @@ export async function generateVoiceoverScripts(
     VOICE_CATALOG: getMinimaxVoiceCatalogPrompt(),
     DURATION: '5',
     WORD_COUNT: '25',
+    CHARACTER_VOICE_MAP: characterVoiceJson,
   })
 
   const textClient = await getTextClient()

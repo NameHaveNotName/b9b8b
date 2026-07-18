@@ -220,6 +220,9 @@ export const TEXT_MODELS = {
 
   // 多模态视觉文本生成（用户上传参考图时使用）
   VISION: 'gpt-4o-mini',
+
+  // 音色匹配：使用 MiniMax M3（角色描述 → 最佳音色 ID）
+  VOICE_ASSIGNMENT: 'deepseek-chat',
 }
 
 export const VIDEO_MODELS = {
