@@ -83,8 +83,9 @@ function VoiceoverSplitView({
   const voiceoversByShotId = useMemo(() => {
     const map = new Map<string, any[]>()
     for (const s of segments) {
-      if (!map.has(s.shotId)) map.set(s.shotId, [])
-      map.get(s.shotId)!.push(s)
+      const key = `${s.actNumber || 0}|${s.shotId}`
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(s)
     }
     return map
   }, [segments])
@@ -141,7 +142,8 @@ function VoiceoverSplitView({
               <div className="hidden sm:block bg-stone-50/50 px-4 py-2 text-xs font-medium text-stone-500">分镜</div>
               <div className="hidden sm:block bg-stone-50/50 px-4 py-2 text-xs font-medium text-stone-500">配音</div>
               {actShots.map((shot: any) => {
-                const shotVoiceovers = voiceoversByShotId.get(shot.shotId) || []
+                const shotKey = `${shot.actNumber || 0}|${shot.shotId}`
+                const shotVoiceovers = voiceoversByShotId.get(shotKey) || []
                 return (
                   <Fragment key={shot.shotId}>
                     {/* 分镜 */}
@@ -449,7 +451,7 @@ export default function VideoDirectPanel({
       const res = await fetch(`/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'generate-audio', segmentId, voiceId: selectedVoice, stepName: 'VIDEO_DIRECT' }),
+        body: JSON.stringify({ action: 'generate-audio', segmentId, stepName: 'VIDEO_DIRECT' }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || '生成失败')
@@ -459,7 +461,7 @@ export default function VideoDirectPanel({
     } finally {
       setIsGeneratingVoice(false)
     }
-  }, [projectId, selectedVoice, mutateVoiceover])
+  }, [projectId, mutateVoiceover])
 
   const handleGenerateAllVoiceoverAudio = useCallback(async () => {
     setIsGeneratingVoice(true)

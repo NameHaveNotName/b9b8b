@@ -70,6 +70,7 @@ export async function resetStaleGeneratingVoiceovers(projectId: string, staleMin
 
 interface VoiceoverScriptItem {
   shotId: string
+  actNumber?: number
   text: string
   speaker?: string
   voiceId?: string
@@ -147,9 +148,9 @@ export async function generateVoiceoverScripts(
     throw new Error('LLM 未返回任何配音片段')
   }
 
-  // 过滤 shotId 不存在的条目
-  const validShotIds = new Set(shots.map((s) => s.shotId))
-  const validSegments = segments.filter((s) => validShotIds.has(s.shotId))
+  // 过滤 shotId 不存在的条目，并建立 shotId → actNumber 映射
+  const shotIdToAct = new Map(shots.map((s) => [s.shotId, s.actNumber ?? 0]))
+  const validSegments = segments.filter((s) => shotIdToAct.has(s.shotId))
   if (validSegments.length === 0) {
     throw new Error('LLM 返回的配音片段 shotId 均不匹配现有分镜')
   }
@@ -171,6 +172,7 @@ export async function generateVoiceoverScripts(
     data: validSegments.map((s) => ({
       projectId,
       shotId: s.shotId,
+      actNumber: s.actNumber ?? shotIdToAct.get(s.shotId) ?? 0,
       stepName,
       text: s.text,
       speaker: s.speaker || '旁白',
