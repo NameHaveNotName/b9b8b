@@ -26,6 +26,28 @@ export async function getFramework(projectId: string) {
   return (fwStep?.outputData as any) || {}
 }
 
+/** 从 CHARACTER Step 读取角色图 URL 映射 */
+export async function getCharacterPortraits(projectId: string): Promise<Record<string, string>> {
+  const charStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType: 'CHARACTER' } },
+  })
+  if (!charStep) return {}
+
+  const assets = await prisma.asset.findMany({
+    where: { projectId, stepId: charStep.id },
+    select: { url: true, metadata: true },
+  })
+
+  const portraitMap: Record<string, string> = {}
+  for (const asset of assets) {
+    const charId = asset.metadata?.characterId
+    if (charId && asset.url) {
+      portraitMap[charId] = asset.url
+    }
+  }
+  return portraitMap
+}
+
 /** 构建用于生成配音文案的影片简介 */
 function buildStoryBrief(framework: any): string {
   const parts: string[] = []
@@ -81,25 +103,41 @@ interface VoiceoverScriptItem {
 /**
  * 根据角色描述确定每个角色的最佳音色。
  * 使用 MiniMax M3 模型进行角色 → 音色匹配。
+ * 会传入角色图和框架设定作为参考，让 M3 更准确地选择音色。
  *
  * @param characters 角色列表
+ * @param characterPortraits 角色ID → 角色图URL 的映射
+ * @param framework 框架数据（包含 tone、visualStyle 等设定）
  * @returns 角色名称 → voiceId 的映射
  */
-export async function determineCharacterVoiceAssignments(characters: any[]): Promise<Record<string, string>> {
+export async function determineCharacterVoiceAssignments(
+  characters: any[],
+  characterPortraits: Record<string, string> = {},
+  framework: any = {}
+): Promise<Record<string, string>> {
   if (!characters || characters.length === 0) {
     return {}
   }
 
-  const charactersJson = JSON.stringify(
-    characters.map((c) => ({
-      name: c.name || c.id || '未知角色',
-      description: c.description || '',
-    }))
-  )
+  const charactersWithImages = characters.map((c) => ({
+    name: c.name || c.id || '未知角色',
+    description: c.description || '',
+    portraitUrl: characterPortraits[c.id] || characterPortraits[c.name] || '',
+  }))
+
+  const charactersJson = JSON.stringify(charactersWithImages, null, 2)
+
+  const frameworkContext = [
+    framework.title ? `片名：${framework.title}` : '',
+    framework.tone ? `情绪基调：${framework.tone}` : '',
+    framework.visualStyle ? `视觉风格：${framework.visualStyle}` : '',
+    framework.styleGuide ? `风格指南：${framework.styleGuide}` : '',
+  ].filter(Boolean).join('\n')
 
   const prompt = loadPromptTemplate('voice-assignment', {
     VOICE_CATALOG: getMinimaxVoiceCatalogPrompt(),
     CHARACTERS_JSON: charactersJson,
+    FRAMEWORK_CONTEXT: frameworkContext,
   })
 
   const textClient = await getTextClient()
@@ -109,7 +147,15 @@ export async function determineCharacterVoiceAssignments(characters: any[]): Pro
     const parsed = extractJsonFromMarkdown(resultText)
     const voiceMap: Record<string, string> = {}
 
-    for (const [characterName, voiceId] of Object.entries(parsed || {})) {
+    for (const [characterName, voiceData] of Object.entries(parsed || {})) {
+      // 支持两种格式：直接 voiceId 字符串，或 { voiceId, reason } 对象
+      let voiceId = ''
+      if (typeof voiceData === 'string') {
+        voiceId = voiceData
+      } else if (typeof voiceData === 'object' && voiceData !== null) {
+        voiceId = voiceData.voiceId || voiceData.voice_id || voiceData.id || ''
+      }
+
       if (typeof voiceId === 'string' && isValidMinimaxVoiceId(voiceId)) {
         voiceMap[characterName] = voiceId
       }
@@ -149,7 +195,8 @@ export async function generateVoiceoverScripts(
 
   // Step 1: 为角色确定音色分配（使用 MiniMax M3）
   const characters = framework?.characters || []
-  const characterVoiceMap = await determineCharacterVoiceAssignments(characters)
+  const characterPortraits = await getCharacterPortraits(projectId)
+  const characterVoiceMap = await determineCharacterVoiceAssignments(characters, characterPortraits, framework)
   const characterVoiceJson = JSON.stringify(characterVoiceMap)
 
   // Step 2: 为每个 shot 创建唯一的 act 前缀 ID（跨幕区分同 shotId）

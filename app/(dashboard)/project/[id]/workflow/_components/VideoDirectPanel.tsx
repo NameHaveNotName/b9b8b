@@ -101,6 +101,21 @@ function VoiceoverSplitView({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {(summary?.total || 0) > 0 && (
+            <button
+              onClick={handleGenerateVoiceoverScripts}
+              disabled={isGeneratingScripts || shots.length === 0}
+              className="flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
+              title="重新生成配音文案（会覆盖现有文案）"
+            >
+              {isGeneratingScripts ? (
+                <LoaderCircle className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+              重新生成文案
+            </button>
+          )}
           <select
             value={selectedVoice}
             onChange={(e) => onVoiceChange(e.target.value)}
