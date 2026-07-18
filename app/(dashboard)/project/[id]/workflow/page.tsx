@@ -4466,10 +4466,11 @@ function KeyframesPanel({
     fetcher
   )
 
-  // 从 KEYFRAMES 步骤读取状态（用于 PROMPT_READY 检测）
-  const { data: keyframesRes } = useSWR(
+  // 从 KEYFRAMES 步骤读取状态（用于 PROMPT_READY 检测），每 3 秒轮询
+  const { data: keyframesRes, mutate: mutateKeyframes } = useSWR(
     `/api/projects/${projectId}/steps/keyframes`,
-    fetcher
+    fetcher,
+    { refreshInterval: 3000 }
   )
 
   const [localShots, setLocalShots] = useState<KeyframeShot[]>([])
@@ -4480,35 +4481,41 @@ function KeyframesPanel({
   const storyboardShots: KeyframeShot[] = storyboardRes?.outputData?.shots || []
   const storyboardAssets = storyboardRes?.assets || []
 
-  // 从 KEYFRAMES outputData 读取 actionChange 映射
+  // 从 KEYFRAMES outputData 读取 keyframes 数据（包含 lastFrameUrl 和 actionChange）
   const keyframesData = keyframesRes?.outputData?.keyframes || keyframesRes?.outputData?.results || []
+  const lastFrameMap: Record<string, string> = {}
   const actionChangeMap: Record<string, string> = {}
   for (const kf of keyframesData) {
-    if (kf.shotId) actionChangeMap[kf.shotId] = kf.actionChange || ''
+    if (kf.shotId) {
+      if (kf.lastFrameUrl) lastFrameMap[kf.shotId] = kf.lastFrameUrl
+      if (kf.actionChange) actionChangeMap[kf.shotId] = kf.actionChange
+    }
   }
 
-  // SWR 数据首次到达时同步到本地状态
+  // SWR 数据首次到达时同步到本地状态（合并 lastFrameUrl 和 actionChange）
   useEffect(() => {
     if (storyboardShots.length > 0 && !hasSynced) {
       const shotsWithAction = storyboardShots.map((s) => ({
         ...s,
+        lastFrameUrl: lastFrameMap[s.shotId] || s.lastFrameUrl,
         actionChange: actionChangeMap[s.shotId] || '',
       }))
       setLocalShots(shotsWithAction)
       setHasSynced(true)
     }
-  }, [storyboardShots.length, hasSynced])
+  }, [storyboardShots.length, hasSynced, Object.keys(lastFrameMap).length])
 
   // 当 SWR 数据变化时（如从其他界面保存后），如果已同步则更新
   useEffect(() => {
     if (hasSynced && storyboardShots.length > 0) {
       const shotsWithAction = storyboardShots.map((s) => ({
         ...s,
+        lastFrameUrl: lastFrameMap[s.shotId] || s.lastFrameUrl,
         actionChange: actionChangeMap[s.shotId] || '',
       }))
       setLocalShots(shotsWithAction)
     }
-  }, [storyboardShots.length])
+  }, [storyboardShots.length, Object.keys(lastFrameMap).length])
 
   function handleShotsChange(next: KeyframeShot[]) {
     setLocalShots(next)
@@ -4604,21 +4611,27 @@ function KeyframesPanel({
     }
   }
 
-  // 生成全部尾帧
-  function handleGenerateAll() {
-    console.log('[KEYFRAMES-GENERATE-ALL] 开始生成全部尾帧')
-    onExecute('KEYFRAMES', { action: 'generate-prompts' })
+  // PROCESSING 状态单独处理（显示加载状态）
+  if (step.status === 'PROCESSING') {
+    return <ProcessingBlock message="正在生成尾帧..." />
   }
 
-  // 有 shots 且 KEYFRAMES 步骤已完成
-  const hasShots = localShots.length > 0
-  const showEditor = step.status === 'COMPLETED' && hasShots
+  // 生成全部尾帧（批量）
+  function handleGenerateAll() {
+    console.log('[KEYFRAMES-GENERATE-ALL] 开始生成全部尾帧')
+    onExecute('KEYFRAMES', { action: 'generate-images' })
+  }
 
-  // PROMPT_READY：提示词预览
+  // 只要有 shots 数据就显示编辑器（不再要求 step.status === 'COMPLETED'）
+  const hasShots = localShots.length > 0
+
+  // PROMPT_READY：提示词预览（仅在没有 shots 时显示，作为引导）
   const kfPrompts = keyframesRes?.outputData?.prompts || step.outputData?.prompts || []
   const kfDefaultRatio = keyframesRes?.outputData?.aspectRatio || step.outputData?.aspectRatio || '16:9'
   const kfDefaultModel = keyframesRes?.outputData?.imageModel || step.outputData?.imageModel || IMAGE_MODELS.primary
-  if (kfPrompts.length > 0 && step.status !== 'COMPLETED') {
+
+  // 无 shots 时显示提示词预览（引导用户先生成分镜）
+  if (!hasShots) {
     return (
       <div className="space-y-4">
         <PromptPreviewWithRatio
@@ -4639,7 +4652,8 @@ function KeyframesPanel({
     )
   }
 
-  if (showEditor) {
+  // 有 shots 时显示纵向分镜卡片布局（每张卡片有独立状态和生成按钮）
+  if (hasShots) {
     return (
       <div className="space-y-4">
         {/* 顶部工具栏 */}
