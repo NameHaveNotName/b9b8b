@@ -83,6 +83,7 @@ function VoiceoverSplitView({
   const voiceoversByShotId = useMemo(() => {
     const map = new Map<string, any[]>()
     for (const s of segments) {
+      // shotId 在数据库中存储为 act{actNumber}_{shotId} 格式（如 act1_shot_001）
       if (!map.has(s.shotId)) map.set(s.shotId, [])
       map.get(s.shotId)!.push(s)
     }
@@ -141,7 +142,10 @@ function VoiceoverSplitView({
               <div className="hidden sm:block bg-stone-50/50 px-4 py-2 text-xs font-medium text-stone-500">分镜</div>
               <div className="hidden sm:block bg-stone-50/50 px-4 py-2 text-xs font-medium text-stone-500">配音</div>
               {actShots.map((shot: any) => {
-                const shotVoiceovers = voiceoversByShotId.get(shot.shotId) || []
+                // 使用与数据库相同的 composite key 格式查询配音
+                const actNum = shot.actNumber ?? 0
+                const uniqueShotId = `act${actNum}_${shot.shotId}`
+                const shotVoiceovers = voiceoversByShotId.get(uniqueShotId) || []
                 return (
                   <Fragment key={shot.shotId}>
                     {/* 分镜 */}

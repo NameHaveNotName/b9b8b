@@ -152,10 +152,14 @@ export async function generateVoiceoverScripts(
   const characterVoiceMap = await determineCharacterVoiceAssignments(characters)
   const characterVoiceJson = JSON.stringify(characterVoiceMap)
 
+  // Step 2: 为每个 shot 创建唯一的 act 前缀 ID（跨幕区分同 shotId）
+  const makeUniqueShotId = (shotId: string, actNumber: number) => `act${actNumber}_${shotId}`
+
   const storyBrief = buildStoryBrief(framework)
+  // 使用 uniqueShotId 作为唯一标识符传递给 LLM
   const shotsJson = JSON.stringify(
     shots.map((s) => ({
-      shotId: s.shotId,
+      shotId: makeUniqueShotId(s.shotId, s.actNumber ?? 0),  // 使用 act 前缀的唯一 ID
       actNumber: s.actNumber,
       sceneName: s.sceneName,
       description: s.description,
@@ -201,7 +205,24 @@ export async function generateVoiceoverScripts(
 
   // 过滤 shotId 不存在的条目，并建立 shotId → actNumber 映射
   const shotIdToAct = new Map(shots.map((s) => [s.shotId, s.actNumber ?? 0]))
-  const validSegments = segments.filter((s) => shotIdToAct.has(s.shotId))
+  // 建立 uniqueShotId → (shotId, actNumber) 的反向映射
+  const uniqueShotIdToOriginal = new Map<string, { shotId: string; actNumber: number }>()
+  for (const s of shots) {
+    const act = s.actNumber ?? 0
+    const uniqueShotId = makeUniqueShotId(s.shotId, act)
+    uniqueShotIdToOriginal.set(uniqueShotId, { shotId: s.shotId, actNumber: act })
+  }
+  // LLM 返回的 shotId 需要匹配 uniqueShotId 格式：act{actNumber}_{shotId}
+  const validSegments = segments.filter((seg) => {
+    // 尝试直接匹配 uniqueShotId
+    if (uniqueShotIdToOriginal.has(seg.shotId)) return true
+    // 尝试匹配原始 shotId（从所有 act 中找第一个匹配的）
+    if (shotIdToAct.has(seg.shotId)) {
+      // 为兼容旧数据，使用 act0 作为默认值
+      return true
+    }
+    return false
+  })
   if (validSegments.length === 0) {
     throw new Error('LLM 返回的配音片段 shotId 均不匹配现有分镜')
   }
