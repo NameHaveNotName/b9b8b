@@ -18,7 +18,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, Image as ImageIcon, Play, Loader2, Check } from 'lucide-react'
+import { GripVertical, Image as ImageIcon, Play, Loader2, Check, RefreshCw } from 'lucide-react'
 import ImageLightbox from '@/components/generation/ImageLightbox'
 import type { Shot } from '@/app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable'
 
@@ -69,6 +69,7 @@ function KeyframeCard({
   const [editingAction, setEditingAction] = useState(false)
   const [actionValue, setActionValue] = useState(shot.actionChange || '')
   const [lightboxOpen, setLightboxOpen] = useState<'first' | 'last' | null>(null)
+  const [hoveredLastFrame, setHoveredLastFrame] = useState(false)
 
   const firstFrameUrl = shot.mode === 'reference' ? shot.referenceImageUrl : shot.firstFrameUrl
 
@@ -150,7 +151,11 @@ function KeyframeCard({
           </div>
 
           {/* 尾帧 */}
-          <div className="relative">
+          <div
+            className="relative"
+            onMouseEnter={() => setHoveredLastFrame(true)}
+            onMouseLeave={() => setHoveredLastFrame(false)}
+          >
             {shot.lastFrameUrl ? (
               <>
                 <img
@@ -170,6 +175,22 @@ function KeyframeCard({
                   }}
                 />
                 <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-white">尾帧</span>
+                {hoveredLastFrame && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-black/60">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onGenerate(shot.shotId, actNumber) }}
+                      disabled={!!generatingShotId}
+                      className="flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-stone-700 shadow-sm backdrop-blur-sm transition hover:bg-white disabled:opacity-50"
+                      title="重新生成尾帧"
+                    >
+                      {generatingShotId === shot.shotId ? (
+                        <><Loader2 className="h-3 w-3 animate-spin" />生成中...</>
+                      ) : (
+                        <><RefreshCw className="h-3 w-3" />重做</>
+                      )}
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <button
@@ -273,13 +294,13 @@ function KeyframeCard({
               />
             </div>
           ) : (
-            <button
-              onClick={() => { setEditingAction(true); setActionValue(shot.actionChange || '') }}
-              className="text-stone-400 hover:text-stone-600 transition text-xs"
-              title="点击编辑动作变化"
+            <div
+              onDoubleClick={() => { setEditingAction(true); setActionValue(shot.actionChange || '') }}
+              className="cursor-text text-stone-400 hover:text-stone-600 transition text-xs"
+              title="双击编辑动作变化"
             >
               {shot.actionChange || '+ 动作变化'}
-            </button>
+            </div>
           )}
         </div>
       </div>
