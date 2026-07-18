@@ -40,6 +40,7 @@ const DURATIONS = [3, 5, 7]
 
 function KeyframeCard({
   shot,
+  actNumber,
   characterMap,
   onUpdate,
   onGenerate,
@@ -47,9 +48,10 @@ function KeyframeCard({
   onActionChange,
 }: {
   shot: Shot
+  actNumber: number
   characterMap: Record<string, string>
   onUpdate: (updated: Shot) => void
-  onGenerate: (shotId: string) => void
+  onGenerate: (shotId: string, actNumber: number) => void
   generatingShotId: string | null
   onActionChange?: (shotId: string, actionChange: string) => void
 }) {
@@ -171,7 +173,7 @@ function KeyframeCard({
               </>
             ) : (
               <button
-                onClick={() => onGenerate(shot.shotId)}
+                onClick={() => onGenerate(shot.shotId, actNumber)}
                 disabled={!!generatingShotId}
                 className="flex h-14 w-20 flex-col items-center justify-center rounded-md border border-dashed border-amber-300 bg-amber-50/50 text-amber-600 transition hover:bg-amber-100 disabled:opacity-50"
               >
@@ -340,21 +342,22 @@ export default function KeyframesTable({
   }
 
   // 单条尾帧生成
-  async function handleGenerateLastFrame(shotId: string) {
+  async function handleGenerateLastFrame(shotId: string, actNumber: number) {
     setGeneratingShotId(shotId)
-    console.log('[KEYFRAMES-GENERATE] 生成尾帧, shotId:', shotId)
+    console.log('[KEYFRAMES-GENERATE] 生成尾帧, shotId:', shotId, 'actNumber:', actNumber)
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/keyframes/generate-last`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shotId }),
+        body: JSON.stringify({ shotId, actNumber }),
       })
       const result = await res.json()
       if (!res.ok || !result.success) {
         throw new Error(result.message || result.error || `HTTP ${res.status}`)
       }
+      // 使用 composite key (actNumber, shotId) 更新本地状态
       const next = shots.map((s) =>
-        s.shotId === shotId ? { ...s, lastFrameUrl: result.lastFrameUrl } : s
+        s.actNumber === actNumber && s.shotId === shotId ? { ...s, lastFrameUrl: result.lastFrameUrl } : s
       )
       onShotsChange(next)
       await saveShots(next)
@@ -431,33 +434,32 @@ export default function KeyframesTable({
               </div>
             </div>
 
-            {/* 分镜卡片列表 */}
-            <div className="divide-y divide-stone-100">
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={(e) => handleDragEnd(e, actNumber, actShots)}
+            {/* 分镜卡片列表（纵向单列） */}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={(e) => handleDragEnd(e, actNumber, actShots)}
+            >
+              <SortableContext
+                items={actShots.map((s) => s.shotId)}
+                strategy={verticalListSortingStrategy}
               >
-                <SortableContext
-                  items={actShots.map((s) => s.shotId)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
-                    {actShots.map((shot) => (
-                      <KeyframeCard
-                        key={shot.shotId}
-                        shot={shot}
-                        characterMap={characterMap}
-                        onUpdate={handleUpdateShot}
-                        onGenerate={handleGenerateLastFrame}
-                        generatingShotId={generatingShotId}
-                        onActionChange={onActionChange}
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
-            </div>
+                <div className="divide-y divide-stone-100">
+                  {actShots.map((shot) => (
+                    <KeyframeCard
+                      key={`${actNumber}-${shot.shotId}`}
+                      shot={shot}
+                      actNumber={actNumber}
+                      characterMap={characterMap}
+                      onUpdate={handleUpdateShot}
+                      onGenerate={handleGenerateLastFrame}
+                      generatingShotId={generatingShotId}
+                      onActionChange={onActionChange}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           </div>
         )
       })}

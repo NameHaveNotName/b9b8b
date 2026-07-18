@@ -4483,23 +4483,28 @@ function KeyframesPanel({
 
   // 从 KEYFRAMES outputData 读取 keyframes 数据（包含 lastFrameUrl 和 actionChange）
   const keyframesData = keyframesRes?.outputData?.keyframes || keyframesRes?.outputData?.results || []
+  // 使用 composite key (actNumber|shotId) 避免跨幕同名镜头冲突
   const lastFrameMap: Record<string, string> = {}
   const actionChangeMap: Record<string, string> = {}
   for (const kf of keyframesData) {
     if (kf.shotId) {
-      if (kf.lastFrameUrl) lastFrameMap[kf.shotId] = kf.lastFrameUrl
-      if (kf.actionChange) actionChangeMap[kf.shotId] = kf.actionChange
+      const key = `${kf.actNumber || 0}|${kf.shotId}`
+      if (kf.lastFrameUrl) lastFrameMap[key] = kf.lastFrameUrl
+      if (kf.actionChange) actionChangeMap[key] = kf.actionChange
     }
   }
 
   // SWR 数据首次到达时同步到本地状态（合并 lastFrameUrl 和 actionChange）
   useEffect(() => {
     if (storyboardShots.length > 0 && !hasSynced) {
-      const shotsWithAction = storyboardShots.map((s) => ({
-        ...s,
-        lastFrameUrl: lastFrameMap[s.shotId] || s.lastFrameUrl,
-        actionChange: actionChangeMap[s.shotId] || '',
-      }))
+      const shotsWithAction = storyboardShots.map((s) => {
+        const key = `${s.actNumber || 0}|${s.shotId}`
+        return {
+          ...s,
+          lastFrameUrl: lastFrameMap[key] || s.lastFrameUrl,
+          actionChange: actionChangeMap[key] || '',
+        }
+      })
       setLocalShots(shotsWithAction)
       setHasSynced(true)
     }
@@ -4508,10 +4513,12 @@ function KeyframesPanel({
   // 当 SWR 数据变化时（如从其他界面保存后），如果已同步则更新
   useEffect(() => {
     if (hasSynced && storyboardShots.length > 0) {
-      const shotsWithAction = storyboardShots.map((s) => ({
-        ...s,
-        lastFrameUrl: lastFrameMap[s.shotId] || s.lastFrameUrl,
-        actionChange: actionChangeMap[s.shotId] || '',
+      const shotsWithAction = storyboardShots.map((s) => {
+        const key = `${s.actNumber || 0}|${s.shotId}`
+        return {
+          ...s,
+          lastFrameUrl: lastFrameMap[key] || s.lastFrameUrl,
+          actionChange: actionChangeMap[key] || '',
       }))
       setLocalShots(shotsWithAction)
     }

@@ -36,6 +36,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   if (!body?.shotId) {
     return NextResponse.json({ error: '需要 shotId' }, { status: 400 })
   }
+  const actNumber = typeof body.actNumber === 'number' ? body.actNumber : null
 
   // 从 STORYBOARD 步骤读取 shots
   const storyboardStep = await prisma.workflowStep.findUnique({
@@ -46,9 +47,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   }
 
   const storyboardShots = (storyboardStep.outputData as any)?.shots || []
-  const shot = storyboardShots.find((s: any) => s.shotId === body.shotId)
+  // 使用 composite key (actNumber, shotId) 查找对应镜头
+  const shot = storyboardShots.find((s: any) =>
+    s.shotId === body.shotId && (actNumber == null || s.actNumber === actNumber)
+  )
   if (!shot) {
-    return NextResponse.json({ error: `未找到 shot: ${body.shotId}` }, { status: 404 })
+    return NextResponse.json({ error: `未找到 shot: ${body.shotId} (act ${actNumber})` }, { status: 404 })
   }
 
   // 获取 KEYFRAMES 步骤（用于创建 Asset 记录）
@@ -142,20 +146,25 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       }
     })
 
-    // 将 lastFrameUrl 写回 STORYBOARD 步骤的 shots 数组
+    // 将 lastFrameUrl 写回 STORYBOARD 步骤的 shots 数组（使用 composite key）
     const updatedShots = storyboardShots.map((s: any) =>
-      s.shotId === body.shotId ? { ...s, lastFrameUrl: result.url } : s
+      s.shotId === body.shotId && (actNumber == null || s.actNumber === actNumber)
+        ? { ...s, lastFrameUrl: result.url }
+        : s
     )
     await prisma.workflowStep.update({
       where: { id: storyboardStep.id },
       data: { outputData: { ...(storyboardStep.outputData as any), shots: updatedShots } }
     })
 
-    // 同步更新 KEYFRAMES 步骤的 outputData（保留兼容性）
+    // 同步更新 KEYFRAMES 步骤的 outputData（使用 composite key）
     const kfOutputData = (keyframesStep.outputData as any) || {}
-    const kfResults = (kfOutputData.results || []).filter((r: any) => r.shotId !== body.shotId)
+    const kfResults = (kfOutputData.results || []).filter((r: any) =>
+      !(r.shotId === body.shotId && (actNumber == null || r.actNumber === actNumber))
+    )
     kfResults.push({
       shotId: body.shotId,
+      actNumber: shot.actNumber,
       firstFrameUrl: shot.firstFrameUrl || shot.referenceImageUrl || '',
       lastFrameUrl: result.url,
       description: shot.description,
