@@ -637,6 +637,33 @@ export default function VideoDirectPanel({
               <audio src={musicUrl} controls className="mt-1 w-full" />
             </div>
           )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={handleCompose}
+              disabled={isComposing}
+              className="flex items-center gap-1 rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
+            >
+              <Film className="h-3 w-3" />
+              {isComposing ? '合成中...' : '重新合成'}
+            </button>
+            <button
+              onClick={() => onExecute('VIDEO_DIRECT', { action: 'generate-bgm' })}
+              disabled={isExecuting}
+              className="flex items-center gap-1 rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
+            >
+              <Music className="h-3 w-3" />
+              {musicUrl ? '重新生成音乐' : '生成音乐'}
+            </button>
+            {voiceoverSegments.length > 0 && (
+              <button
+                onClick={() => setVoiceoverMode(true)}
+                className="flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+              >
+                <Mic className="h-3 w-3" />
+                配音表 ({voiceoverSegments.length})
+              </button>
+            )}
+          </div>
         </div>
 
         <div>
