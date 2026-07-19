@@ -48,6 +48,8 @@ function VoiceoverSplitView({
   onStartEditingVoice,
   onCancelEditingVoice,
   onEditingVoiceChange,
+  handleGenerateVoiceoverScripts,
+  isGeneratingScripts,
 }: {
   shots: any[]
   segments: any[]
@@ -69,6 +71,8 @@ function VoiceoverSplitView({
   onStartEditingVoice: (s: any) => void
   onCancelEditingVoice: () => void
   onEditingVoiceChange: (v: string) => void
+  handleGenerateVoiceoverScripts: () => void
+  isGeneratingScripts: boolean
 }) {
   const shotsByAct = useMemo(() => {
     const grouped = new Map<number, any[]>()
@@ -850,6 +854,8 @@ export default function VideoDirectPanel({
             onStartEditingVoice={startEditingVoice}
             onCancelEditingVoice={cancelEditingVoice}
             onEditingVoiceChange={setEditingVoiceId}
+            handleGenerateVoiceoverScripts={handleGenerateVoiceoverScripts}
+            isGeneratingScripts={isGeneratingScripts}
           />
         )}
 
