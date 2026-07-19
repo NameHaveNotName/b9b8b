@@ -4,23 +4,25 @@
 输入信息：
 1. 角色列表（包含角色名、描述、角色参考图）
 2. 影片框架设定（片名、情绪基调、视觉风格等）
-3. MiniMax 可用音色列表（仅作为参考，可不选择列表中的音色）
+3. MiniMax 可用音色列表（仅作为参考，M3 也可以根据角色描述自主选择最合适的音色）
 
 要求：
 1. 仔细阅读每个角色的描述和参考图，判断角色的性别、年龄、性格、情绪特征
 2. 参考影片的情绪基调和视觉风格，选择与整体风格匹配的音色
 3. 输出严格 JSON 对象，key 是角色名称，value 可以是：
-   - 直接的 voiceId 字符串（推荐选择列表中的音色）
+   - 直接的 voiceId 字符串
    - 或对象 { voiceId: "xxx", reason: "选择理由" }
-4. 如果对列表中的音色不满意，可以根据角色描述推荐其他音色风格（如"活泼可爱的年轻女声"、"低沉沧桑的男声"等），并从列表中选择最接近的一个
+4. 如果对列表中的音色不满意，可以根据角色描述自主推荐最合适的音色风格（如"活泼可爱的年轻女声"、"低沉沧桑的男声"等），只要是 MiniMax TTS 支持的音色即可
 5. 音色必须与角色匹配！参考示例：
-   - 可爱小女孩/萝莉 → female-shaonv 或 female-yaoyao
-   - 卡通吉祥物/萌系角色 → female-yaoyao
-   - 成年男性/大叔 → male-qn-badao 或 male-qn-jingying
-   - 年轻男生/大学生 → male-qn-daxuesheng
-   - 成熟女性/御姐 → female-yujie
-   - 旁白/叙述 → male-qn-qingse
-   - 活泼少女 → female-shaonv 或 female-yaoyao
+   - 可爱小女孩/萝莉 → female-shaonv, female-tianmei, lovely_girl 等
+   - 卡通吉祥物/萌系角色 → cartoon_pig, female-shaonv, tianxin_xiaoling 等
+   - 成年男性/大叔 → male-qn-badao, male-qn-jingying, junlang_nanyou 等
+   - 年轻男生/大学生 → male-qn-daxuesheng, chunzhen_xuedi, pure-hearted_boy 等
+   - 成熟女性/御姐 → female-yujie, wumei_yujie, female-chengshu 等
+   - 旁白/叙述 → male-qn-qingse, male-qn-jingying, Chinese_Male_Announcer 等
+   - 活泼少女 → female-shaonv, tianxin_xiaoling, qiaopi_mengmei 等
+   - 温柔男友 → junlang_nanyou, lengdan_xiongzhang, gentle_youth 等
+   - 高冷角色 → lengdan_xiongzhang, Chinese_Mature_Woman, Arrogant_Miss 等
 
 【角色列表】（包含描述和参考图URL）
 {{CHARACTERS_JSON}}
@@ -28,7 +30,7 @@
 【影片框架设定】
 {{FRAMEWORK_CONTEXT}}
 
-可选音色列表（MiniMax TTS voice_id，仅作为参考）：
+参考音色列表（MiniMax TTS voice_id）：
 {{VOICE_CATALOG}}
 
 只输出 JSON 对象，不要任何其他解释、注释或 markdown 代码块。
