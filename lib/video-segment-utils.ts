@@ -451,14 +451,15 @@ export async function composeVideo(args: {
     let musicUrl: string | null = null
     let musicIsMock = true
 
-    if (isTrailer) {
-      // 优先从 step outputData 读取已有的 BGM（用户可能已单独生成）
-      const step = await prisma.workflowStep.findUnique({
-        where: { projectId_stepType: { projectId, stepType: 'TRAILER' } },
-      })
-      const stepOutput = (step?.outputData as any) || {}
-      const existingBgmUrl = stepOutput.musicUrl
+    // 优先从 step outputData 读取已有的 BGM（用户可能已单独生成）
+    const stepType = isTrailer ? 'TRAILER' : 'VIDEO_DIRECT'
+    const stepForBgm = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType } },
+    })
+    const stepOutput = (stepForBgm?.outputData as any) || {}
+    const existingBgmUrl = stepOutput.musicUrl
 
+    if (existingBgmUrl || isTrailer) {
       let bgmPath: string
       let bgmExt = 'aac'
       let bgmMime = 'audio/aac'
@@ -473,7 +474,7 @@ export async function composeVideo(args: {
         musicIsMock = stepOutput.musicIsMock ?? false
         console.log(`[COMPOSE] 复用已有 BGM url=${existingBgmUrl} isMock=${musicIsMock}`)
       } else {
-        // 没有已有 BGM，生成新的
+        // TRAILER 且没有已有 BGM，生成新的
         const fwStep = await prisma.workflowStep.findUnique({
           where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
         })

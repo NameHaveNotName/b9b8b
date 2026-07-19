@@ -629,6 +629,14 @@ export default function VideoDirectPanel({
             <span>总时长: {formatTime(totalDuration)}</span>
             <span>{segments.length} 个片段</span>
           </div>
+          {musicUrl && (
+            <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
+              <span className="text-xs text-stone-500">
+                背景音乐 {musicIsMock ? '(静音)' : ''}
+              </span>
+              <audio src={musicUrl} controls className="mt-1 w-full" />
+            </div>
+          )}
         </div>
 
         <div>
