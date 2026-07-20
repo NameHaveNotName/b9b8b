@@ -49,6 +49,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const updateData: any = {}
     if (body.selectedStyleId !== undefined) {
       updateData.selectedStyleId = body.selectedStyleId
+      // 兼容路径：选风格图时同步推进 STYLE 步骤的解锁状态，避免下游步骤报"前置未完成"
+      if (body.selectedStyleId) {
+        updateData.stepStyleDone = true
+      }
     }
     if (body.title !== undefined) {
       updateData.title = body.title

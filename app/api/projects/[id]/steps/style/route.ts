@@ -649,7 +649,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     styleRefUrl,
   }
 
-  // 更新数据库（事务：workflowStep + project.selectedStyleId 双写，保证前端 isSelected 正确读取）
+  // 更新数据库（事务：workflowStep + project.selectedStyleId + stepStyleDone 三写，保证前端解锁状态正确）
   const [updated] = await prisma.$transaction([
     prisma.workflowStep.update({
       where: { id: existing!.id },
@@ -657,7 +657,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }),
     prisma.project.update({
       where: { id: params.id },
-      data: { selectedStyleId },
+      data: { selectedStyleId, stepStyleDone: true },
     }),
   ])
 

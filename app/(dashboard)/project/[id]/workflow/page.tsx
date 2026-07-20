@@ -161,6 +161,15 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
           isAvailable = shots.some((shot: any) => shot.firstFrameUrl)
         }
 
+        // 兼容：若 STYLE 步骤已有 selectedStyleId / selectedRef 但 stepStyleDone 未被写入（旧数据/迁移遗漏），也视为可用
+        if (stepType === 'CHARACTER' && !isAvailable) {
+          const styleStep = steps.find((s: any) => s.stepType === 'STYLE')
+          const styleOutput = (styleStep?.outputData as any) || {}
+          if (styleOutput.selectedStyleId || styleOutput.styleRefUrl || project?.selectedStyleId) {
+            isAvailable = true
+          }
+        }
+
         const canRun = isDone || isFailed || isProcessing || isAvailable
         if (!canRun) {
           const stepLabel = STEP_LABELS[stepType] || stepType
