@@ -613,8 +613,8 @@ export default function VideoDirectPanel({
     return `${m}:${String(s).padStart(2, '0')}`
   }
 
-  // 合成完成后
-  if (combinedVideoUrl) {
+  // 合成完成后（配音模式优先）
+  if (combinedVideoUrl && !voiceoverMode) {
     return (
       <div className="space-y-6">
         <div className="sticky top-0 z-10 bg-white pb-4 pt-2">
