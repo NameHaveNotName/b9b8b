@@ -300,127 +300,12 @@ export async function generateVoiceoverScripts(
     })),
   })
 
-  console.log(`[VOICEOVER-SCRIPTS] 已为项目 ${projectId} 创建 ${created.count} 条配音文案`)
-
-  // 【2026-XX-XX】用配音文案反向影响分镜表：把台词注入到 VideoSegment.prompt，让角色对口型
-  // 只覆盖 VideoSegment.prompt，不动其他字段（shotId、sequence、duration、status 等都保留）
-  // 这是"尽力而为"操作，失败不影响配音文案本身
-  try {
-    await regenerateVideoPromptsWithVoiceover(projectId, stepName, shots, validSegments, framework)
-  } catch (e: any) {
-    console.warn('[VOICEOVER-SCRIPTS] 反向生成 videoPrompt 失败（不影响配音）:', e?.message)
-  }
+console.log(`[VOICEOVER-SCRIPTS] 已为项目 ${projectId} 创建 ${created.count} 条配音文案`)
 
   return prisma.voiceoverSegment.findMany({
     where: { projectId, stepName },
     orderBy: { sequence: 'asc' },
   })
-}
-
-/**
- * 根据配音文案 + 原分镜描述，重新生成每个分镜的英文 videoPrompt，并覆盖 VideoSegment.prompt。
- *
- * 设计要点：
- * 1. 只覆盖 VideoSegment.prompt 字段，不动 shotId/sequence/duration/status 等
- * 2. 若配音文案包含台词，prompt 中会强制要求角色"lip-sync"念出台词
- * 3. 若配音文案为空（纯空镜），则按常规方式生成英文 prompt（不带 lip-sync 指令）
- * 4. 如果某个 shotId 在 VideoSegment 中不存在（用户还没点"开始执行"创建 segments），
- *    该 shot 会被跳过，等用户后续点"开始执行"时仍会走原 generateSegmentPrompts
- */
-async function regenerateVideoPromptsWithVoiceover(
-  projectId: string,
-  stepName: string,
-  shots: any[],
-  voiceoverSegments: VoiceoverScriptItem[],
-  framework: any
-): Promise<void> {
-  // 建立 shotId(unique) → voiceover 的映射
-  const makeUniqueShotId = (shotId: string, actNumber: number) => `act${actNumber}_${shotId}`
-  const voiceoverByShot = new Map<string, VoiceoverScriptItem>()
-  for (const vo of voiceoverSegments) {
-    voiceoverByShot.set(vo.shotId, vo)
-  }
-
-  // 读取已存在的 VideoSegment（用于覆盖 prompt）
-  const existingSegments = await prisma.videoSegment.findMany({
-    where: { projectId, stepName },
-    orderBy: { sequence: 'asc' },
-  })
-  if (existingSegments.length === 0) {
-    console.log('[VIDEO-PROMPT-REGEN] 没有已存在的 VideoSegment，跳过（用户尚未点开始执行）')
-    return
-  }
-
-  // 构建 LLM 输入：每个 shot 的原 description + 对应 voiceover
-  const shotsWithVoiceover = shots.map((s) => {
-    const uniqueShotId = makeUniqueShotId(s.shotId, s.actNumber ?? 0)
-    const vo = voiceoverByShot.get(uniqueShotId)
-    return {
-      shotId: uniqueShotId,
-      originalShotId: s.shotId,
-      actNumber: s.actNumber,
-      description: s.description,
-      cameraMove: s.cameraMove,
-      duration: s.duration,
-      characters: s.characters,
-      sceneName: s.sceneName,
-      voiceoverText: vo?.text || '',
-      speaker: vo?.speaker || '',
-    }
-  })
-
-  const storyBrief = buildStoryBrief(framework)
-  const prompt = loadPromptTemplate('video-prompt-with-voiceover', {
-    STORY_BRIEF: storyBrief,
-    SHOTS_WITH_VOICEOVER_JSON: JSON.stringify(shotsWithVoiceover, null, 2),
-  })
-
-  const textClient = await getTextClient()
-  const resultText = await textClient.generate(prompt, { temperature: 0.6, maxTokens: 6144 })
-
-  let results: Array<{ shotId: string; videoPrompt?: string }> = []
-  try {
-    const parsed = extractJsonFromMarkdown(resultText)
-    if (Array.isArray(parsed)) {
-      results = parsed
-    } else if (parsed && Array.isArray(parsed.shots)) {
-      results = parsed.shots
-    } else if (parsed && Array.isArray(parsed.prompts)) {
-      results = parsed.prompts
-    } else {
-      throw new Error('LLM 返回的 videoPrompt 不是数组')
-    }
-  } catch (e: any) {
-    console.warn('[VIDEO-PROMPT-REGEN] JSON 解析失败:', e?.message)
-    console.warn('[VIDEO-PROMPT-REGEN] 原始文本:', resultText.slice(0, 300))
-    return
-  }
-
-  // 建立 uniqueShotId → videoPrompt 映射
-  const promptByShot = new Map<string, string>()
-  for (const r of results) {
-    if (r.shotId && r.videoPrompt) {
-      promptByShot.set(r.shotId, r.videoPrompt)
-    }
-  }
-
-  // 把新的 videoPrompt 覆盖到 VideoSegment.prompt
-  // 通过 uniqueShotId 关联：VoiceoverSegment.shotId 是 act{N}_{shotId} 格式
-  let updated = 0
-  for (const seg of existingSegments) {
-    // seg.shotId 已经是 act{N}_{shotId} 格式（与 voiceoverSegments.shotId 一致）
-    const newPrompt = promptByShot.get(seg.shotId)
-    if (!newPrompt) continue
-    if (seg.prompt === newPrompt) continue
-
-    await prisma.videoSegment.update({
-      where: { id: seg.id },
-      data: { prompt: newPrompt },
-    })
-    updated++
-  }
-
-  console.log(`[VIDEO-PROMPT-REGEN] 已覆盖 ${updated}/${existingSegments.length} 个 VideoSegment.prompt`)
 }
 
 /**

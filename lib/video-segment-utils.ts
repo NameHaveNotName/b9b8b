@@ -9,6 +9,8 @@
 
 import { prisma } from './prisma'
 import { generateText, generateVideoFromImage, generateDirectVideo as generateDirectVideoXiaomi } from './api-clients/xiaomi'
+import { loadPromptTemplate, extractJsonFromMarkdown } from './prompts'
+import { getTextClient } from './api-clients'
 import { TEXT_MODELS, VIDEO_MODELS } from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
 import { generateTrailerBgm } from './bgm-generator'
@@ -277,6 +279,86 @@ export async function generateConceptSegmentPrompts(
   return segments
 }
 
+interface FinalVideoPromptResult {
+  videoPrompt: string
+  lastFrameUrl: string | null
+}
+
+/**
+ * 为单个 VideoSegment 生成最终的英文 videoPrompt。
+ * 综合：分镜描述、首帧/尾帧 imagePrompt、actionChange、配音文案。
+ * 尽力而为：如果 LLM 失败，返回原来的 prompt。
+ */
+async function buildFinalVideoPrompt(
+  projectId: string,
+  stepName: string,
+  segment: any
+): Promise<FinalVideoPromptResult> {
+  const originalPrompt = segment.prompt || ''
+  const shotId = segment.shotId
+
+  try {
+    // 1. 读取 STORYBOARD 数据：分镜描述 + 首帧 prompt
+    const storyboardStep = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType: 'STORYBOARD' } },
+    })
+    const storyboardOutput = (storyboardStep?.outputData as any) || {}
+    const shots: any[] = storyboardOutput.shots || []
+    const shotPrompts: any[] = storyboardOutput.shotPrompts || []
+    const shot = shots.find((s: any) => s.shotId === shotId) || shots[segment.sequence] || {}
+    const firstFramePrompt = shotPrompts.find((p: any) => p.shotId === shotId)?.prompt || ''
+    const description = shot.description || ''
+    const actionChange = shot.actionChange || ''
+
+    // 2. 读取 KEYFRAMES 数据：尾帧 prompt + lastFrameUrl
+    const keyframeStep = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType: 'KEYFRAMES' } },
+    })
+    const keyframeOutput = (keyframeStep?.outputData as any) || {}
+    const keyframePrompts: any[] = keyframeOutput.prompts || []
+    const keyframeResults: any[] = keyframeOutput.results || keyframeOutput.keyframes || []
+    const lastFramePrompt = keyframePrompts.find((p: any) => p.shotId === shotId)?.englishPrompt || ''
+    const keyframeResult = keyframeResults.find((r: any) => r.shotId === shotId)
+    const resultActionChange = keyframeResult?.actionChange || actionChange
+    const lastFrameUrl = keyframeResult?.lastFrameUrl || null
+
+    // 3. 读取配音文案
+    const voiceover = await prisma.voiceoverSegment.findFirst({
+      where: { projectId, stepName, shotId },
+      select: { text: true, speaker: true },
+    })
+    const voiceoverText = voiceover?.text || ''
+    const speaker = voiceover?.speaker || ''
+
+    // 4. 如果没有任何额外上下文，直接返回原 prompt
+    if (!firstFramePrompt && !lastFramePrompt && !voiceoverText && !resultActionChange) {
+      return { videoPrompt: originalPrompt, lastFrameUrl }
+    }
+
+    // 5. 调 LLM 生成最终 videoPrompt
+    const promptText = loadPromptTemplate('video-prompt-from-context', {
+      SHOT_DESCRIPTION: description || segment.caption || originalPrompt,
+      FIRST_FRAME_PROMPT: firstFramePrompt || '（无）',
+      LAST_FRAME_PROMPT: lastFramePrompt || '（无）',
+      ACTION_CHANGE: resultActionChange || '（无）',
+      VOICEOVER_TEXT: voiceoverText || '（无）',
+      SPEAKER: speaker || '（无）',
+    })
+
+    const textClient = await getTextClient()
+    const resultText = await textClient.generate(promptText, { temperature: 0.5, maxTokens: 1024 })
+    const parsed = extractJsonFromMarkdown(resultText)
+    if (parsed?.videoPrompt && typeof parsed.videoPrompt === 'string') {
+      console.log(`[VIDEO-PROMPT-BUILD] segment=${segment.id} shot=${shotId} 生成最终 prompt 成功`)
+      return { videoPrompt: parsed.videoPrompt, lastFrameUrl }
+    }
+    return { videoPrompt: originalPrompt, lastFrameUrl }
+  } catch (e: any) {
+    console.warn(`[VIDEO-PROMPT-BUILD] segment=${segment.id} 失败，使用原 prompt:`, e?.message)
+    return { videoPrompt: originalPrompt, lastFrameUrl: null }
+  }
+}
+
 /**
  * 生成单个 VideoSegment 的视频。
  *
@@ -302,6 +384,16 @@ export async function generateOneVideoSegment(args: {
     const isTrailer = stepName === 'TRAILER'
     const isDirect = stepName === 'VIDEO_DIRECT'
 
+    // 动态生成最终 videoPrompt（综合首帧/尾帧/配音/动作变化）
+    let finalPrompt = prompt
+    let lastFrameUrlFromContext: string | null = null
+    const segment = await prisma.videoSegment.findUnique({ where: { id: segmentId } })
+    if (segment) {
+      const ctxResult = await buildFinalVideoPrompt(projectId, stepName, segment)
+      finalPrompt = ctxResult.videoPrompt
+      lastFrameUrlFromContext = ctxResult.lastFrameUrl
+    }
+
     if (isTrailer) {
       // Trailer: 图生视频（复用 Veo 等）
       const trailerCfg = (VIDEO_MODELS as any).trailer || {}
@@ -319,7 +411,7 @@ export async function generateOneVideoSegment(args: {
             console.log(`[SEGMENT ${segmentId}] 尝试图生视频 model=${model}`)
             const r = await generateVideoFromImage({
               model,
-              prompt,
+              prompt: finalPrompt,
               imageUrl,
               duration,
               aspectRatio,
@@ -364,8 +456,8 @@ export async function generateOneVideoSegment(args: {
       try {
         const result = await generateDirectVideoXiaomi({
           firstFrameUrl: imageUrl,
-          lastFrameUrl: null,
-          prompt: prompt || 'A cinematic shot with smooth camera motion',
+          lastFrameUrl: lastFrameUrlFromContext,
+          prompt: finalPrompt || 'A cinematic shot with smooth camera motion',
           model: modelId,
           aspectRatio: '16:9',
           duration,
