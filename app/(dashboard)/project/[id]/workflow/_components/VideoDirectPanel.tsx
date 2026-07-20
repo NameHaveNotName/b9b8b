@@ -654,13 +654,27 @@ export default function VideoDirectPanel({
               <Music className="h-3 w-3" />
               {musicUrl ? '重新生成音乐' : '生成音乐'}
             </button>
-            {voiceoverSegments.length > 0 && (
+            {voiceoverSegments.length > 0 ? (
               <button
                 onClick={() => setVoiceoverMode(true)}
                 className="flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
               >
                 <Mic className="h-3 w-3" />
                 配音表 ({voiceoverSegments.length})
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerateVoiceoverScripts}
+                disabled={isGeneratingScripts || shots.length === 0}
+                className="flex items-center gap-1 rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
+                title="先生成配音文案再进入配音表"
+              >
+                {isGeneratingScripts ? (
+                  <LoaderCircle className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Type className="h-3 w-3" />
+                )}
+                生成配音文案
               </button>
             )}
           </div>
