@@ -40,7 +40,8 @@ export async function getCharacterPortraits(projectId: string): Promise<Record<s
 
   const portraitMap: Record<string, string> = {}
   for (const asset of assets) {
-    const charId = asset.metadata?.characterId
+    const meta = asset.metadata as Record<string, any> | null
+    const charId = meta?.characterId
     if (charId && asset.url) {
       portraitMap[charId] = asset.url
     }
@@ -153,7 +154,8 @@ export async function determineCharacterVoiceAssignments(
       if (typeof voiceData === 'string') {
         voiceId = voiceData
       } else if (typeof voiceData === 'object' && voiceData !== null) {
-        voiceId = voiceData.voiceId || voiceData.voice_id || voiceData.id || ''
+        const voiceObj = voiceData as Record<string, any>
+        voiceId = voiceObj.voiceId || voiceObj.voice_id || voiceObj.id || ''
       }
 
       if (typeof voiceId === 'string' && isValidMinimaxVoiceId(voiceId)) {
