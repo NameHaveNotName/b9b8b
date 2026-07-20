@@ -274,7 +274,13 @@ export async function getImageClient(): Promise<ImageClient> {
             ? 'opening moment, anticipatory posture'
             : 'closing moment, action resolution'
         const singleFrameGuard = 'Single full frame only. Absolutely no split-screen, multi-panel, collage, triptych, diptych, comic layout, before-and-after comparison, or timeline sequence. One image, one moment.'
-        const prompt = `${sceneDesc}, ${phase}. ${singleFrameGuard}`
+        const ar = aspectRatio || '16:9'
+        const orientationHint = /^9:16|3:4|2:3|portrait/i.test(ar)
+          ? 'Portrait orientation, vertical composition, tall frame, full body shot, character centered vertically. The image MUST be taller than wide.'
+          : /^16:9|21:9|4:3|landscape/i.test(ar)
+            ? 'Landscape orientation, cinematic widescreen, horizontal frame. The image MUST be wider than tall.'
+            : ''
+        const prompt = `${sceneDesc}, ${phase}. ${orientationHint ? `${orientationHint} ` : ''}${singleFrameGuard}`
         console.log(`[ASPECT-RATIO] [generateKeyframe] 比例: ${aspectRatio || '16:9'}`)
         const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateKeyframe] 模型: ${model}`)

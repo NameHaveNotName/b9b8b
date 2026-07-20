@@ -121,6 +121,13 @@ async function backgroundComposeDirectVideo(projectId: string) {
       throw new Error('没有已完成的片段可合成')
     }
 
+    // 从 KEYFRAMES step.outputData 读取用户选择的画面比例
+    const keyframeStep = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType: 'KEYFRAMES' } },
+    })
+    const aspectRatio = (keyframeStep?.outputData as any)?.aspectRatio || '16:9'
+    console.log(`[DIRECT-COMPOSE-BG] 使用比例: ${aspectRatio}`)
+
     const { composeVideo } = await import('@/lib/video-segment-utils')
     const result = await composeVideo({
       projectId,
@@ -131,6 +138,7 @@ async function backgroundComposeDirectVideo(projectId: string) {
         videoUrl: s.videoUrl,
         duration: s.duration,
       })),
+      aspectRatio,
     })
 
     console.log(`[DIRECT-COMPOSE-BG] 合成完成 videoUrl=${result.videoUrl}`)
