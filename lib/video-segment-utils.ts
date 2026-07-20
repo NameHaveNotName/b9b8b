@@ -285,11 +285,45 @@ interface FinalVideoPromptResult {
 }
 
 /**
+ * 强制让 videoPrompt 里保留配音文案原文。
+ * LLM 有时会把中文台词翻译成英文，或自己改写中文，导致 lip-sync 节奏不匹配中文配音。
+ * 后处理规则：把 prompt 中被引号包围、且含中文/英文的台词文本强制替换为原文。
+ */
+export function enforceOriginalVoiceover(videoPrompt: string, voiceoverText: string): string {
+  if (!videoPrompt || !voiceoverText) return videoPrompt
+  const hasChinese = /[\u4e00-\u9fa5]/.test(voiceoverText)
+  if (!hasChinese) return videoPrompt
+  // 已经包含原文，无需处理
+  if (videoPrompt.includes(voiceoverText)) return videoPrompt
+
+  // 替换被引号包围的台词文本（无论中英文），强制使用原文
+  const quotePatterns = [
+    /"([^"]{6,})"/g,
+    /“([^”]{6,})”/g,
+  ]
+  let replaced = false
+  for (const pattern of quotePatterns) {
+    videoPrompt = videoPrompt.replace(pattern, (match, quoted) => {
+      if (replaced) return match
+      replaced = true
+      return `"${voiceoverText}"`
+    })
+  }
+
+  // 如果没找到可替换的引号内容，在末尾追加原文
+  if (!replaced && !videoPrompt.includes(voiceoverText)) {
+    videoPrompt += ` The spoken line in Mandarin Chinese is: "${voiceoverText}".`
+  }
+
+  return videoPrompt
+}
+
+/**
  * 为单个 VideoSegment 生成最终的英文 videoPrompt。
  * 综合：分镜描述、首帧/尾帧 imagePrompt、actionChange、配音文案。
  * 尽力而为：如果 LLM 失败，返回原来的 prompt。
  */
-async function buildFinalVideoPrompt(
+export async function buildFinalVideoPrompt(
   projectId: string,
   stepName: string,
   segment: any
@@ -349,8 +383,9 @@ async function buildFinalVideoPrompt(
     const resultText = await textClient.generate(promptText, { temperature: 0.5, maxTokens: 1024 })
     const parsed = extractJsonFromMarkdown(resultText)
     if (parsed?.videoPrompt && typeof parsed.videoPrompt === 'string') {
+      const finalPrompt = enforceOriginalVoiceover(parsed.videoPrompt, voiceoverText)
       console.log(`[VIDEO-PROMPT-BUILD] segment=${segment.id} shot=${shotId} 生成最终 prompt 成功`)
-      return { videoPrompt: parsed.videoPrompt, lastFrameUrl }
+      return { videoPrompt: finalPrompt, lastFrameUrl }
     }
     return { videoPrompt: originalPrompt, lastFrameUrl }
   } catch (e: any) {
