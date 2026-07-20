@@ -666,9 +666,13 @@ function WorkflowInspectorDrawerWrapper({
   // 点击"生成/重新生成"时打开副工作台 + 构建实际参数
   const [pendingBody, setPendingBody] = useState<any>(null)
 
-  const buildConfirmFromCurrentStep = useCallback((body?: any) => {
+  const buildConfirmFromCurrentStep = useCallback((body?: any, overrideStepType?: string) => {
     if (!currentStep) return
     setPendingBody(body || null)
+    // 兼容：IDEATION 步骤点击"进入下一步"时 body.directionIndex 存在但 stepType 实际是 FRAMEWORK
+    const targetStepType =
+      overrideStepType
+      || (body?.directionIndex !== undefined && currentStep.stepType === 'IDEATION' ? 'FRAMEWORK' : currentStep.stepType)
     const out = currentStep.outputData || {}
     const prompt = out.prompts?.[0]?.englishPrompt
       || out.prompts?.[0]?.chineseDesc
@@ -676,8 +680,8 @@ function WorkflowInspectorDrawerWrapper({
       || out.chineseDesc
       || ''
     setConfirmData({
-      stepType: currentStep.stepType,
-      inputDeps: getInputDeps(currentStep.stepType, project),
+      stepType: targetStepType,
+      inputDeps: getInputDeps(targetStepType, project),
       model: out.imageModel || out.modelId || 'gpt-image-2',
       aspectRatio: out.aspectRatio || '16:9',
       prompt,
@@ -743,8 +747,8 @@ function WorkflowInspectorDrawerWrapper({
         onConfirmGenerate={() => {
           // 关闭副工作台,触发实际执行
           setIsOpen(false)
-          if (currentStep && (window as any).__executeStep) {
-            ;(window as any).__executeStep(currentStep.stepType, pendingBody || undefined)
+          if (confirmData && (window as any).__executeStep) {
+            ;(window as any).__executeStep(confirmData.stepType, pendingBody || undefined)
           }
         }}
       />
