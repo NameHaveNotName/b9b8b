@@ -16,9 +16,10 @@
 2. 必须基于首帧 imagePrompt 保持角色外貌、服装、场景、光影的一致性
 3. 如果有尾帧 imagePrompt，必须描述从首帧到尾帧的连续动作过程
 4. 如果有 actionChange，必须作为视频内核心动作融入提示词
-5. 如果 voiceoverText 不为空，必须明确要求角色念出这段台词，并让嘴部动作匹配台词：
-   - 用类似 "The character clearly speaks the following line with natural lip-sync and matching mouth movements: \"<台词原文>\"" 的措辞
-   - 台词保持原语言，不要翻译
+5. 如果 voiceoverText 不为空，必须明确要求角色用中文念出这段台词，并让嘴部动作匹配中文发音节奏：
+   - 用类似 "The character speaks the following line in Mandarin Chinese with natural lip-sync and mouth movements matching the Chinese pronunciation rhythm: \"<中文台词原文>\"" 的措辞
+   - 台词必须保持中文原文，绝对不要翻译成英文
+   - 这是关键：视频将播放中文配音，嘴型节奏必须匹配中文，而不是英文
    - 旁白镜头（无具体角色）可弱化 lip-sync，仅描述"旁白氛围"
 6. 如果没有配音文案，按常规方式描述画面动态
 7. 输出必须是严格 JSON：{"videoPrompt": "英文提示词"}
