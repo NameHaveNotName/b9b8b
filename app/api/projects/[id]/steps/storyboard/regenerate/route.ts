@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import sharp from 'sharp'
 import { IMAGE_MODELS, MODEL_SIZE_MAP } from '@/lib/models-config'
-import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
+import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 

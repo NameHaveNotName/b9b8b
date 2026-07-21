@@ -8,7 +8,7 @@ import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { markProjectStepDone } from '@/lib/workflow-executor'
-import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
+import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 

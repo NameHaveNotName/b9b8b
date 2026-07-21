@@ -5,7 +5,7 @@ import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from '@/lib/models-config'
-import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
+import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
