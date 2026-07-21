@@ -7,6 +7,7 @@ import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
@@ -146,7 +147,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   // === generate-images: 读取已保存提示词，执行生图 ===
   if (action === 'generate-images') {
-    const aspectRatio = body?.aspectRatio || '16:9'
+    const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+    const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
     console.log(`[ASPECT-RATIO] [CHARACTER-IMAGE] 用户选择比例: ${aspectRatio}`)
     console.log(`[MODEL-SELECT] [CHARACTER-IMAGE] 用户选择模型: ${imageModel || '默认'}`)
@@ -331,6 +333,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
+  const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
   await startStep(step.id)
 
   try {
@@ -407,7 +410,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           enrichedCharacter,
           styleRefUrl,
           stylePrompt,
-          undefined,
+          defaultAspectRatio,
           undefined,
           userRefUrlsCompat
         )
@@ -425,7 +428,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
               chineseDesc: character.description || `${character.name}（${character.role}）`,
               styleRefUrl: styleRefUrl || null,
               llmPrompt: charPrompt,
-              aspectRatio: '16:9',
+              aspectRatio: defaultAspectRatio,
               imageModel: IMAGE_MODELS.primary,
               isMock: !!result.isMock,
               ...(result.lastError ? { mockReason: result.lastError } : {}),
@@ -446,7 +449,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
     }
 
-    await completeStep(step.id, { portraits, characterCount: portraits.length })
+    await completeStep(step.id, { portraits, characterCount: portraits.length, aspectRatio: defaultAspectRatio })
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({ success: true, data: { portraits, characterCount: portraits.length } })
   } catch (e: any) {

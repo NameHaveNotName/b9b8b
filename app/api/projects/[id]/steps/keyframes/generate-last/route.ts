@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
@@ -118,7 +119,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // 尾帧以当前镜头的首帧为参考，保持同一镜头内画面连贯
     const currentFirstFrameUrl: string | undefined = shot.firstFrameUrl || shot.referenceImageUrl || undefined
-    const aspectRatio = shot.metadata?.aspectRatio || '16:9'
+    const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+    const aspectRatio = shot.metadata?.aspectRatio || defaultAspectRatio
 
     console.log(`[KEYFRAMES-GENERATE-LAST] 首帧: ${currentFirstFrameUrl?.slice(0, 80)}, 比例: ${aspectRatio}`)
 

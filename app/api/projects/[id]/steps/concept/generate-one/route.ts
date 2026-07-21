@@ -8,6 +8,7 @@ import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { markProjectStepDone } from '@/lib/workflow-executor'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
@@ -33,7 +34,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (isNaN(actNumber) || actNumber < 0) {
     return NextResponse.json({ error: 'VALID_001', message: 'actNumber 无效' }, { status: 400 })
   }
-  const aspectRatio = body.aspectRatio || '16:9'
+  const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+  const aspectRatio = body.aspectRatio || defaultAspectRatio
   const imageModel = body.imageModel
 
   const step = await prisma.workflowStep.findUnique({

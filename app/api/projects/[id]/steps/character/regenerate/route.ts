@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
@@ -30,7 +31,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!assetId || typeof assetId !== 'string') {
     return NextResponse.json({ error: 'VALIDATION_001', message: '缺少 assetId' }, { status: 400 })
   }
-  const newRatio = aspectRatio || '16:9'
+  const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+  const newRatio = aspectRatio || defaultAspectRatio
   const newModel = imageModel || IMAGE_MODELS.primary
   console.log(`[REGENERATE-PARAMS] character: ${assetId}, 新比例: ${newRatio}, 新模型: ${newModel}`)
 

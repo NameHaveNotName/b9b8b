@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
@@ -146,7 +147,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   // === generate-images: 读取已保存提示词，waitUntil 后台流式生成 ===
   if (action === 'generate-images') {
-    const aspectRatio = body?.aspectRatio || '16:9'
+    const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+    const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
     console.log(`[ASPECT-RATIO] [CONCEPT-IMAGE] 用户选择比例: ${aspectRatio}`)
     console.log(`[MODEL-SELECT] [CONCEPT-IMAGE] 用户选择模型: ${imageModel || '默认'}`)
@@ -347,6 +349,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
+  const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
   await startStep(step.id)
 
   try {
@@ -433,7 +436,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             stylePrompt,
             characterImageUrls,
             undefined,
-            undefined,
+            defaultAspectRatio,
             undefined,
             undefined,
             userRefUrls
@@ -453,7 +456,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
                 llmPrompt: llmScene?.imagePrompt,
                 prompt: finalPrompt,
                 size: '1024x576',
-                aspectRatio: '16:9',
+                aspectRatio: defaultAspectRatio,
                 imageModel: IMAGE_MODELS.primary,
               },
             },
@@ -483,7 +486,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
     }
 
-    await completeStep(step.id, { scenes, totalScenes: scenes.length })
+    await completeStep(step.id, { scenes, totalScenes: scenes.length, aspectRatio: defaultAspectRatio })
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({ success: true, data: { scenes, totalScenes: scenes.length } })
   } catch (e: any) {

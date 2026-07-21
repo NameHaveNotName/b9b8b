@@ -23,9 +23,17 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     // 兼容旧项目：用 WorkflowStep 的 COMPLETED 状态推导 project.step*_done 字段，
     // 避免因为 stepStyleDone 等布尔字段未写入导致下游步骤被错误锁定。
     const derivedState = computeProjectStateFromSteps(project.steps || [])
+
+    // 从 STYLE 步骤读取用户最近一次选中的风格图比例，作为后续生成的默认比例
+    const styleStep = project.steps?.find((s: any) => s.stepType === 'STYLE')
+    const styleOutput = (styleStep?.outputData as any) || {}
+    const selectedAspectRatio =
+      styleOutput?.selectedAspectRatio || styleOutput?.aspectRatio || '16:9'
+
     const projectWithDerivedState = {
       ...project,
       ...derivedState,
+      selectedAspectRatio,
     }
 
     return NextResponse.json({ project: projectWithDerivedState })

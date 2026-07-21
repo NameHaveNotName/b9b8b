@@ -5,6 +5,7 @@ import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from '@/lib/models-config'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
@@ -28,7 +29,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!styleId || typeof styleId !== 'string') {
     return NextResponse.json({ error: 'VALIDATION_001', message: '缺少 styleId' }, { status: 400 })
   }
-  const newRatio = aspectRatio || '16:9'
+  const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+  const newRatio = aspectRatio || defaultAspectRatio
   console.log(`[REGENERATE-PARAMS] style: ${styleId}, 新比例: ${newRatio}, 传入模型: ${imageModel || '未指定'}`)
 
   const step = await prisma.workflowStep.findUnique({

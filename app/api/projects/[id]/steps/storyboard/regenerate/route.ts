@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import sharp from 'sharp'
 import { IMAGE_MODELS, MODEL_SIZE_MAP } from '@/lib/models-config'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
@@ -31,7 +32,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
   // actNumber 用于区分不同幕中相同的 shotId
   const actNo = typeof actNumber === 'number' ? actNumber : null
-  const newRatio = aspectRatio || '16:9'
+  const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+  const newRatio = aspectRatio || defaultAspectRatio
   const newModel = imageModel || IMAGE_MODELS.primary
   console.log(`[REGENERATE-PARAMS] storyboard: ${shotId}, 新比例: ${newRatio}, 新模型: ${newModel}`)
 

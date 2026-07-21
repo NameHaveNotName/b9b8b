@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
@@ -155,7 +156,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
 
-    const aspectRatio = body?.aspectRatio || '16:9'
+    const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+    const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
     console.log(`[ASPECT-RATIO] [KEYFRAMES-IMAGE] 用户选择比例: ${aspectRatio}`)
     console.log(`[MODEL-SELECT] [KEYFRAMES-IMAGE] 用户选择模型: ${imageModel || '默认'}`)

@@ -116,6 +116,7 @@ async function generateStylePrompts(
         selectedStyleId: null,
         styleRefUrl: null,
         generatedCount: 0,
+        aspectRatio,
       },
     },
   })
@@ -643,10 +644,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   console.log('[STYLE-PATCH-DB] 更新前 outputData:', JSON.stringify(existing?.outputData).slice(0, 500))
 
   const existingOutput = (existing?.outputData || {}) as any
+  // 记录用户最近一次选中的风格图比例，供后续步骤作为默认比例
+  const selectedAspectRatio = existingOutput?.aspectRatio || '16:9'
   const newOutput = {
     ...existingOutput,
     selectedStyleId,
     styleRefUrl,
+    selectedAspectRatio,
   }
 
   // 更新数据库（事务：workflowStep + project.selectedStyleId + stepStyleDone 三写，保证前端解锁状态正确）

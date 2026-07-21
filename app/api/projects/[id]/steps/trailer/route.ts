@@ -8,6 +8,7 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { startStep, completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled } from '@/lib/workflow-executor'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
@@ -100,6 +101,7 @@ async function backgroundGenerateSegment(
   try {
     console.log(`[SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
     const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
+    const resolvedAspectRatio = aspectRatio || await getProjectDefaultAspectRatio(projectId)
     const result = await generateOneVideoSegment({
       segmentId,
       projectId,
@@ -108,7 +110,7 @@ async function backgroundGenerateSegment(
       imageUrl,
       duration,
       videoModel,
-      aspectRatio,
+      aspectRatio: resolvedAspectRatio,
     })
 
     // 更新 VideoSegment
@@ -161,6 +163,7 @@ async function backgroundComposeVideo(
 ) {
   try {
     console.log(`[COMPOSE-BG] 开始合成 projectId=${projectId}`)
+    const resolvedAspectRatio = aspectRatio || await getProjectDefaultAspectRatio(projectId)
     const segments = await prisma.videoSegment.findMany({
       where: { projectId, stepName, status: 'completed' },
       orderBy: { sequence: 'asc' },
@@ -180,7 +183,7 @@ async function backgroundComposeVideo(
         videoUrl: s.videoUrl,
         duration: s.duration,
       })),
-      aspectRatio,
+      aspectRatio: resolvedAspectRatio,
     })
 
     console.log(`[COMPOSE-BG] 合成完成 videoUrl=${result.videoUrl}`)

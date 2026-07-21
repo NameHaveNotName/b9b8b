@@ -9,6 +9,7 @@ import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import sharp from 'sharp'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
@@ -141,7 +142,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   // === generate-images: 读取已保存提示词，生成草图 ===
   if (action === 'generate-images') {
-    const aspectRatio = body?.aspectRatio || '16:9'
+    const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+    const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
     console.log(`[ASPECT-RATIO] [STORYBOARD-IMAGE] 用户选择比例: ${aspectRatio}`)
     console.log(`[MODEL-SELECT] [STORYBOARD-IMAGE] 用户选择模型: ${imageModel || '默认'}`)
@@ -345,7 +347,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     }
 
     const shotId = body?.shotId as string | undefined
-    const aspectRatio = body?.aspectRatio || '16:9'
+    const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+    const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
     console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，shotId: ${shotId || 'auto'}，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
 

@@ -8,6 +8,7 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { startStep, canExecuteStep } from '@/lib/workflow-executor'
+import { getProjectDefaultAspectRatio } from '@/lib/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
@@ -53,7 +54,8 @@ async function backgroundGenerateDirectSegment(
   firstFrameUrl: string,
   lastFrameUrl: string | null,
   duration: number,
-  videoModel?: string
+  videoModel?: string,
+  aspectRatio?: string
 ) {
   try {
     console.log(`[DIRECT-SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
@@ -66,6 +68,7 @@ async function backgroundGenerateDirectSegment(
       imageUrl: firstFrameUrl,
       duration,
       videoModel,
+      aspectRatio,
     })
 
     await prisma.videoSegment.update({
@@ -121,11 +124,12 @@ async function backgroundComposeDirectVideo(projectId: string) {
       throw new Error('没有已完成的片段可合成')
     }
 
-    // 从 KEYFRAMES step.outputData 读取用户选择的画面比例
+    // 从 KEYFRAMES 或 STYLE 步骤读取用户选择的画面比例
     const keyframeStep = await prisma.workflowStep.findUnique({
       where: { projectId_stepType: { projectId, stepType: 'KEYFRAMES' } },
     })
-    const aspectRatio = (keyframeStep?.outputData as any)?.aspectRatio || '16:9'
+    const defaultAspectRatio = await getProjectDefaultAspectRatio(projectId)
+    const aspectRatio = (keyframeStep?.outputData as any)?.aspectRatio || defaultAspectRatio
     console.log(`[DIRECT-COMPOSE-BG] 使用比例: ${aspectRatio}`)
 
     const { composeVideo } = await import('@/lib/video-segment-utils')
@@ -303,6 +307,7 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
   // 异步视频生成：先扣点，再启动后台任务
   await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, assetId: segmentId, success: true })
 
+  const defaultAspectRatio = await getProjectDefaultAspectRatio(projectId)
   waitUntil(backgroundGenerateDirectSegment(
     segmentId,
     projectId,
@@ -310,7 +315,8 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
     firstFrameUrl,
     lastFrameUrl,
     segment.duration || 5,
-    body?.videoModel
+    body?.videoModel,
+    defaultAspectRatio
   ))
 
   return NextResponse.json({
@@ -349,6 +355,7 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
   await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
 
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
+  const defaultAspectRatio = await getProjectDefaultAspectRatio(projectId)
 
   waitUntil((async () => {
     for (const segment of pendingSegments) {
@@ -377,7 +384,8 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
         firstFrameUrl,
         lastFrameUrl,
         segment.duration || 5,
-        body?.videoModel
+        body?.videoModel,
+        defaultAspectRatio
       )
     }
   })())

@@ -460,7 +460,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
                 // CONCEPT：走新的异步生成路径（202 + 轮询），避免 504 超时
                 const hasPrompts = (currentStep.outputData?.prompts?.length || 0) > 0
                 if (hasPrompts) {
-                  const defaultRatio = currentStep.outputData?.aspectRatio || '16:9'
+                  const defaultRatio = currentStep.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
                   const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
                   ;(window as any).__conceptRetry?.(currentStep.outputData.prompts.length, defaultRatio, defaultModel)
                 } else {
@@ -470,7 +470,7 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
                 // 工作指令.txt（2026-06-07）：重试必须走完整流程，不能跳过提示词生成
                 const hasPrompts = currentStep.outputData?.prompts?.length > 0
                 if (hasPrompts) {
-                  const defaultRatio = currentStep.outputData?.aspectRatio || '16:9'
+                  const defaultRatio = currentStep.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
                   const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
                   executeStep(currentStep.stepType, { action: 'generate-images', force: true, aspectRatio: defaultRatio, imageModel: defaultModel })
                 } else {
@@ -683,7 +683,7 @@ function WorkflowInspectorDrawerWrapper({
       stepType: targetStepType,
       inputDeps: getInputDeps(targetStepType, project),
       model: out.imageModel || out.modelId || 'gpt-image-2',
-      aspectRatio: out.aspectRatio || '16:9',
+      aspectRatio: out.aspectRatio || project.selectedAspectRatio || '16:9',
       prompt,
       pointCost: 5,
     })
@@ -1083,6 +1083,7 @@ function StepContent({
       return (
         <CharacterPanel
           step={step}
+          project={project}
           projectId={project.id}
           executing={executing}
           onExecute={onExecute}
@@ -1096,6 +1097,7 @@ function StepContent({
       return (
         <ConceptPanel
           step={step}
+          project={project}
           projectId={project.id}
           executing={executing}
           onExecute={onExecute}
@@ -1117,12 +1119,14 @@ function StepContent({
           mutate={mutate}
           setToast={setToast}
   readOnly={readOnly}
+          defaultAspectRatio={project.selectedAspectRatio}
         />
       )
     case 'STORYBOARD':
       return (
         <StoryboardPanel
           step={step}
+          project={project}
           projectId={project.id}
           executing={executing}
           onExecute={onExecute}
@@ -1139,6 +1143,7 @@ function StepContent({
       return (
         <KeyframesPanel
           step={step}
+          project={project}
           projectId={project.id}
           executing={executing}
           onExecute={onExecute}
@@ -2484,7 +2489,7 @@ function StylePanel({
   // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
     console.log('[PROMPT-BUGFIX] StylePanel PROMPT_READY detected, prompts:', step.outputData.prompts.length)
-    const defaultRatio = step.outputData?.aspectRatio || '16:9'
+    const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
     const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
     return (
       <PromptPreviewWithRatio
@@ -2580,7 +2585,7 @@ function StylePanel({
             // 工作指令.txt（2026-06-07）：重试必须走完整流程，不能跳过提示词生成
             const hasPrompts = step.outputData?.prompts?.length > 0
             if (hasPrompts) {
-              const defaultRatio = step.outputData?.aspectRatio || '16:9'
+              const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
               const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
               onExecute('STYLE', { action: 'generate-images', force: true, aspectRatio: defaultRatio, imageModel: defaultModel })
             } else {
@@ -3277,6 +3282,7 @@ function StyleCard({
 
 function CharacterPanel({
   step,
+  project,
   projectId,
   executing,
   onExecute,
@@ -3286,6 +3292,7 @@ function CharacterPanel({
   readOnly,
 }: {
   step: any
+  project: any
   projectId: string
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
@@ -3306,7 +3313,7 @@ function CharacterPanel({
 
   // PROMPT_READY：提示词预览（必须在 PROCESSING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
-    const defaultRatio = step.outputData?.aspectRatio || '16:9'
+    const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
     const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
     return (
       <PromptPreviewWithRatio
@@ -3549,6 +3556,7 @@ function CharacterPanel({
 
 function ConceptPanel({
   step,
+  project,
   projectId,
   executing,
   onExecute,
@@ -3559,6 +3567,7 @@ function ConceptPanel({
   onRetryReady,
 }: {
   step: any
+  project: any
   projectId: string
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
@@ -3661,7 +3670,7 @@ function ConceptPanel({
   }
     // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
-    const defaultRatio = step.outputData?.aspectRatio || '16:9'
+    const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
     const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
     return (
       <PromptPreviewWithRatio
@@ -3746,7 +3755,7 @@ function ConceptPanel({
   async function handleRegenerateAll() {
     setShowConfirmAll(false)
     setLocalAssets([])
-    const defaultRatio = (step.outputData as any)?.aspectRatio || '16:9'
+    const defaultRatio = (step.outputData as any)?.aspectRatio || project.selectedAspectRatio || '16:9'
     const defaultModel = (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
     const totalScenes = (step.outputData as any)?.prompts?.length || 6
     // 调用主 API 的 force 路径删除旧资产（不等待完成）
@@ -3773,7 +3782,7 @@ function ConceptPanel({
     assetIndexMap[act][idx] = asset
   }
 
-  const defaultRatio = outputData.aspectRatio || '16:9'
+  const defaultRatio = outputData.aspectRatio || project.selectedAspectRatio || '16:9'
   const defaultModel = outputData.imageModel || IMAGE_MODELS.primary
 
   return (
@@ -3923,6 +3932,7 @@ function StoryboardMockImage({ shot }: { shot: any }) {
 
 function StoryboardPanel({
   step,
+  project,
   projectId,
   executing,
   onExecute,
@@ -3935,6 +3945,7 @@ function StoryboardPanel({
   framework,
 }: {
   step: any
+  project: any
   projectId: string
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
@@ -3965,7 +3976,7 @@ function StoryboardPanel({
 
   // 初始化每幕的默认设置
   useEffect(() => {
-    const defaultRatio = step.outputData?.aspectRatio || '16:9'
+    const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
     const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
     const settings: Record<number, { ratio: string; model: string }> = {}
     for (const shot of shots) {
@@ -4456,6 +4467,7 @@ import { Table2, LayoutGrid } from 'lucide-react'
 
 function KeyframesPanel({
   step,
+  project,
   projectId,
   executing,
   onExecute,
@@ -4464,6 +4476,7 @@ function KeyframesPanel({
   readOnly,
 }: {
   step: any
+  project: any
   projectId: string
   executing: string | null
   onExecute: (stepType: string, body?: any) => void
@@ -4648,7 +4661,7 @@ function KeyframesPanel({
 
   // PROMPT_READY：提示词预览（仅在没有 shots 时显示，作为引导）
   const kfPrompts = keyframesRes?.outputData?.prompts || step.outputData?.prompts || []
-  const kfDefaultRatio = keyframesRes?.outputData?.aspectRatio || step.outputData?.aspectRatio || '16:9'
+  const kfDefaultRatio = keyframesRes?.outputData?.aspectRatio || step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
   const kfDefaultModel = keyframesRes?.outputData?.imageModel || step.outputData?.imageModel || IMAGE_MODELS.primary
 
   // 无 shots 时显示提示词预览（引导用户先生成分镜）

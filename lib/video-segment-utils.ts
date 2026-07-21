@@ -494,7 +494,7 @@ export async function generateOneVideoSegment(args: {
           lastFrameUrl: lastFrameUrlFromContext,
           prompt: finalPrompt || 'A cinematic shot with smooth camera motion',
           model: modelId,
-          aspectRatio: '16:9',
+          aspectRatio: segmentAspectRatio || '16:9',
           duration,
           pollTimeoutSec: 300,
           pollIntervalMs: 5000,

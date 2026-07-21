@@ -17,6 +17,7 @@ interface TrailerPanelProps {
   mutate?: () => Promise<any>
   setToast?: (t: { kind: 'success' | 'error'; message: string } | null) => void
   readOnly?: boolean
+  defaultAspectRatio?: string
 }
 
 function ProcessingBlock({ message }: { message: string }) {
@@ -176,6 +177,7 @@ export default function TrailerPanel({
   executing,
   onExecute,
   readOnly,
+  defaultAspectRatio,
 }: TrailerPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -186,7 +188,7 @@ export default function TrailerPanel({
   const [isComposing, setIsComposing] = useState(false)
   const [isGeneratingBgm, setIsGeneratingBgm] = useState(false)
   const [selectedAspectRatio, setSelectedAspectRatio] = useState(
-    stepOutput.aspectRatio || '16:9'
+    stepOutput.aspectRatio || defaultAspectRatio || '16:9'
   )
 
   const { data: segmentData } = useSWR(
@@ -300,7 +302,7 @@ export default function TrailerPanel({
           <div className="mt-2 flex items-center justify-between text-sm text-stone-500">
             <span>总时长: {formatTime(totalDuration)}</span>
             <span>
-              {segments.length} 个片段 · 比例: {stepOutput.aspectRatio || '16:9'}
+              {segments.length} 个片段 · 比例: {stepOutput.aspectRatio || defaultAspectRatio || '16:9'}
             </span>
           </div>
           {musicUrl && (
