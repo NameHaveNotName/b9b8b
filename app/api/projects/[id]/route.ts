@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { projectDetailSelect, projectCoreSelect } from '@/lib/db/project-select'
+import { computeProjectStateFromSteps } from '@/lib/workflow-state'
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   try {
@@ -19,7 +20,15 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     const access = await checkProjectAccess(project.userId)
     if (!access.allowed) return access.response
 
-    return NextResponse.json({ project })
+    // 兼容旧项目：用 WorkflowStep 的 COMPLETED 状态推导 project.step*_done 字段，
+    // 避免因为 stepStyleDone 等布尔字段未写入导致下游步骤被错误锁定。
+    const derivedState = computeProjectStateFromSteps(project.steps || [])
+    const projectWithDerivedState = {
+      ...project,
+      ...derivedState,
+    }
+
+    return NextResponse.json({ project: projectWithDerivedState })
   } catch (error: any) {
     console.error(`[GET /api/projects/${params.id}] error:`, error)
     return NextResponse.json(
