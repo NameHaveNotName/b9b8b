@@ -1,6 +1,8 @@
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
@@ -204,104 +206,31 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     await startStep(step.id)
 
-    try {
-      const framework = (project.framework || frameworkStep.outputData) as any
-
-      const styleStep = await prisma.workflowStep.findFirst({
-        where: { projectId: params.id, stepType: 'STYLE', status: 'COMPLETED' }
-      })
-
-      let styleRefUrl: string | undefined
-      let stylePrompt: string | undefined
-      if (styleStep) {
+    // 异步后台生成：HTTP 立即返回，避免前端因生图耗时而超时
+    waitUntil(
+      (async () => {
         try {
-          const ref = await getStyleRefUrl(params.id)
-          styleRefUrl = ref.styleRefUrl
-          stylePrompt = ref.stylePrompt
-          console.log(`[CHARACTER-IMAGE] 注入风格图: ${styleRefUrl}`)
-        } catch (refErr: any) {
-          console.log(`[CHARACTER-IMAGE] 风格图提取失败，回退到无风格模式`)
-        }
-      }
-
-      const refs = await getProjectReferences(params.id).catch(() => [])
-      const userRefUrls = refs.filter(r => r.url).map(r => r.url)
-
-      const imageClient = await getImageClient()
-      const portraits = []
-      const failedCharacters: string[] = []
-
-      for (const promptItem of resolvedPrompts) {
-        try {
-          const enrichedCharacter = {
-            id: promptItem.characterId,
-            name: promptItem.characterName,
-            role: promptItem.role || '',
-            description: promptItem.englishPrompt || promptItem.chineseDesc,
-          }
-
-          const result = await imageClient.generateCharacterPortrait(
+          await generateCharacterImagesBackground(
             params.id,
-            enrichedCharacter,
-            styleRefUrl,
-            stylePrompt,
+            step.id,
+            resolvedPrompts,
             aspectRatio,
             imageModel,
-            userRefUrls
+            pointsCheck.cost,
+            userId
           )
-          // 防御：确保 result 包含必需的 url 和 storageKey
-          if (!result?.url || !result?.storageKey) {
-            console.error(`[CHARACTER-IMAGE] 角色 ${promptItem.characterName} 返回结果缺少 url/storageKey:`, JSON.stringify(result))
-            failedCharacters.push(promptItem.characterName)
-            continue
-          }
-          const asset = await prisma.asset.create({
-            data: {
-              projectId: params.id,
-              stepId: step.id,
-              type: 'IMAGE',
-              mimeType: 'image/png',
-              storageKey: result.storageKey,
-              url: result.url,
-              metadata: {
-                characterId: promptItem.characterId,
-                characterName: promptItem.characterName,
-                chineseDesc: promptItem.chineseDesc,
-                styleRefUrl: styleRefUrl || null,
-                llmPrompt: promptItem.englishPrompt,
-                aspectRatio,
-                imageModel: imageModel || IMAGE_MODELS.primary,
-                isMock: !!result.isMock,
-                ...(result.lastError ? { mockReason: result.lastError } : {}),
-              },
-            },
-          })
-          console.log(`[CHARACTER-IMAGE] Asset 创建成功: assetId=${asset.id}, stepId=${step.id}, char=${promptItem.characterName}, url=${result.url.slice(0, 60)}`)
-          portraits.push({ character: enrichedCharacter, assetId: asset.id, url: result.url, llmPrompt: promptItem.englishPrompt })
-        } catch (imgErr: any) {
-          console.error(`[CHARACTER-IMAGE] 角色 ${promptItem.characterName} 生图失败:`, imgErr?.message)
-          failedCharacters.push(promptItem.characterName)
+        } catch (e: any) {
+          console.error('[CHARACTER-IMAGE] 后台生成异常:', e?.message)
         }
-      }
+      })()
+    )
 
-      if (portraits.length === 0) {
-        const errMsg = `所有角色生图均失败${failedCharacters.length > 0 ? '（' + failedCharacters.join(', ') + '）' : ''}`
-        await failStep(step.id, errMsg)
-        await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: errMsg })
-        return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
-      }
-
-      await completeStep(step.id, { portraits, characterCount: portraits.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
-      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      // 验证数据库中 Asset 是否真实存在
-      const dbAssetCount = await prisma.asset.count({ where: { stepId: step.id } })
-      console.log(`[CHARACTER-IMAGE] 完成: 成功 ${portraits.length}/${resolvedPrompts.length} 条，失败: ${failedCharacters.join(', ') || '无'}，数据库 Asset 数: ${dbAssetCount}`)
-      return NextResponse.json({ success: true, data: { portraits, characterCount: portraits.length } })
-    } catch (e: any) {
-      await failStep(step.id, e.message)
-      await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
-      return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
-    }
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
+    return NextResponse.json({
+      success: true,
+      status: 'PROCESSING',
+      message: '角色设计生成任务已在后台启动，请稍后刷新查看',
+    })
   }
 
   // === 默认兼容：无 action 时走原有完整流程 ===
@@ -336,126 +265,184 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
   await startStep(step.id)
 
+  // 异步后台生成：先生成 prompts，再串行生图
+  waitUntil(
+    (async () => {
+      try {
+        const framework = (project.framework || frameworkStep.outputData) as any
+        const allCharacters: Array<{ id: string; name: string; role: string; description: string }> =
+          framework?.characters || []
+        const characters = allCharacters.slice(0, 5)
+
+        const prompt = loadPromptTemplate('character', {
+          USER_INPUT: JSON.stringify(framework),
+          REFERENCE_INSTRUCTIONS: '',
+        })
+        const textClient = await getTextClient()
+        const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+        const parsed = extractJsonFromMarkdown(resultText)
+        const parsedChars = parsed.characters || []
+
+        const prompts = characters.map((character, i) => {
+          const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
+          const charDesc = charData?.description || character.description || `${character.name}（${character.role}）`
+          const rawPrompt = charData?.imagePrompt || ''
+          const isValidEnglishPrompt = rawPrompt.trim().length > 10 && /[a-zA-Z]{3,}/.test(rawPrompt)
+          const englishPrompt = isValidEnglishPrompt
+            ? rawPrompt.trim()
+            : `Cinematic character portrait of ${character.name}, ${charDesc}. Solo portrait, front-facing, complete full face clearly visible. Cinematic film still, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism.`
+          return {
+            id: `prompt_${i + 1}`,
+            chineseDesc: charDesc,
+            englishPrompt,
+            target: `character_${character.id}`,
+            characterName: character.name,
+            characterId: character.id,
+            role: character.role,
+          }
+        })
+
+        await prisma.workflowStep.update({
+          where: { id: step.id },
+          data: {
+            outputData: {
+              ...(step.outputData as any || {}),
+              prompts,
+              characterCount: characters.length,
+            },
+          },
+        })
+
+        await generateCharacterImagesBackground(
+          params.id,
+          step.id,
+          prompts,
+          defaultAspectRatio,
+          undefined,
+          pointsCheck.cost,
+          userId
+        )
+      } catch (e: any) {
+        console.error('[CHARACTER] 后台生成异常:', e?.message)
+        await failStep(step.id, e.message)
+        await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
+      }
+    })()
+  )
+
+  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
+  return NextResponse.json({
+    success: true,
+    status: 'PROCESSING',
+    message: '角色设计生成任务已在后台启动，请稍后刷新查看',
+  })
+}
+
+/**
+ * 后台实际执行角色生图。
+ * 被 waitUntil 调用，HTTP 响应已经返回给前端。
+ */
+async function generateCharacterImagesBackground(
+  projectId: string,
+  stepId: string,
+  resolvedPrompts: any[],
+  aspectRatio: string,
+  imageModel: string | undefined,
+  cost: number,
+  userId: string
+) {
   try {
-    const framework = (project.framework || frameworkStep.outputData) as any
-    const allCharacters: Array<{ id: string; name: string; role: string; description: string }> =
-      framework?.characters || []
-
-    // 数量控制：最多 5 个角色
-    const characters = allCharacters.slice(0, 5)
-
-    // Phase 6: 前置步骤检测 — 风格统一步骤状态
     const styleStep = await prisma.workflowStep.findFirst({
-      where: { projectId: params.id, stepType: 'STYLE', status: 'COMPLETED' }
+      where: { projectId, stepType: 'STYLE', status: 'COMPLETED' },
     })
-    console.log(`[CHARACTER] 风格统一步骤状态: ${styleStep ? '已完成' : '未执行/跳过'}`)
 
-    // Phase 6: 风格图提取
     let styleRefUrl: string | undefined
     let stylePrompt: string | undefined
     if (styleStep) {
       try {
-        const ref = await getStyleRefUrl(params.id)
+        const ref = await getStyleRefUrl(projectId)
         styleRefUrl = ref.styleRefUrl
         stylePrompt = ref.stylePrompt
-        console.log(`[CHARACTER] 注入风格图: ${styleRefUrl}`)
+        console.log(`[CHARACTER-BG] 注入风格图: ${styleRefUrl}`)
       } catch (refErr: any) {
-        // Phase 6: 风格图注入失败不阻断流程
-        console.log(`[CHARACTER] 风格图提取失败: ${refErr?.message}，回退到无风格模式`)
+        console.log(`[CHARACTER-BG] 风格图提取失败，回退到无风格模式`)
       }
     }
 
-    if (!styleRefUrl) {
-      console.log('[CHARACTER] 无风格图，直接文生图')
-    }
+    const refs = await getProjectReferences(projectId).catch(() => [])
+    const userRefUrls = refs.filter((r: any) => r.url).map((r: any) => r.url)
 
-    const refsCompat = await getProjectReferences(params.id).catch(() => [])
-    const userRefUrlsCompat = refsCompat.filter(r => r.url).map(r => r.url)
-    const refLabelsCompat = refsCompat.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
-
-    const refInstructionsCompat = refsCompat.length > 0
-      ? `【用户上传了 ${refsCompat.length} 张人物参考图${refLabelsCompat.length > 0 ? `，标签：${refLabelsCompat.join('、')}` : ''}】\n` +
-        `1. 你必须仔细分析参考图中每个人物的：整体造型、头部装饰/发型、面部特征、服装颜色与款式、标志性配件、身材比例、材质质感。\n` +
-        `2. 为每个角色生成 imagePrompt 时，必须用文字准确复现参考图中的核心视觉特征。\n` +
-        `3. 禁止在 imagePrompt 中写"参考图1""参考图2"等占位描述；必须用具体、可视觉化的英文形容词和名词。\n` +
-        `4. 如果某个角色明显对应某张带标签的参考图（如角色名"海宝"对应标签"海宝"），必须优先保证该角色的颜色、体型、服装、头饰/发型与参考图一致。`
-      : '【无人物参考图】请根据 framework.characters 中的 description 生成 imagePrompt。'
-
-    const prompt = loadPromptTemplate('character', {
-      USER_INPUT: JSON.stringify(framework),
-      REFERENCE_INSTRUCTIONS: refInstructionsCompat,
-    })
-    const textClient = await getTextClient()
-    const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
-    const parsed = extractJsonFromMarkdown(resultText)
-    const parsedChars = parsed.characters || []
-
-    // 2. 用图像 API 生成角色概念图
     const imageClient = await getImageClient()
-    const portraits = []
+    const portraits: any[] = []
     const failedCharacters: string[] = []
 
-    for (const character of characters) {
+    for (const promptItem of resolvedPrompts) {
       try {
-        // 优先使用 LLM 生成的 imagePrompt，否则 fallback 到基础描述
-        const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
-        const charPrompt = charData?.imagePrompt || ''
-        const enrichedCharacter = charPrompt
-          ? { ...character, description: `${character.description} ${charPrompt}` }
-          : character
+        const enrichedCharacter = {
+          id: promptItem.characterId,
+          name: promptItem.characterName,
+          role: promptItem.role || '',
+          description: promptItem.englishPrompt || promptItem.chineseDesc,
+        }
 
-        // Phase 6: 有风格图时注入，无风格图时直接文生图
         const result = await imageClient.generateCharacterPortrait(
-          params.id,
+          projectId,
           enrichedCharacter,
           styleRefUrl,
           stylePrompt,
-          defaultAspectRatio,
-          undefined,
-          userRefUrlsCompat
+          aspectRatio,
+          imageModel,
+          userRefUrls
         )
+        if (!result?.url || !result?.storageKey) {
+          console.error(`[CHARACTER-BG] 角色 ${promptItem.characterName} 返回结果缺少 url/storageKey:`, JSON.stringify(result))
+          failedCharacters.push(promptItem.characterName)
+          continue
+        }
         const asset = await prisma.asset.create({
           data: {
-            projectId: params.id,
-            stepId: step.id,
+            projectId,
+            stepId,
             type: 'IMAGE',
             mimeType: 'image/png',
             storageKey: result.storageKey,
             url: result.url,
             metadata: {
-              characterId: character.id,
-              characterName: character.name,
-              chineseDesc: character.description || `${character.name}（${character.role}）`,
+              characterId: promptItem.characterId,
+              characterName: promptItem.characterName,
+              chineseDesc: promptItem.chineseDesc,
               styleRefUrl: styleRefUrl || null,
-              llmPrompt: charPrompt,
-              aspectRatio: defaultAspectRatio,
-              imageModel: IMAGE_MODELS.primary,
+              llmPrompt: promptItem.englishPrompt,
+              aspectRatio,
+              imageModel: imageModel || IMAGE_MODELS.primary,
               isMock: !!result.isMock,
               ...(result.lastError ? { mockReason: result.lastError } : {}),
             },
           },
         })
-        portraits.push({ character, assetId: asset.id, url: result.url, llmPrompt: charPrompt })
+        console.log(`[CHARACTER-BG] Asset 创建成功: assetId=${asset.id}, char=${promptItem.characterName}`)
+        portraits.push({ character: enrichedCharacter, assetId: asset.id, url: result.url, llmPrompt: promptItem.englishPrompt })
       } catch (imgErr: any) {
-        console.error(`[CHARACTER] 角色 ${character.name} 生图失败:`, imgErr?.message)
-        failedCharacters.push(character.name)
+        console.error(`[CHARACTER-BG] 角色 ${promptItem.characterName} 生图失败:`, imgErr?.message)
+        failedCharacters.push(promptItem.characterName)
       }
     }
 
     if (portraits.length === 0) {
       const errMsg = `所有角色生图均失败${failedCharacters.length > 0 ? '（' + failedCharacters.join(', ') + '）' : ''}`
-      await failStep(step.id, errMsg)
-      await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: errMsg })
-      return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
+      await failStep(stepId, errMsg)
+      await deductPointsAndLog(userId, cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: errMsg })
+      return
     }
 
-    await completeStep(step.id, { portraits, characterCount: portraits.length, aspectRatio: defaultAspectRatio })
-    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-    return NextResponse.json({ success: true, data: { portraits, characterCount: portraits.length } })
+    await completeStep(stepId, { portraits, characterCount: portraits.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
+    await deductPointsAndLog(userId, cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+    const dbAssetCount = await prisma.asset.count({ where: { stepId } })
+    console.log(`[CHARACTER-BG] 完成: 成功 ${portraits.length}/${resolvedPrompts.length} 条，数据库 Asset 数: ${dbAssetCount}`)
   } catch (e: any) {
-    await failStep(step.id, e.message)
-    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
-    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
+    console.error('[CHARACTER-BG] 异常:', e?.message)
+    await failStep(stepId, e.message)
+    await deductPointsAndLog(userId, cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: e.message })
   }
 }
 
