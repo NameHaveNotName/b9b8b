@@ -1,28 +1,98 @@
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { generateImage } from '@/lib/api-clients/xiaomi'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
-import { uploadFile, getSignedFileUrl } from '@/lib/r2'
+import { uploadFile, uploadThumbnail, getSignedFileUrl, deleteFile } from '@/lib/r2'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import sharp from 'sharp'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
-import { GENERATION_COSTS } from '@/lib/points-config'
+import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 
-async function generateStoryboardByAct(textClient: any, framework: any, act: any, tagInstructions?: string) {
+const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-2'
+const STORYBOARD_MIN_TOTAL_SHOTS = 20
+const STORYBOARD_MAX_TOTAL_SHOTS = 40
+
+function normalizeOptionalInt(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function distributeStoryboardShotBudget(acts: any[]): number[] {
+  if (!Array.isArray(acts) || acts.length === 0) return []
+
+  const raw = acts.map((act) => {
+    const estimated = Number(act?.estimatedShots)
+    return Number.isFinite(estimated) && estimated > 0 ? estimated : 6
+  })
+  const rawTotal = raw.reduce((sum, value) => sum + value, 0)
+  const targetTotal = rawTotal > STORYBOARD_MAX_TOTAL_SHOTS
+    ? STORYBOARD_MAX_TOTAL_SHOTS
+    : rawTotal < STORYBOARD_MIN_TOTAL_SHOTS
+      ? Math.min(STORYBOARD_MAX_TOTAL_SHOTS, Math.max(STORYBOARD_MIN_TOTAL_SHOTS, acts.length))
+      : rawTotal
+
+  const minimumPerAct = 1
+  const weightsTotal = rawTotal || raw.length
+  let allocated = raw.map((value) => Math.max(minimumPerAct, Math.floor((value / weightsTotal) * targetTotal)))
+  let currentTotal = allocated.reduce((sum, value) => sum + value, 0)
+
+  const order = raw
+    .map((value, index) => ({ value, index }))
+    .sort((a, b) => b.value - a.value)
+
+  while (currentTotal < targetTotal) {
+    for (const item of order) {
+      if (currentTotal >= targetTotal) break
+      allocated[item.index] += 1
+      currentTotal += 1
+    }
+  }
+
+  while (currentTotal > targetTotal) {
+    let changed = false
+    for (const item of [...order].reverse()) {
+      if (currentTotal <= targetTotal) break
+      if (allocated[item.index] <= minimumPerAct) continue
+      allocated[item.index] -= 1
+      currentTotal -= 1
+      changed = true
+    }
+    if (!changed) break
+  }
+
+  return allocated
+}
+
+function normalizeStoryboardActResults(actResults: any[][], acts: any[]) {
+  return actResults.flatMap((rawShots, actIndex) => {
+    const actNumber = actIndex + 1
+    const shots = Array.isArray(rawShots) ? rawShots : []
+    return shots.map((shot: any, shotIndex: number) => ({
+      ...shot,
+      actNumber,
+      shotId: `shot_${String(shotIndex + 1).padStart(3, '0')}`,
+    }))
+  })
+}
+
+async function generateStoryboardByAct(textClient: any, framework: any, act: any, tagInstructions?: string, actNumberOverride?: number, estimatedShotsOverride?: number) {
+  const actNumber = actNumberOverride || normalizeOptionalInt(act.actNo ?? act.actNumber, 1)
   const prompt = loadPromptTemplate('storyboard-act-dynamic', {
     USER_INPUT: JSON.stringify(framework),
-    ACT_NUMBER: String(act.actNo || act.actNumber || 1),
-    ACT_TITLE: act.title || `第${act.actNo || act.actNumber || 1}幕`,
+    ACT_NUMBER: String(actNumber),
+    ACT_TITLE: act.title || `第${actNumber}幕`,
     ACT_CONTENT: act.content || '',
-    ESTIMATED_SHOTS: String(typeof act.estimatedShots === 'number' ? act.estimatedShots : 10),
+    ESTIMATED_SHOTS: String(estimatedShotsOverride || (typeof act.estimatedShots === 'number' ? act.estimatedShots : 10)),
     ACT_PACING: act.pacing || '张弛有度',
     KEY_SCENES: Array.isArray(act.keyScenes) ? act.keyScenes.join('；') : '',
     TAG_INSTRUCTIONS: tagInstructions || '',
@@ -31,19 +101,109 @@ async function generateStoryboardByAct(textClient: any, framework: any, act: any
   return extractJsonFromMarkdown(text) || []
 }
 
+async function generateStoryboardImagePrompt(textClient: any, input: {
+  currentDescription: string
+  originalPrompt: string
+  sceneName?: string
+  cameraMove?: string
+  duration?: number | string
+  aspectRatio: string
+  characters?: any
+  previousDescription?: string
+  nextDescription?: string
+  referencePolicy: string
+}): Promise<{ imagePrompt: string; negativePrompt?: string }> {
+  const prompt = loadPromptTemplate('storyboard-image-prompt', {
+    CURRENT_DESCRIPTION: input.currentDescription || '',
+    ORIGINAL_PROMPT: input.originalPrompt || '',
+    SCENE_NAME: input.sceneName || '',
+    CAMERA_MOVE: input.cameraMove || '',
+    DURATION: String(input.duration || ''),
+    ASPECT_RATIO: input.aspectRatio || '16:9',
+    CHARACTERS: JSON.stringify(input.characters || []),
+    PREVIOUS_DESCRIPTION: input.previousDescription || '',
+    NEXT_DESCRIPTION: input.nextDescription || '',
+    REFERENCE_POLICY: input.referencePolicy || '',
+  })
+
+  const text = await textClient.generate(prompt, { temperature: 0.35, maxTokens: 1200 })
+  const parsed = extractJsonFromMarkdown(text)
+  const imagePrompt = typeof parsed?.imagePrompt === 'string' ? parsed.imagePrompt.trim() : ''
+  if (!imagePrompt) {
+    throw new Error('STORYBOARD_IMAGE_PROMPT_EMPTY')
+  }
+  return {
+    imagePrompt,
+    negativePrompt: typeof parsed?.negativePrompt === 'string' ? parsed.negativePrompt.trim() : undefined,
+  }
+}
+
+function normalizeCharacterIds(value: any): string[] {
+  const raw = Array.isArray(value) ? value : [value]
+  return raw
+    .flatMap((item) => String(item || '').split(/[、,，\s]+/))
+    .map((id) => id.trim())
+    .filter(Boolean)
+}
+
+function assetCharacterId(asset: any): string {
+  const metadata = (asset?.metadata || {}) as any
+  return String(
+    metadata.characterId
+    || metadata.character?.id
+    || metadata.id
+    || ''
+  ).trim()
+}
+
+function selectCharacterReferenceImages(characterAssets: any[], characterIds: string[]): Array<{ url: string; characterId: string }> {
+  const ids = normalizeCharacterIds(characterIds)
+  if (ids.length === 0) return []
+  const selected = new Map<string, { url: string; characterId: string }>()
+  for (const id of ids) {
+    const asset = characterAssets.find((candidate) => {
+      const candidateId = assetCharacterId(candidate)
+      const storageKey = String(candidate?.storageKey || '')
+      return candidateId === id || storageKey.includes(`/characters/${id}`) || storageKey.includes(`character:${id}`)
+    })
+    if (asset?.url) selected.set(id, { url: asset.url, characterId: id })
+  }
+  return Array.from(selected.values())
+}
+
+function normalizeActNumber(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function uniqueUrlList(...groups: string[][]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const group of groups) {
+    for (const url of group) {
+      if (!url || seen.has(url)) continue
+      seen.add(url)
+      result.push(url)
+    }
+  }
+  return result
+}
+
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
+  const access = await checkProjectPermission(params.id)
+  if (!access.allowed) {
+    return access.response
+  }
+  const { user, isOwner } = access
   const project = await prisma.project.findUnique({ where: { id: params.id } })
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
-  }
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
   }
 
   if (!await canExecuteStep(params.id, 'STORYBOARD')) {
@@ -63,7 +223,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   // === generate-prompts: 只生成分镜提示词，不生成草图 ===
   if (action === 'generate-prompts') {
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS, { projectId: params.id })
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -84,10 +244,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].storyboard
         : ''
 
+      const shotBudgets = distributeStoryboardShotBudget(acts)
       const actResults = await Promise.all(
-        acts.map((act: any) => generateStoryboardByAct(textClient, framework, act, tagInstructions))
+        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, tagInstructions, actIndex + 1, shotBudgets[actIndex]))
       )
-      let allShots = actResults.flat()
+      let allShots = normalizeStoryboardActResults(actResults, acts)
       if (!Array.isArray(allShots) || allShots.length === 0) {
         throw new Error('Failed to parse storyboard from LLM output')
       }
@@ -100,10 +261,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
       // 构建提示词数组
       const prompts = allShots.map((shot, i) => ({
-        id: `prompt_${shot.shotId || i + 1}`,
+        id: `prompt_act${shot.actNumber || 1}_${shot.shotId || i + 1}`,
         chineseDesc: shot.description || '',
         englishPrompt: `${shot.cameraMove || '固定'} | ${shot.duration || 5}s | ${shot.description || ''}`,
-        target: `shot_${shot.shotId || i + 1}`,
+        target: `act${shot.actNumber || 1}_${shot.shotId || i + 1}`,
         shotId: shot.shotId || String(i + 1),
         actNumber: shot.actNumber,
         cameraMove: shot.cameraMove,
@@ -158,7 +319,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     let currentPrompts = prompts
     if (prompts.length === 0) {
       console.log('[STORYBOARD-IMAGE] No prompts found, auto-generating prompts first...')
-      const promptPointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS)
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS, { projectId: params.id })
       if (!promptPointsCheck.ok) {
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
@@ -174,18 +335,19 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         ? PROJECT_TAG_PROMPTS[projectTag2 as keyof typeof PROJECT_TAG_PROMPTS].storyboard
         : ''
 
+      const shotBudgets = distributeStoryboardShotBudget(acts)
       const actResults = await Promise.all(
-        acts.map((act: any) => generateStoryboardByAct(textClient, framework, act, tagInstructions2))
+        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, tagInstructions2, actIndex + 1, shotBudgets[actIndex]))
       )
-      currentAllShots = actResults.flat()
+      currentAllShots = normalizeStoryboardActResults(actResults, acts)
       if (!Array.isArray(currentAllShots) || currentAllShots.length === 0) {
         return NextResponse.json({ error: 'API_001', message: '生成分镜表失败，请稍后重试' }, { status: 500 })
       }
       currentPrompts = currentAllShots.map((shot, i) => ({
-        id: `prompt_${shot.shotId || i + 1}`,
+        id: `prompt_act${shot.actNumber || 1}_${shot.shotId || i + 1}`,
         chineseDesc: shot.description || '',
         englishPrompt: `${shot.cameraMove || '固定'} | ${shot.duration || 5}s | ${shot.description || ''}`,
-        target: `shot_${shot.shotId || i + 1}`,
+        target: `act${shot.actNumber || 1}_${shot.shotId || i + 1}`,
         shotId: shot.shotId || String(i + 1),
         actNumber: shot.actNumber,
         cameraMove: shot.cameraMove,
@@ -210,7 +372,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       console.log(`[STORYBOARD-IMAGE] Auto-generated ${currentPrompts.length} prompts, proceeding to generate images...`)
     }
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_IMAGES)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_IMAGES, { projectId: params.id })
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -283,8 +445,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         `
         const buffer = await sharp(Buffer.from(svg)).png().toBuffer()
         const storageKey = `projects/${params.id}/storyboard/${promptItem.shotId}.png`
-        await uploadFile(storageKey, buffer, 'image/png')
-        const url = await getSignedFileUrl(storageKey, 3600)
+        const { thumbnailKey, thumbnailUrl, originalUrl } = await uploadThumbnail(storageKey, buffer, 'image/png')
 
         const asset = await prisma.asset.create({
           data: {
@@ -293,12 +454,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
             type: 'IMAGE',
             mimeType: 'image/png',
             storageKey,
-            url,
-            metadata: { shotId: promptItem.shotId, type: 'storyboard', characters: promptItem.characters, duration: promptItem.duration, actNumber: promptItem.actNumber, aspectRatio },
+            url: originalUrl,
+            metadata: { shotId: promptItem.shotId, type: 'storyboard', characters: promptItem.characters, duration: promptItem.duration, actNumber: promptItem.actNumber, aspectRatio, thumbnailKey, thumbnailUrl },
           }
         })
-        shotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url, actNumber: promptItem.actNumber })
-        shotsWithFirstFrame.push({ ...shot, firstFrameUrl: url })
+        shotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url: originalUrl, actNumber: promptItem.actNumber, thumbnailUrl })
+        shotsWithFirstFrame.push({ ...shot, firstFrameUrl: originalUrl, thumbnailUrl })
       }
 
       // 从 project.framework 读取 acts 用于动态 actsSummary
@@ -319,7 +480,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         shotAssets: shotAssets,
         mode: existingOutput.mode || 'keyframe',
         aspectRatio,
-        imageModel: imageModel || 'gpt-image-2',
+        imageModel: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
         actsSummary,
       }
 
@@ -341,8 +502,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   // === generate-act-images: 按幕增量生成真实 AI 图片（异步队列：每次只生成1个shot）===
   if (action === 'generate-act-images') {
-    const actNumber = body?.actNumber
-    if (typeof actNumber !== 'number') {
+    const actNumber = normalizeActNumber(body?.actNumber)
+    if (actNumber == null) {
       return NextResponse.json({ error: 'VALIDATION_001', message: 'actNumber 必填且为数字' }, { status: 400 })
     }
 
@@ -352,7 +513,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const imageModel = body?.imageModel
     console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，shotId: ${shotId || 'auto'}，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_ACT_IMAGE)
+    const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE), { projectId: params.id })
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -361,13 +522,21 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const prompts = (existingOutput.prompts || []).map((p: any, i: number) => ({
       ...p,
       shotId: p.shotId || `shot_${String(i + 1).padStart(3, '0')}`,
+      actNumber: normalizeOptionalInt(p.actNumber, 0),
     }))
     const allShots = (existingOutput.shots || []).map((s: any, i: number) => ({
       ...s,
       shotId: s.shotId || `shot_${String(i + 1).padStart(3, '0')}`,
+      actNumber: normalizeOptionalInt(s.actNumber, 0),
     }))
-    const existingShotAssets: Array<{ shotId: string; assetId: string; url: string; actNumber?: number }> = existingOutput.shotAssets || []
-    const existingShotPrompts: Array<{ shotId: string; actNumber?: number; prompt: string; caption: string }> = existingOutput.shotPrompts || []
+    const existingShotAssets: Array<{ shotId: string; assetId: string; url: string; actNumber?: number }> = (existingOutput.shotAssets || []).map((s: any) => ({
+      ...s,
+      actNumber: normalizeOptionalInt(s.actNumber, 0),
+    }))
+    const existingShotPrompts: any[] = (existingOutput.shotPrompts || []).map((p: any) => ({
+      ...p,
+      actNumber: normalizeOptionalInt(p.actNumber, 0),
+    }))
 
     const actPrompts = prompts.filter((p: any) => p.actNumber === actNumber)
     if (actPrompts.length === 0) {
@@ -388,6 +557,24 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         await prisma.asset.delete({ where: { id: asset.id } }).catch(() => {})
       }
       cleanedShotAssets = existingShotAssets.filter((s: any) => !(s.actNumber === actNumber && actShotIds.has(s.shotId)))
+    }
+
+    let activeShotId: string | undefined = shotId
+    const markShotGeneration = async (next: Record<string, any>) => {
+      const latest = await prisma.workflowStep.findUnique({ where: { id: step.id } })
+      const latestOutput = ((latest?.outputData as any) || existingOutput) as any
+      await prisma.workflowStep.update({
+        where: { id: step.id },
+        data: {
+          outputData: {
+            ...latestOutput,
+            generatingShots: {
+              ...(latestOutput.generatingShots || {}),
+              ...next,
+            },
+          },
+        },
+      })
     }
 
     try {
@@ -440,10 +627,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 要求：
 1. 提示词必须包含场景环境、角色动作、光影氛围、镜头感描述
 2. 如果涉及角色，必须引用该角色的形象特征（从角色设定中提取），确保角色一致性
-3. 提示词长度控制在 200-500 词，适合即梦/Flux/DALL-E 等模型
-4. 同时生成一个中文描述（用于前端展示）
-5. 【最高优先级】必须输出单张完整画面（single full frame），禁止出现以下任何形式：分屏 split-screen、多格 panels、漫画分镜 comic layout、拼贴 collage、三联画 triptych、双联画 diptych、时间轴 timeline、前后对比 before/after、白天黑夜并列 day-night split。只描述一个单一瞬间的单一画面。
-6. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
+3. 如果是旅游/城市/路线镜头，地点和体验必须是主体，人物只做导览；除非镜头明确要求人物特写，人物通常只占画面高度 15%-30%，不要挡住建筑、街道、船窗、河岸、展品或入口。
+4. 如果镜头涉及主观视角、过肩跟随、步行移动、船窗/车窗、入口、检票、交通连接，必须优先表现观众视角和真实空间关系，可以不出现人物。
+5. 禁止让图像模型绘制可读中文、英文招牌、校训、票面文字、二维码、UI 文本、水印、字幕或 logo；需要文字信息时，只表现信息牌/手机/票据轮廓或后期留白区域。
+6. 真实城市点位要克制幻想化：避免虚构古街牌坊、宫殿化建筑、错误地标混搭、江南园林化船只、随机天际线。
+7. 提示词长度控制在 120-240 词，适合即梦/Flux/DALL-E 等模型
+8. 同时生成一个中文描述（用于前端展示）
+9. 【最高优先级】必须输出单张完整画面（single full frame），禁止出现以下任何形式：分屏 split-screen、多格 panels、漫画分镜 comic layout、拼贴 collage、三联画 triptych、双联画 diptych、时间轴 timeline、前后对比 before/after、白天黑夜并列 day-night split。只描述一个单一瞬间的单一画面。
+10. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
 {"prompt": "英文生图提示词...", "caption": "中文画面描述..."}${sbRefHint}`
 
             try {
@@ -515,6 +706,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         })
       }
 
+      activeShotId = targetShotId
+
       let shotPrompt = currentShotPrompts.find((p: any) => p.actNumber === actNumber && p.shotId === targetShotId)
       if (!shotPrompt) {
         // 兼容旧数据：允许无 actNumber 的提示词回退
@@ -537,10 +730,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         console.error(`[STORYBOARD-ACT] 幕 ${actNumber} 镜头 ${targetShotId} 无可用提示词，currentShotPrompts:`, currentShotPrompts.map((p: any) => `${p.actNumber ?? '?'}/${p.shotId}`), 'actPrompts:', actPrompts.map((p: any) => `${p.actNumber}/${p.shotId}`))
         return NextResponse.json({ error: 'VALIDATION_003', message: `镜头 ${targetShotId} 没有对应的提示词` }, { status: 400 })
       }
+      const currentShot = allShots.find((s: any) => s.shotId === targetShotId && s.actNumber === actNumber)
 
       // 查找上一个镜头（同幕内），用于画面连贯性
       let previousShotImageUrl: string | null = null
       let previousShotDesc: string | null = null
+      let nextShotDesc = ''
       const targetIndex = actPrompts.findIndex((p: any) => p.shotId === targetShotId)
       if (targetIndex > 0) {
         const prevPrompt = actPrompts[targetIndex - 1]
@@ -551,6 +746,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           console.log(`[STORYBOARD-ACT] 上一镜头 ${prevPrompt.shotId} 已有图片，用作连贯参考`)
         }
       }
+      if (targetIndex >= 0 && targetIndex < actPrompts.length - 1) {
+        const nextPrompt = actPrompts[targetIndex + 1]
+        nextShotDesc = allShots.find((s: any) => s.shotId === nextPrompt.shotId && s.actNumber === actNumber)?.description || nextPrompt.chineseDesc || ''
+      }
 
       // 删除该 shot 已有的 asset（覆盖生成，需同时匹配 shotId 和 actNumber）
       const allAssets = await prisma.asset.findMany({
@@ -558,6 +757,20 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       })
       const oldAsset = allAssets.find((a: any) => a.metadata?.shotId === targetShotId && a.metadata?.actNumber === actNumber)
       if (oldAsset) {
+        // 先删除旧文件（storageKey 和 thumbnailKey）
+        try {
+          if (oldAsset.storageKey) {
+            await deleteFile(oldAsset.storageKey)
+            console.log(`[STORYBOARD-ACT] 删除旧文件: ${oldAsset.storageKey}`)
+          }
+          const oldMeta = (oldAsset.metadata || {}) as any
+          if (oldMeta.thumbnailKey) {
+            await deleteFile(oldMeta.thumbnailKey)
+            console.log(`[STORYBOARD-ACT] 删除旧缩略图: ${oldMeta.thumbnailKey}`)
+          }
+        } catch (e: any) {
+          console.warn(`[STORYBOARD-ACT] 删除旧文件失败:`, e?.message)
+        }
         await prisma.asset.delete({ where: { id: oldAsset.id } }).catch(() => {})
       }
 
@@ -573,50 +786,123 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const characterAssets = await prisma.asset.findMany({
         where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
       })
-      const characterImageUrls = characterAssets
-        .map((a) => a.url)
-        .filter((u): u is string => typeof u === 'string' && u.length > 0)
+      const shotCharacterIds = normalizeCharacterIds(currentShot?.characters || shotPrompt.characters || [])
+      const characterImageRefs = selectCharacterReferenceImages(characterAssets, shotCharacterIds)
+      const characterImageUrls = characterImageRefs.map((ref) => ref.url)
 
       const refs = await getProjectReferences(params.id).catch(() => [])
       const userRefUrls = refs.filter(r => r.url).map(r => r.url)
 
-      const refImages: string[] = []
-      if (previousShotImageUrl) refImages.push(previousShotImageUrl)
-      if (characterImageUrls.length > 0) refImages.push(...characterImageUrls)
-      if (styleRefUrl) refImages.push(styleRefUrl)
-      if (userRefUrls.length > 0) refImages.push(...userRefUrls)
+      const extraRefsKey = actNumber != null ? `${targetShotId}_${actNumber}` : targetShotId
+      const persistedExtraRefs: Array<{ url: string; id?: string }> = (existingOutput.shotExtraRefs || {})[extraRefsKey] || []
+      const extraRefUrls = persistedExtraRefs
+        .filter((r: any) => typeof r?.url === 'string' && /^https?:\/\//i.test(r.url))
+        .map((r: any) => r.url)
 
-      // 如果有上一镜头参考图，增强 prompt 以保持画面连贯性
-      let finalPrompt = shotPrompt.prompt
-      if (previousShotImageUrl && previousShotDesc) {
-        const currentShot = allShots.find((s: any) => s.shotId === targetShotId)
-        const currentDesc = currentShot?.description || shotPrompt.caption || ''
-        const charSame = currentShot?.characters?.join(',') === actPrompts[targetIndex]?.characters?.join(',')
-        const hint = charSame
-          ? 'Maintain the same characters, environment, and lighting as the reference image. Only adjust camera angle, framing, and character poses as described.'
-          : 'Maintain the same environment and lighting as the reference image, but apply the character changes described below.'
-        finalPrompt = `[Continuity from previous shot: ${previousShotDesc.slice(0, 80)}] ${hint}\n\nCurrent shot: ${currentDesc}\n\n${shotPrompt.prompt}`
+      const refImages = uniqueUrlList(
+        extraRefUrls,
+        characterImageUrls,
+        styleRefUrl ? [styleRefUrl] : [],
+        previousShotImageUrl ? [previousShotImageUrl] : [],
+        userRefUrls
+      )
+      // 优先级：角色 → 风格 → 上一帧 → 用户参考（角色优先保证一致性）
+      const refStats = {
+        total: refImages.length,
+        topPriority: extraRefUrls.length,
+        characters: characterImageUrls.length,
+        characterIds: characterImageRefs.map((ref) => ref.characterId),
+        style: styleRefUrl ? 1 : 0,
+        previousShot: previousShotImageUrl ? 1 : 0,
+        userReferences: userRefUrls.length,
+      }
+      console.log(`[STORYBOARD-ACT] 参考图统计: total=${refStats.total}, topPriority=${refStats.topPriority}, chars=${refStats.characters}, style=${refStats.style}, prev=${refStats.previousShot}, userRefs=${refStats.userReferences}`)
+      refImages.forEach((url, index) => console.log(`[STORYBOARD-ACT] ref[${index}]=${url.slice(0, 100)}`))
+      if (refImages.length === 0) {
+        throw new Error('STORYBOARD_REF_MISSING: 分镜生图未找到人物设计、风格统一或参考素材图片，已停止生成以避免产出无关图片')
       }
 
-      // 强制单帧：追加负面约束，防止模型输出分屏/多格/拼贴
-      const singleFrameGuard = ' Single full frame only. Absolutely no split-screen, multi-panel, collage, triptych, diptych, comic layout, before-and-after comparison, or timeline sequence. One image, one moment.'
-      const guardedPrompt = finalPrompt + singleFrameGuard
+      const currentDesc = currentShot?.description || shotPrompt.caption || shotPrompt.prompt || ''
+      let generatedImagePrompt = ''
+      let generatedNegativePrompt = ''
+      try {
+        const textClientForImagePrompt = await getTextClient()
+        const referencePolicy = `Reference image counts: topPriority=${refStats.topPriority}, characters=${refStats.characters}, style=${refStats.style}, previousShot=${refStats.previousShot}, userReferences=${refStats.userReferences}. Top-priority reference images are mandatory visual constraints and should be followed first. Use character/style references for appearance and style only. Use previous-shot reference only for shared continuity; never copy its unrelated scene objects into the current shot.`
+        const imagePromptResult = await generateStoryboardImagePrompt(textClientForImagePrompt, {
+          currentDescription: currentDesc,
+          originalPrompt: shotPrompt.prompt || '',
+          sceneName: currentShot?.sceneName || shotPrompt.sceneName || '',
+          cameraMove: currentShot?.cameraMove || shotPrompt.cameraMove || '',
+          duration: currentShot?.duration || shotPrompt.duration || '',
+          aspectRatio,
+          characters: currentShot?.characters || shotPrompt.characters || [],
+          previousDescription: previousShotDesc || '',
+          nextDescription: nextShotDesc,
+          referencePolicy,
+        })
+        generatedImagePrompt = imagePromptResult.imagePrompt
+        generatedNegativePrompt = imagePromptResult.negativePrompt || ''
+        console.log(`[STORYBOARD-ACT] 文本AI生成 imagePrompt ${targetShotId}:`, generatedImagePrompt.slice(0, 120))
+      } catch (promptErr: any) {
+        generatedImagePrompt = `${currentDesc}\n\n${shotPrompt.prompt || ''}`
+        generatedNegativePrompt = ''
+        console.warn(`[STORYBOARD-ACT] imagePrompt 文本生成失败，使用回退 prompt: ${promptErr?.message || promptErr}`)
+      }
+
+      // ===== 当前镜头语义优先，参考图只保留外观/画风一致性 =====
+      let finalPrompt = generatedImagePrompt
+      const primaryRefHint = characterImageUrls.length > 0
+        ? 'Use the character reference images only for character appearance, costume, hairstyle and iconic accessories. Do not copy unrelated background objects from reference images.'
+        : ''
+      if (previousShotImageUrl && previousShotDesc) {
+        const charSame = currentShot?.characters?.join(',') === actPrompts[targetIndex]?.characters?.join(',')
+        // 弱化连贯性提示
+        const hint = charSame
+          ? 'Maintain only shared character/style continuity from the previous shot; the current shot description is authoritative.'
+          : 'Use previous-shot context only for narrative continuity; the current shot description is authoritative.'
+        finalPrompt = `${primaryRefHint}\n\n${hint}\n\n${generatedImagePrompt}`
+      } else {
+        finalPrompt = `${primaryRefHint}\n\n${generatedImagePrompt}`
+      }
+
+      const aspectGuard = aspectRatio === '9:16'
+        ? ' Compose as a tall vertical portrait storyboard frame for mobile video, with a 9:16 visual composition and important subjects centered away from the edges.'
+        : aspectRatio === '16:9'
+          ? ' Compose as a wide horizontal cinematic storyboard frame with a 16:9 visual composition.'
+          : ` Compose for a ${aspectRatio} storyboard frame.`
+      // 弱化单帧约束（保留但缩短）
+      const singleFrameGuard = ' Single full frame, no split-screen, no collage.'
+      const negativeGuard = generatedNegativePrompt ? ` Avoid: ${generatedNegativePrompt}.` : ''
+      const guardedPrompt = finalPrompt + aspectGuard + singleFrameGuard + negativeGuard
 
       console.log(`[STORYBOARD-ACT] 阶段B: 生图 ${targetShotId}, prompt前80:`, guardedPrompt.slice(0, 80))
+      const generationKey = `${actNumber}_${targetShotId}`
+      await markShotGeneration({
+        [generationKey]: {
+          status: 'processing',
+          actNumber,
+          shotId: targetShotId,
+          startedAt: new Date().toISOString(),
+          message: '供应商任务已提交，正在等待生成结果',
+          imageModel: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
+          aspectRatio,
+        },
+      })
 
       const { buffer, isMock, lastError } = await generateImage({
-        model: imageModel || 'gpt-image-2',
+        model: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
         prompt: guardedPrompt,
         referenceImages: refImages.length > 0 ? refImages : undefined,
         aspectRatio,
         watermark: false,
         sequentialImageGeneration: 'disabled',
         maxImages: 1,
+        requireReferenceImages: refImages.length > 0,
+        noDedup: true,
       })
 
-      const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.shotId}_${Date.now()}.png`
-      await uploadFile(storageKey, buffer, 'image/png')
-      const url = await getSignedFileUrl(storageKey, 3600)
+const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.shotId}_${Date.now()}.png`
+      const { thumbnailKey, thumbnailUrl, originalUrl } = await uploadThumbnail(storageKey, buffer, 'image/png')
 
       const asset = await prisma.asset.create({
         data: {
@@ -625,29 +911,37 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           type: 'IMAGE',
           mimeType: 'image/png',
           storageKey,
-          url,
+          url: originalUrl,
           metadata: {
             shotId: shotPrompt.shotId,
             type: 'storyboard',
             actNumber,
             aspectRatio,
-            imageModel: imageModel || 'gpt-image-2',
+            imageModel: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
+            referenceImageCount: refStats.total,
+            referenceImageBreakdown: refStats,
+            referenceImageUrls: refImages,
             prompt: shotPrompt.prompt,
+            imagePrompt: guardedPrompt,
+            generatedImagePrompt,
+            generatedNegativePrompt,
             caption: shotPrompt.caption,
             isMock: !!isMock,
             mockReason: lastError || null,
+            thumbnailKey,
+            thumbnailUrl,
           },
         }
       })
 
       // 合并 shotAssets 并回写对应 shot 的 firstFrameUrl
-      const newShotAsset = { shotId: shotPrompt.shotId, assetId: asset.id, url, actNumber }
+      const newShotAsset = { shotId: shotPrompt.shotId, assetId: asset.id, url: originalUrl, actNumber, thumbnailUrl }
       const mergedShotAssets = [
         ...cleanedShotAssets.filter((s: any) => !(s.shotId === shotPrompt.shotId && s.actNumber === actNumber)),
         newShotAsset,
       ]
       const mergedShots = allShots.map((s: any) =>
-        s.shotId === shotPrompt.shotId && s.actNumber === actNumber ? { ...s, firstFrameUrl: url } : s
+        s.shotId === shotPrompt.shotId && s.actNumber === actNumber ? { ...s, firstFrameUrl: originalUrl, thumbnailUrl } : s
       )
 
       const processedCount = mergedShotAssets.filter((s: any) => s.actNumber === actNumber && actShotIds.has(s.shotId)).length
@@ -660,8 +954,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         shotAssets: mergedShotAssets,
         shotPrompts: currentShotPrompts,
         aspectRatio,
-        imageModel: imageModel || 'gpt-image-2',
+        imageModel: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
+        generatingShots: {
+          ...(existingOutput.generatingShots || {}),
+          [generationKey]: undefined,
+        },
       }
+      Object.keys(nextOutput.generatingShots || {}).forEach((key) => {
+        if (nextOutput.generatingShots[key] === undefined) delete nextOutput.generatingShots[key]
+      })
 
       await prisma.workflowStep.update({
         where: { id: step.id },
@@ -692,6 +993,18 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         }
       })
     } catch (e: any) {
+      if (activeShotId) {
+        const generationKey = `${actNumber}_${activeShotId}`
+        await markShotGeneration({
+          [generationKey]: {
+            status: 'failed',
+            actNumber,
+            shotId: activeShotId,
+            failedAt: new Date().toISOString(),
+            message: e.message || '生成失败',
+          },
+        }).catch(() => {})
+      }
       await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
       console.error(`[STORYBOARD-ACT] 第 ${actNumber} 幕生成失败:`, e.message)
       return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
@@ -723,7 +1036,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   }
 
   const totalCost = GENERATION_COSTS.STORYBOARD_PROMPTS + GENERATION_COSTS.STORYBOARD_IMAGES
-  const pointsCheck = await checkPoints(totalCost)
+  const pointsCheck = await checkPoints(totalCost, { projectId: params.id })
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -736,10 +1049,11 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     // 动态遍历所有幕生成分镜
     const textClient = await getTextClient()
+    const shotBudgets = distributeStoryboardShotBudget(acts)
     const actResults = await Promise.all(
-      acts.map((act: any) => generateStoryboardByAct(textClient, framework, act))
+      acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, undefined, actIndex + 1, shotBudgets[actIndex]))
     )
-    let allShots = actResults.flat()
+    let allShots = normalizeStoryboardActResults(actResults, acts)
 
     if (!Array.isArray(allShots) || allShots.length === 0) {
       throw new Error('Failed to parse storyboard from LLM output')
@@ -795,8 +1109,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       const buffer = await sharp(Buffer.from(svg)).png().toBuffer()
 
       const storageKey = `projects/${params.id}/storyboard/${shot.shotId}.png`
-      await uploadFile(storageKey, buffer, 'image/png')
-      const url = await getSignedFileUrl(storageKey, 3600)
+      const { thumbnailKey, thumbnailUrl, originalUrl } = await uploadThumbnail(storageKey, buffer, 'image/png')
 
       const asset = await prisma.asset.create({
         data: {
@@ -805,12 +1118,12 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
           type: 'IMAGE',
           mimeType: 'image/png',
           storageKey,
-          url,
-          metadata: { shotId: shot.shotId, type: 'storyboard', characters: shot.characters, duration: shot.duration, actNumber: shot.actNumber },
+          url: originalUrl,
+          metadata: { shotId: shot.shotId, type: 'storyboard', characters: shot.characters, duration: shot.duration, actNumber: shot.actNumber, thumbnailKey, thumbnailUrl },
         }
       })
-      shotAssets.push({ shotId: shot.shotId, assetId: asset.id, url, actNumber: shot.actNumber })
-      shotsWithFirstFrame.push({ ...shot, firstFrameUrl: url })
+      shotAssets.push({ shotId: shot.shotId, assetId: asset.id, url: originalUrl, actNumber: shot.actNumber, thumbnailUrl })
+      shotsWithFirstFrame.push({ ...shot, firstFrameUrl: originalUrl, thumbnailUrl })
     }
 
     const outputData = {
@@ -856,14 +1169,11 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
-  const project = await prisma.project.findUnique({ where: { id: params.id } })
-  if (!project) {
-    return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
-  }
-  const access = await checkProjectAccess(project.userId)
+  const access = await checkProjectPermission(params.id)
   if (!access.allowed) {
     return access.response
   }
+  const { user, project, isOwner } = access
 
   const body = await req.json().catch(() => null)
   if (!body || !Array.isArray(body.shots)) {

@@ -1,12 +1,12 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, ObjectIdentifier } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import fs from "fs/promises";
 import path from "path";
 
-// ======== 工作指令.txt Supabase 适配 ========
-// 存储模式优先级：
-// 1. Supabase Storage S3（SUPABASE_STORAGE_S3_ENDPOINT 为真实值）
-// 2. Cloudflare R2（R2_ACCOUNT_ID 为真实值）
+// ======== 存储配置 ========
+// 存储模式优先级（R2 优先，因为免费额度更大）：
+// 1. Cloudflare R2（R2_ACCOUNT_ID 等配置为真实值）— 推荐，免费额度 10GB 存储 + 100GB 月度 Airtail
+// 2. Supabase Storage S3（SUPABASE_STORAGE_S3_ENDPOINT 为真实值）
 // 3. 本地 Mock（public/mock-storage/）
 
 function isPlaceholder(v: string | undefined): boolean {
@@ -64,12 +64,12 @@ const R2 = isR2Mode
   : null;
 
 // 启动日志
-if (isSupabaseS3Mode) {
-  console.log('[STORAGE] Supabase S3 模式已启用，bucket:', process.env.SUPABASE_STORAGE_BUCKET)
-} else if (isR2Mode) {
-  console.log('[STORAGE] R2 模式已启用，bucket:', process.env.R2_BUCKET_NAME)
+if (isR2Mode) {
+  console.log('[STORAGE] ✓ Cloudflare R2 模式已启用，bucket:', process.env.R2_BUCKET_NAME)
+} else if (isSupabaseS3Mode) {
+  console.log('[STORAGE] ✓ Supabase Storage S3 模式已启用，bucket:', process.env.SUPABASE_STORAGE_BUCKET)
 } else {
-  console.warn('[STORAGE] Mock 模式：使用 public/mock-storage/ 本地兜底')
+  console.warn('[STORAGE] ⚠ Mock 模式：使用 public/mock-storage/ 本地兜底（仅用于开发）')
 }
 
 async function ensureLocalDir(filePath: string) {
@@ -96,7 +96,14 @@ function buildPublicUrl(key: string): string {
   return `/mock-storage/${normalizedKey}`
 }
 
+const MAX_FILE_SIZE_MB = parseInt(process.env.MAX_FILE_SIZE_MB || '50', 10)
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
 export async function uploadFile(key: string, body: Buffer, contentType: string) {
+  if (body.length > MAX_FILE_SIZE_BYTES) {
+    throw new Error(`STORAGE_004: 文件大小超过限制 (${MAX_FILE_SIZE_MB}MB)`)
+  }
+
   if (isMockMode) {
     try {
       const localPath = path.join(MOCK_STORAGE_ROOT, key)
@@ -203,4 +210,263 @@ export async function deleteFile(key: string) {
 // 兼容旧代码中的 getPublicUrl 调用
 export async function getPublicUrl(key: string) {
   return buildPublicUrl(key)
+}
+
+// ============================================================
+// 缩略图上传（生成并上传缩略图，返回缩略图 URL）
+// ============================================================
+export async function uploadThumbnail(
+  originalKey: string,
+  buffer: Buffer,
+  contentType: string = 'image/png'
+): Promise<{ originalKey: string; thumbnailKey: string; thumbnailUrl: string; originalUrl: string }> {
+  const { generateThumbnail, getThumbnailKey } = await import('./thumbnail')
+  const { default: sharp } = await import('sharp')
+
+  const { thumbnailBuffer, needsThumbnail } = await generateThumbnail(buffer)
+
+  const thumbnailKey = getThumbnailKey(originalKey)
+
+  if (needsThumbnail) {
+    await uploadFile(thumbnailKey, thumbnailBuffer, 'image/webp')
+    console.log(`[STORAGE-THUMB] 上传缩略图 ${thumbnailKey} (${(thumbnailBuffer.length / 1024).toFixed(1)} KB)`)
+  }
+
+  await uploadFile(originalKey, buffer, contentType)
+
+  const thumbnailUrl = needsThumbnail ? await getSignedFileUrl(thumbnailKey, 3600) : await getSignedFileUrl(originalKey, 3600)
+  const originalUrl = await getSignedFileUrl(originalKey, 3600)
+
+  return { originalKey, thumbnailKey, thumbnailUrl, originalUrl }
+}
+
+// ============================================================
+// 删除项目文件夹（批量删除前缀下的所有对象）
+// ============================================================
+export async function deleteProjectFolder(projectId: string): Promise<{ deletedCount: number }> {
+  const prefix = `projects/${projectId}/`
+  let deletedCount = 0
+  let continuationToken: string | undefined
+
+  if (isMockMode) {
+    try {
+      const { readdir, unlink, rmdir } = await import('fs/promises')
+      const projectDir = path.join(MOCK_STORAGE_ROOT, prefix)
+      await deleteLocalFolderRecursive(projectDir)
+      console.log(`[STORAGE-MOCK] 删除文件夹 ${prefix}`)
+      return { deletedCount: 0 }
+    } catch (error: any) {
+      console.error(`[STORAGE-MOCK] 删除文件夹失败:`, error?.message)
+      return { deletedCount: 0 }
+    }
+  }
+
+  // 检查是否配置了 S3 客户端（R2 优先）
+  const hasR2 = isR2Mode && R2
+  const hasSupabaseS3 = isSupabaseS3Mode && supabaseS3Client
+
+  if (!hasR2 && !hasSupabaseS3) {
+    console.warn('[STORAGE] 无 S3 客户端（Supabase S3 或 R2），跳过云存储清理')
+    return { deletedCount: 0 }
+  }
+
+  // R2 优先
+  const client = hasR2 ? R2! : supabaseS3Client!
+  const bucket = hasR2 ? process.env.R2_BUCKET_NAME! : process.env.SUPABASE_STORAGE_BUCKET!
+  const storageType = hasR2 ? 'R2' : 'Supabase S3'
+
+  console.log(`[STORAGE-${storageType}] 开始删除项目文件夹: ${prefix}`)
+
+  do {
+    try {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+      const listResult = await client.send(listCommand)
+
+      if (!listResult.Contents || listResult.Contents.length === 0) {
+        console.log(`[STORAGE-${storageType}] 没有找到文件: ${prefix}`)
+        break
+      }
+
+      const objectsToDelete: ObjectIdentifier[] = listResult.Contents
+        .filter(obj => obj.Key)
+        .map(obj => ({ Key: obj.Key! }))
+
+      // 分批删除（S3 单次最多 1000 个）
+      const batchSize = 1000
+      for (let i = 0; i < objectsToDelete.length; i += batchSize) {
+        const batch = objectsToDelete.slice(i, i + batchSize)
+        const deleteCommand = new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: batch },
+        })
+        await client.send(deleteCommand)
+        deletedCount += batch.length
+        console.log(`[STORAGE-${storageType}] 删除第 ${i / batchSize + 1} 批 ${batch.length} 个文件`)
+      }
+
+      continuationToken = listResult.NextContinuationToken
+    } catch (error: any) {
+      console.error(`[STORAGE-${storageType}] 列出/删除文件失败:`, error?.message)
+      break
+    }
+  } while (continuationToken)
+
+  console.log(`[STORAGE-${storageType}] 项目文件夹已删除: ${prefix}, 共 ${deletedCount} 个文件`)
+  return { deletedCount }
+}
+
+async function deleteLocalFolderRecursive(dirPath: string): Promise<void> {
+  try {
+    const { readdir, unlink, rmdir } = await import('fs/promises')
+    const entries = await readdir(dirPath, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name)
+      if (entry.isDirectory()) {
+        await deleteLocalFolderRecursive(fullPath)
+        await rmdir(fullPath)
+      } else {
+        await unlink(fullPath)
+      }
+    }
+  } catch (error: any) {
+    if (error.code !== 'ENOENT') {
+      console.warn(`[STORAGE-MOCK] 删除本地文件夹失败: ${dirPath}`, error?.message)
+    }
+  }
+}
+
+// ============================================================
+// 删除用户资产文件夹
+// ============================================================
+export async function deleteUserAssetsFolder(userId: string): Promise<{ deletedCount: number }> {
+  const prefix = `users/${userId}/`
+  let deletedCount = 0
+
+  if (isMockMode) {
+    try {
+      const { readdir, unlink, rmdir } = await import('fs/promises')
+      const userDir = path.join(MOCK_STORAGE_ROOT, prefix)
+      await deleteLocalFolderRecursive(userDir)
+      return { deletedCount: 0 }
+    } catch (error: any) {
+      return { deletedCount: 0 }
+    }
+  }
+
+  const client = isR2Mode ? R2 : supabaseS3Client
+  const bucket = isR2Mode ? process.env.R2_BUCKET_NAME! : process.env.SUPABASE_STORAGE_BUCKET!
+
+  if (!client) return { deletedCount: 0 }
+
+  let continuationToken: string | undefined
+  do {
+    try {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+      const listResult = await client.send(listCommand)
+
+      if (!listResult.Contents || listResult.Contents.length === 0) break
+
+      const objectsToDelete: ObjectIdentifier[] = listResult.Contents
+        .filter(obj => obj.Key)
+        .map(obj => ({ Key: obj.Key! }))
+
+      const deleteCommand = new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: objectsToDelete },
+      })
+      await client.send(deleteCommand)
+      deletedCount += objectsToDelete.length
+      continuationToken = listResult.NextContinuationToken
+    } catch (error: any) {
+      console.error(`[STORAGE] 删除用户文件夹失败:`, error?.message)
+      break
+    }
+  } while (continuationToken)
+
+  return { deletedCount }
+}
+
+// ============================================================
+// 获取缩略图 URL（如果缩略图存在则返回缩略图，否则返回原图）
+// ============================================================
+export async function getThumbnailUrl(originalKey: string): Promise<string> {
+  const { getThumbnailKey, isThumbnailKey } = await import('./thumbnail')
+
+  if (isThumbnailKey(originalKey)) {
+    return getSignedFileUrl(originalKey, 3600)
+  }
+
+  const thumbnailKey = getThumbnailKey(originalKey)
+
+  try {
+    const url = await getSignedFileUrl(thumbnailKey, 3600)
+    return url
+  } catch {
+    return getSignedFileUrl(originalKey, 3600)
+  }
+}
+
+// ============================================================
+// 删除旧版缩略图（清理没有对应原图的缩略图）
+// ============================================================
+export async function cleanupOrphanedThumbnails(): Promise<{ deletedCount: number }> {
+  if (isMockMode) return { deletedCount: 0 }
+
+  const client = isSupabaseS3Mode ? supabaseS3Client : R2
+  if (!client) return { deletedCount: 0 }
+
+  const bucket = isSupabaseS3Mode ? process.env.SUPABASE_STORAGE_BUCKET! : process.env.R2_BUCKET_NAME!
+  let deletedCount = 0
+  let continuationToken: string | undefined
+
+  do {
+    try {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: '',
+        ContinuationToken: continuationToken,
+      })
+      const listResult = await client.send(listCommand)
+
+      if (!listResult.Contents || listResult.Contents.length === 0) break
+
+      const { isThumbnailKey, getOriginalKeyFromThumbnail } = await import('./thumbnail')
+      const keysToDelete: ObjectIdentifier[] = []
+
+      for (const obj of listResult.Contents) {
+        if (!obj.Key) continue
+        if (isThumbnailKey(obj.Key)) {
+          const originalKey = getOriginalKeyFromThumbnail(obj.Key)
+          const originalExists = listResult.Contents.some(o => o.Key === originalKey)
+          if (!originalExists) {
+            keysToDelete.push({ Key: obj.Key })
+          }
+        }
+      }
+
+      if (keysToDelete.length > 0) {
+        const deleteCommand = new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: keysToDelete },
+        })
+        await client.send(deleteCommand)
+        deletedCount += keysToDelete.length
+      }
+
+      continuationToken = listResult.NextContinuationToken
+    } catch (error: any) {
+      console.error(`[STORAGE] 清理孤立缩略图失败:`, error?.message)
+      break
+    }
+  } while (continuationToken)
+
+  return { deletedCount }
 }

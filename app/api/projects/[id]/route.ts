@@ -1,13 +1,17 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { checkProjectAccess } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { projectDetailSelect, projectCoreSelect } from '@/lib/db/project-select'
 import { computeProjectStateFromSteps } from '@/lib/workflow-state'
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   try {
+    const access = await checkProjectPermission(params.id)
+    if (!access.allowed) return access.response
+    const { user, isOwner } = access
+
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       select: projectDetailSelect,
@@ -16,9 +20,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     if (!project) {
       return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
-
-    const access = await checkProjectAccess(project.userId)
-    if (!access.allowed) return access.response
 
     // 兼容旧项目：用 WorkflowStep 的 COMPLETED 状态推导 project.step*_done 字段，
     // 避免因为 stepStyleDone 等布尔字段未写入导致下游步骤被错误锁定。
@@ -29,10 +30,26 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     const styleOutput = (styleStep?.outputData as any) || {}
     const selectedAspectRatio =
       styleOutput?.selectedAspectRatio || styleOutput?.aspectRatio || '16:9'
+    const hasSelectedStyle =
+      !!project.selectedStyleId ||
+      !!styleOutput.selectedStyleId ||
+      !!styleOutput.selectedRef ||
+      !!styleOutput.styleRefUrl ||
+      !!styleOutput.selectedStyleImage ||
+      !!styleOutput.selectedStyle?.url
 
     const projectWithDerivedState = {
       ...project,
-      ...derivedState,
+      stepIdeaDone: project.stepIdeaDone || derivedState.stepIdeaDone,
+      stepFrameworkDone: project.stepFrameworkDone || derivedState.stepFrameworkDone,
+      stepStyleDone: project.stepStyleDone || derivedState.stepStyleDone || hasSelectedStyle,
+      stepCharacterDone: project.stepCharacterDone || derivedState.stepCharacterDone,
+      stepConceptDone: project.stepConceptDone || derivedState.stepConceptDone,
+      stepStoryboardDone: project.stepStoryboardDone || derivedState.stepStoryboardDone,
+      stepStoryboardFirstframeDone: project.stepStoryboardFirstframeDone || derivedState.stepStoryboardFirstframeDone,
+      stepTrailerDone: project.stepTrailerDone || derivedState.stepTrailerDone,
+      stepEndingDone: project.stepEndingDone || derivedState.stepEndingDone,
+      stepDirectDone: project.stepDirectDone || derivedState.stepDirectDone,
       selectedAspectRatio,
     }
 
@@ -48,6 +65,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
+    const access = await checkProjectPermission(params.id)
+    if (!access.allowed) return access.response
+    const { user, isOwner } = access
+
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       select: projectCoreSelect,
@@ -57,12 +78,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
 
-    const access = await checkProjectAccess(project.userId)
-    if (!access.allowed) return access.response
-
     const body = await req.json().catch(() => ({}))
 
-    // 目前仅支持更新 selectedStyleId / title / rawIdea
+    // 支持更新 selectedStyleId / title / rawIdea / groupId
     const updateData: any = {}
     if (body.selectedStyleId !== undefined) {
       updateData.selectedStyleId = body.selectedStyleId
@@ -76,6 +94,30 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
     if (body.rawIdea !== undefined) {
       updateData.rawIdea = body.rawIdea
+    }
+
+    // 小组成员可把自己的个人项目拉入小组；已属于小组的项目不能移出
+    if (body.groupId !== undefined && body.groupId !== project.groupId) {
+      if (!isOwner && !user?.isAdmin) {
+        return NextResponse.json({ error: 'AUTH_002', message: '只有项目所有者可以移入小组' }, { status: 403 })
+      }
+      if (project.groupId) {
+        return NextResponse.json({ error: 'GROUP_010', message: '项目已属于小组，不能移出' }, { status: 400 })
+      }
+      if (body.groupId !== null) {
+        const membership = await prisma.groupMembership.findUnique({
+          where: {
+            groupId_userId: {
+              groupId: body.groupId,
+              userId: user.id,
+            },
+          },
+        })
+        if (!membership || membership.status !== 'ACTIVE') {
+          return NextResponse.json({ error: 'GROUP_001', message: '你不是该小组成员' }, { status: 403 })
+        }
+        updateData.groupId = body.groupId
+      }
     }
 
     const updated = await prisma.project.update({
@@ -96,6 +138,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   try {
+    const access = await checkProjectPermission(params.id)
+    if (!access.allowed) return access.response
+    const { user, isOwner } = access
+
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       select: {
@@ -108,11 +154,17 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
       return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
 
-    const access = await checkProjectAccess(project.userId)
-    if (!access.allowed) return access.response
-
     const projectId = params.id
     console.log(`[DELETE-PROJECT] 开始删除项目: ${projectId}, 资产数=${project.assets.length}`)
+
+    // 0. 删除云存储（R2 或 Supabase Storage）中的项目文件夹
+    try {
+      const { deleteProjectFolder } = await import('@/lib/r2')
+      const { deletedCount } = await deleteProjectFolder(projectId)
+      console.log(`[DELETE-PROJECT] 云存储清理完成: 删除 ${deletedCount} 个文件`)
+    } catch (err: any) {
+      console.warn('[DELETE-PROJECT] 云存储清理失败（继续删除项目）:', err?.message)
+    }
 
     // 1. 删除本地 mock-storage 文件（从 asset.url 和 asset.storageKey 推导路径）
     const fsSync = await import('fs')

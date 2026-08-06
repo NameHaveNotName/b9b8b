@@ -18,7 +18,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, Image as ImageIcon, Trash2, Maximize2 } from 'lucide-react'
+import { GripVertical, Image as ImageIcon, Trash2, Maximize2, Loader2 } from 'lucide-react'
 import ImageLightbox from '@/components/generation/ImageLightbox'
 
 export interface Shot {
@@ -36,6 +36,9 @@ export interface Shot {
   referenceImageUrl?: string  // 实拍参考模式产出（原代表画面）
   firstFrameUrl?: string      // 视频生成模式产出（原起始帧）
   lastFrameUrl?: string       // 生成尾帧模式产出（尾帧）
+  // 缩略图支持
+  thumbnailUrl?: string      // 缩略图 URL（可选，优先使用）
+  originalUrl?: string       // 原图 URL（点击查看时使用）
 }
 
 export interface Asset {
@@ -96,6 +99,11 @@ function SortableRow({
   const [editingDesc, setEditingDesc] = useState(false)
   const [descValue, setDescValue] = useState(shot.description)
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [imageLoading, setImageLoading] = useState(false)
+  const [displayUrl, setDisplayUrl] = useState<string | null>(null)
+
+  const imageUrl = mode === 'reference' ? shot.referenceImageUrl : shot.firstFrameUrl
+  const thumbnailUrl = shot.thumbnailUrl
 
   function saveDesc() {
     setEditingDesc(false)
@@ -103,6 +111,25 @@ function SortableRow({
       onUpdate({ ...shot, description: descValue })
     }
   }
+
+  function handleImageClick() {
+    if (!imageUrl) return
+    if (displayUrl === imageUrl) {
+      setLightboxOpen(true)
+      return
+    }
+    setImageLoading(true)
+    setDisplayUrl(imageUrl)
+    setLightboxOpen(true)
+    setImageLoading(false)
+  }
+
+  function handleImageLoad() {
+    setImageLoading(false)
+  }
+
+  const showImage = thumbnailUrl || imageUrl
+  const effectiveDisplayUrl = displayUrl || thumbnailUrl || imageUrl
 
   return (
     <div
@@ -121,71 +148,51 @@ function SortableRow({
         <GripVertical className="h-4 w-4" />
       </button>
 
-      {/* 缩略图 — 模式特定 */}
+      {/* 缩略图 — 懒加载：初始显示缩略图，点击后加载原图 */}
       <div className="group relative shrink-0">
-        {mode === 'reference' ? (
+        {showImage ? (
           <>
-            {shot.referenceImageUrl ? (
-              <>
-                <img
-                  src={shot.referenceImageUrl}
-                  alt="代表画面"
-                  className="h-16 w-24 cursor-zoom-in rounded-md object-cover"
-                  loading="lazy"
-                  onClick={() => setLightboxOpen(true)}
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.onerror = null;
-                    target.style.display = 'none';
-                    const placeholder = document.createElement('div');
-                    placeholder.className = 'flex h-16 w-24 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500';
-                    placeholder.textContent = '加载失败';
-                    target.parentNode?.insertBefore(placeholder, target.nextSibling);
-                  }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 transition group-hover:bg-black/20">
-                  <Maximize2 className="h-3.5 w-3.5 scale-90 text-white opacity-0 transition group-hover:scale-100 group-hover:opacity-100" />
+            <div className="relative h-16 w-24 overflow-hidden rounded-md bg-stone-100">
+              {imageLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-stone-200">
+                  <Loader2 className="h-4 w-4 animate-spin text-stone-400" />
                 </div>
-              </>
-            ) : (
-              <div className="flex h-16 w-24 items-center justify-center rounded-md bg-stone-100">
-                <ImageIcon className="h-5 w-5 text-stone-300" />
-              </div>
+              )}
+              <img
+                src={effectiveDisplayUrl || undefined}
+                alt={mode === 'reference' ? '代表画面' : '起始帧'}
+                className="h-16 w-24 cursor-zoom-in rounded-md object-cover transition-opacity"
+                loading="lazy"
+                onClick={handleImageClick}
+                onLoad={handleImageLoad}
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement
+                  target.onerror = null
+                  target.style.display = 'none'
+                  const placeholder = document.createElement('div')
+                  placeholder.className = 'flex h-16 w-24 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500'
+                  placeholder.textContent = '加载失败'
+                  target.parentNode?.insertBefore(placeholder, target.nextSibling)
+                }}
+              />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 transition group-hover:bg-black/20">
+              <Maximize2 className="h-3.5 w-3.5 scale-90 text-white opacity-0 transition group-hover:scale-100 group-hover:opacity-100" />
+            </div>
+            {thumbnailUrl && !displayUrl && (
+              <span className="absolute bottom-0.5 right-0.5 rounded bg-green-600 px-1 text-[9px] text-white">缩</span>
             )}
-            <span className="absolute bottom-0.5 left-0.5 rounded bg-amber-600 px-1 text-[9px] text-white">参考</span>
           </>
         ) : (
-          <>
-            {shot.firstFrameUrl ? (
-              <>
-                <img
-                  src={shot.firstFrameUrl}
-                  alt="起始帧"
-                  className="h-16 w-24 cursor-zoom-in rounded-md object-cover"
-                  loading="lazy"
-                  onClick={() => setLightboxOpen(true)}
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.onerror = null;
-                    target.style.display = 'none';
-                    const placeholder = document.createElement('div');
-                    placeholder.className = 'flex h-16 w-24 items-center justify-center rounded-md bg-stone-200 text-xs text-stone-500';
-                    placeholder.textContent = '加载失败';
-                    target.parentNode?.insertBefore(placeholder, target.nextSibling);
-                  }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 transition group-hover:bg-black/20">
-                  <Maximize2 className="h-3.5 w-3.5 scale-90 text-white opacity-0 transition group-hover:scale-100 group-hover:opacity-100" />
-                </div>
-              </>
-            ) : (
-              <div className="flex h-16 w-24 items-center justify-center rounded-md bg-stone-100">
-                <ImageIcon className="h-5 w-5 text-stone-300" />
-              </div>
-            )}
-            <span className="absolute bottom-0.5 left-0.5 rounded bg-blue-600 px-1 text-[9px] text-white">首帧</span>
-          </>
+          <div className="flex h-16 w-24 items-center justify-center rounded-md bg-stone-100">
+            <ImageIcon className="h-5 w-5 text-stone-300" />
+          </div>
         )}
+        <span className={`absolute bottom-0.5 left-0.5 rounded px-1 text-[9px] text-white ${
+          mode === 'reference' ? 'bg-amber-600' : 'bg-blue-600'
+        }`}>
+          {mode === 'reference' ? '参考' : '首帧'}
+        </span>
       </div>
 
       {/* Shot ID */}
@@ -276,18 +283,10 @@ function SortableRow({
         <Trash2 className="h-4 w-4" />
       </button>
 
-      {/* 图片灯箱 — 模式特定 */}
-      {mode === 'reference' && shot.referenceImageUrl && (
+      {/* 图片灯箱 — 使用已加载的原图 URL */}
+      {imageUrl && (
         <ImageLightbox
-          src={shot.referenceImageUrl}
-          alt={shot.description}
-          isOpen={lightboxOpen}
-          onClose={() => setLightboxOpen(false)}
-        />
-      )}
-      {mode === 'keyframe' && shot.firstFrameUrl && (
-        <ImageLightbox
-          src={shot.firstFrameUrl}
+          src={displayUrl || imageUrl}
           alt={shot.description}
           isOpen={lightboxOpen}
           onClose={() => setLightboxOpen(false)}
@@ -309,6 +308,12 @@ export default function StoryboardTable({
   onShotsChange,
   mode,
 }: StoryboardTableProps) {
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 20
+
+  const totalPages = Math.ceil(shots.length / PAGE_SIZE)
+  const paginatedShots = shots.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
@@ -387,7 +392,7 @@ export default function StoryboardTable({
             <div className="w-8 shrink-0" />
           </div>
 
-          {shots.map((shot) => (
+          {paginatedShots.map((shot) => (
             <SortableRow
               key={shot.shotId}
               shot={shot}
@@ -398,6 +403,43 @@ export default function StoryboardTable({
               mode={mode}
             />
           ))}
+
+          {/* 分页控件 */}
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <button
+                onClick={() => setPage(1)}
+                disabled={page === 1}
+                className="rounded border px-2 py-1 text-sm disabled:opacity-40"
+              >
+                首页
+              </button>
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="rounded border px-2 py-1 text-sm disabled:opacity-40"
+              >
+                上一页
+              </button>
+              <span className="text-sm text-stone-500">
+                第 {page} / {totalPages} 页，共 {shots.length} 个镜头
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="rounded border px-2 py-1 text-sm disabled:opacity-40"
+              >
+                下一页
+              </button>
+              <button
+                onClick={() => setPage(totalPages)}
+                disabled={page === totalPages}
+                className="rounded border px-2 py-1 text-sm disabled:opacity-40"
+              >
+                末页
+              </button>
+            </div>
+          )}
         </div>
       </SortableContext>
     </DndContext>
