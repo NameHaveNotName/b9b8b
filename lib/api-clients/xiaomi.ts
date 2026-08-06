@@ -1,9 +1,13 @@
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { IMAGE_MODELS, MODEL_SIZE_MAP, VIDEO_MODELS } from '@/lib/models-config'
+import { generateTextMinimax, MinimaxTextError } from './minimax-text'
 import fs from 'fs'
 import path from 'path'
 
 const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://yunwu.ai'
+
+const BASE64_CACHE_TTL_MS = 5 * 60 * 1000
+const base64Cache = new Map<string, { result: string; cachedAt: number }>()
 // 工作指令.txt（防御版）：API_KEY 兼容 OPENAI_API_KEY 兜底
 const API_KEY = process.env.XIAOMI_API_KEY || process.env.OPENAI_API_KEY
 
@@ -19,6 +23,8 @@ const PROMPT_MAX_LEN = 900
 const PROVIDER_MODEL_MAP: Record<string, string> = {
   'doubao-seedream-4.5': 'doubao-seedream-5.0-lite', // 供应商实际支持的模型名
   'gpt-image-2': 'gpt-image-2',
+  'gpt-4o': 'gpt-4o',
+  'gpt-4o-mini': 'gpt-4o-mini',
   'flux.1-kontext-pro': 'flux.1-kontext-pro',
   'kling-omni-image': 'kling-omni-image',
   'gemini-3.1-flash-image': 'gemini-3.1-flash-image',
@@ -35,6 +41,16 @@ const VIDEO_PROVIDER_MAP: Record<string, string> = {
 /** 将业务层模型 ID 映射为供应商端实际模型名。无映射时原样返回。 */
 function applyProviderModelMap(modelId: string): string {
   return PROVIDER_MODEL_MAP[modelId] || modelId
+}
+
+function imageProviderPreferenceHeaders(p: GenerateImageParams): Record<string, string> {
+  const preferStable = p.providerPreference === 'stable' || p.model === 'gpt-image-2'
+  if (!preferStable) return {}
+  return {
+    'X-Provider-Preference': 'stable',
+    'X-Provider-Group': 'premium-openai',
+    'X-Model-Route': 'premium-openai',
+  }
 }
 
 const RETRY_STATUS = [429, 502, 503, 504]
@@ -83,12 +99,30 @@ export async function resolveImageToBase64(urlOrPath: string): Promise<string> {
 
   // 公网 URL：下载后转 base64
   if (urlOrPath.startsWith('http')) {
+    const now = Date.now()
+    const cached = base64Cache.get(urlOrPath)
+    if (cached && now - cached.cachedAt < BASE64_CACHE_TTL_MS) {
+      console.log('[BASE64] Cache hit:', urlOrPath.slice(0, 80))
+      return cached.result
+    }
+
     console.log('[BASE64] 下载公网图片:', urlOrPath.slice(0, 120))
     const res = await fetch(urlOrPath)
     if (!res.ok) throw new Error(`[BASE64] 下载失败 ${res.status}: ${urlOrPath.slice(0, 120)}`)
     const buffer = Buffer.from(await res.arrayBuffer())
     const mime = res.headers.get('content-type') || 'image/jpeg'
-    return `data:${mime};base64,${buffer.toString('base64')}`
+    const result = `data:${mime};base64,${buffer.toString('base64')}`
+
+    if (base64Cache.size > 200) {
+      const keysToDelete: string[] = []
+      for (const [key, val] of base64Cache) {
+        if (now - val.cachedAt > BASE64_CACHE_TTL_MS) keysToDelete.push(key)
+      }
+      keysToDelete.forEach((k) => base64Cache.delete(k))
+    }
+    base64Cache.set(urlOrPath, { result, cachedAt: now })
+
+    return result
   }
 
   // 本地相对路径（如 /mock-storage/...）
@@ -163,12 +197,41 @@ async function xiaomiFetch(path: string, body: any, timeoutMs = 120000) {
   }
 }
 
-// ==================== 文本生成 ====================
+// ==================== 文本生成（MiniMax M2.7 优先 + 云雾降级）====================
+// 优先调用 MiniMax 官方 API（最高优先级），失败时回退到云雾（xiaomi）供应商。
+// MiniMax M2.7（模型名 MiniMax-Text-01）作为最高优先级，主要原因：
+//   1. 中文理解与生成质量稳定
+//   2. 价格优于 gpt-4o-mini
+//   3. 上下文窗口大（最新版本支持 128K+）
+// 失败回退：网络错误、API key 未配置、超时、4xx/5xx 错误都触发降级。
 export async function generateText(
   prompt: string,
   model: string = 'deepseek-chat',
   maxTokens: number = 12000
 ): Promise<string> {
+  if (MINIMAX_API_KEY) {
+    try {
+      // step 1: 优先用 MiniMax（模型名映射 deepseek-chat → MiniMax-Text-01）
+      const minimaxModel = 'MiniMax-Text-01'
+      const t0 = Date.now()
+      const result = await generateTextMinimax(prompt, {
+        model: minimaxModel,
+        maxTokens: Math.min(maxTokens, 8192),
+        temperature: 0.7,
+        timeoutMs: 120000,
+      })
+      console.log(`[TEXT-MINIMAX] 模型=${minimaxModel} 耗时=${Date.now() - t0}ms 长度=${result.length} ✅`)
+      return result
+    } catch (e: any) {
+      // step 2: MiniMax 失败 → 回退到云雾
+      const reason = e instanceof MinimaxTextError ? `MinimaxTextError(${e.status || '?'}): ${e.message}` : (e?.message || String(e))
+      console.warn(`[TEXT-MINIMAX] 失败,回退云雾 (${model}): ${reason.slice(0, 200)}`)
+    }
+  } else {
+    console.log(`[TEXT-MINIMAX] MINIMAX_API_KEY 未配置,直接走云雾 (${model})`)
+  }
+
+  // step 3: 云雾（xiaomi）供应商降级
   const data = await xiaomiFetch('/v1/chat/completions', {
     model,
     messages: [{ role: 'user', content: prompt }],
@@ -401,6 +464,10 @@ export interface GenerateImageParams {
   sequentialImageGeneration?: 'auto' | 'disabled'
   /** 多图模型用：最多生成几张（默认 1） */
   maxImages?: number
+  requireReferenceImages?: boolean
+  /** 重试/再生时跳过请求去重，强制发新请求（防止 Vercel 超时后缓存 mock 导致重复使用） */
+  noDedup?: boolean
+  providerPreference?: 'stable' | 'default'
 }
 
 export interface GenerateImageResult {
@@ -441,6 +508,29 @@ function mapToDalleSize(size?: string, aspectRatio?: string): string {
   return '1024x1024'
 }
 
+function roundToMultiple(value: number, multiple = 16): number {
+  return Math.max(multiple, Math.round(value / multiple) * multiple)
+}
+
+/** gpt-image-2 accepts pixel sizes whose dimensions are multiples of 16. */
+function mapToGptImageSize(size?: string, aspectRatio?: string): string {
+  const ar = aspectRatio || size || '1:1'
+  if (ar === 'auto') return ar
+  if (/^\d+x\d+$/i.test(ar)) {
+    const [width, height] = ar.split(/x/i).map(Number)
+    if (width % 16 === 0 && height % 16 === 0) return `${width}x${height}`
+    return `${roundToMultiple(width)}x${roundToMultiple(height)}`
+  }
+  if (/^9:16|portrait/i.test(ar)) return `1024x${roundToMultiple(1024 * 16 / 9)}`
+  if (/^16:9|landscape/i.test(ar)) return `${roundToMultiple(1024 * 16 / 9)}x1024`
+  if (/^3:4/i.test(ar)) return `1024x${roundToMultiple(1024 * 4 / 3)}`
+  if (/^4:3/i.test(ar)) return `${roundToMultiple(1024 * 4 / 3)}x1024`
+  if (/^21:9/i.test(ar)) return `${roundToMultiple(1024 * 21 / 9)}x1024`
+  if (/^2:3/i.test(ar)) return `1024x${roundToMultiple(1024 * 3 / 2)}`
+  if (/^3:2/i.test(ar)) return `${roundToMultiple(1024 * 3 / 2)}x1024`
+  return '1024x1024'
+}
+
 /**
  * 7 模型尺寸解析：优先用 MODEL_SIZE_MAP[modelId][aspectRatio] 解析为像素尺寸，
  * 无匹配时回退到传入的 size 或默认 '1024x576'（16:9）。
@@ -448,6 +538,7 @@ function mapToDalleSize(size?: string, aspectRatio?: string): string {
 function resolveSize(model: string, aspectRatio?: string, explicitSize?: string): string {
   // 已有像素尺寸直接返回
   if (explicitSize && /x/i.test(explicitSize)) return explicitSize
+  if (model.toLowerCase().includes('gpt-image')) return mapToGptImageSize(explicitSize, aspectRatio)
   const ar = aspectRatio || explicitSize || '16:9'
   // 查表
   const modelSizes = MODEL_SIZE_MAP[model]
@@ -535,12 +626,15 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
   }
 
   if (kind === 'dalle') {
+    // DALL-E / gpt-image 文生图端点 (/v1/images/generations) 不支持 image 字段；
+    // 参考图由 callGptImageEdit 在 /v1/images/edits 中单独处理。
     if (allRefs.length > 0) {
-      const ref = allRefs.length === 1 ? allRefs[0] : allRefs
-      console.log(`[Image] DALL-E/gpt-image: 传入 ${allRefs.length} 张参考图`)
-      return { model: p.model, prompt, n: typeof p.n === 'number' ? p.n : 1, size: mapToDalleSize(p.size, p.aspectRatio), image: ref }
+      console.log(`[Image] DALL-E/gpt-image: 文生图端点忽略 ${allRefs.length} 张参考图（由 edits 端点处理）`)
     }
-    return { model: p.model, prompt, n: typeof p.n === 'number' ? p.n : 1, size: mapToDalleSize(p.size, p.aspectRatio) }
+    const size = p.model.toLowerCase().includes('gpt-image')
+      ? mapToGptImageSize(p.size, p.aspectRatio)
+      : mapToDalleSize(p.size, p.aspectRatio)
+    return { model: p.model, prompt, n: typeof p.n === 'number' ? p.n : 1, size }
   }
 
   if (kind === 'flux') {
@@ -616,6 +710,7 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<XiaomiImageRaw>
   console.log(`[GPT-EDIT] model=${model}, http refs=${imgUrls.length}, data refs=${dataUrls.length}`)
 
   let imageCount = 0
+  const requestedRefCount = imgUrls.length + dataUrls.length
   // 并行下载 http 参考图
   if (imgUrls.length > 0) {
     const downloads = await Promise.allSettled(
@@ -632,6 +727,8 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<XiaomiImageRaw>
       if (d.status === 'fulfilled') {
         parts.push(makeFormPart('image', `ref_${imageCount}.${d.value.ext}`, d.value.buffer, d.value.ct, boundary))
         imageCount++
+      } else {
+        console.warn(`[GPT-EDIT] 参考图下载失败: ${d.reason?.message || d.reason}`)
       }
     }
   }
@@ -645,6 +742,10 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<XiaomiImageRaw>
       parts.push(makeFormPart('image', `ref_${imageCount}.${ext}`, buffer, mime, boundary))
       imageCount++
     } catch { /* skip */ }
+  }
+
+  if (imageCount === 0 && p.requireReferenceImages && requestedRefCount > 0) {
+    throw new Error(`GPT_EDIT_REF_DOWNLOAD_FAILED: 要求使用参考图，但 ${requestedRefCount} 张参考图全部下载失败`)
   }
 
   if (imageCount === 0) {
@@ -672,7 +773,8 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<XiaomiImageRaw>
   parts.push(textPart('model', model))
   parts.push(textPart('n', String(p.n || 1)))
   if (p.size || p.aspectRatio) {
-    const sz = p.size || (p.aspectRatio === '3:4' ? '1024x1536' : p.aspectRatio === '9:16' ? '1024x1536' : p.aspectRatio === '1:1' ? '1024x1024' : '1536x1024')
+    const sz = resolveSize(p.model, p.aspectRatio, p.size)
+    console.log(`[GPT-EDIT] requested size=${sz}, aspectRatio=${p.aspectRatio || '-'}`)
     parts.push(textPart('size', sz))
   }
 
@@ -683,14 +785,17 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<XiaomiImageRaw>
     throw new Error('GPT_EDIT_TOO_LARGE: 请求体超过 50MB 限制')
   }
 
+  // gpt-image-2 with multiple reference images often needs more than 90s.
+  // Keep this below the Vercel function limit so the route can still return a real error.
   const res = await fetch(`${BASE_URL}/v1/images/edits`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
       'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      ...imageProviderPreferenceHeaders(p),
     },
     body,
-    signal: AbortSignal.timeout ? AbortSignal.timeout(180000) : undefined,
+    signal: AbortSignal.timeout ? AbortSignal.timeout(240000) : undefined,
   })
 
   if (!res.ok) {
@@ -756,6 +861,7 @@ async function callXiaomiImageOnce(p: GenerateImageParams): Promise<XiaomiImageR
       'Authorization': `Bearer ${API_KEY}`,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      ...imageProviderPreferenceHeaders(params),
     },
     body: bodyString,
     signal: controller.signal,
@@ -825,7 +931,7 @@ const _imageDedup = new Map<string, { promise: Promise<GenerateImageResult>; cre
 function makeImageDedupKey(p: GenerateImageParams): string {
   const ref = p.referenceImageUrl || ''
   const refs = Array.isArray(p.referenceImages) ? p.referenceImages.join(',') : ''
-  return `${p.model}|${(p.prompt || '').slice(0, 200)}|${p.size || ''}|${ref.slice(0, 80)}|${refs.slice(0, 80)}`
+  return `${p.model}|${(p.prompt || '').slice(0, 200)}|${p.size || ''}|${p.aspectRatio || ''}|${ref.slice(0, 80)}|${refs.slice(0, 80)}`
 }
 function getDedupEntry(key: string): Promise<GenerateImageResult> | undefined {
   const entry = _imageDedup.get(key)
@@ -872,8 +978,9 @@ export async function generateImage(
   }
 
   // 工作指令.txt（Phase 2 修复）：请求去重（带过期检查，防止 stale promise 导致永久挂起）
+  // noDedup=true 时跳过去重，用于重试场景（避免 Vercel 超时后缓存 mock 被重复使用）
   const dedupKey = makeImageDedupKey(params)
-  const existing = getDedupEntry(dedupKey)
+  const existing = !params.noDedup ? getDedupEntry(dedupKey) : undefined
   if (existing) {
     console.log(`[IMAGE-DEDUP] 合并重复请求: ${dedupKey.slice(0, 100)}`)
     return existing
@@ -900,7 +1007,9 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
 
       // "does not support image input" — 移除参考图后走纯文生图
       const errMsg = String(e?.message || '')
-      if (/does not support image input/i.test(errMsg) && (params.referenceImageUrl || params.referenceImages?.length)) {
+      if (params.requireReferenceImages && (params.referenceImageUrl || params.referenceImages?.length)) {
+        console.warn(`[GPT-EDIT] model=${params.model} 参考图是硬要求，禁止降级为纯文生图`)
+      } else if (/does not support image input/i.test(errMsg) && (params.referenceImageUrl || params.referenceImages?.length)) {
         console.warn(`[GPT-EDIT] model=${params.model} 不支持 image 字段, 降级为纯文生图`)
         const stripped = { ...params, referenceImageUrl: undefined, referenceImages: undefined }
         try {
@@ -913,6 +1022,9 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
       }
 
       // 降级也失败，不直接 mock，让主循环尝试 fallback 模型链
+      if (params.requireReferenceImages && (params.referenceImageUrl || params.referenceImages?.length)) {
+        throw e
+      }
       console.warn(`[GPT-EDIT] gpt-image-2 失败，交给主循环尝试其他模型`)
     }
   }
@@ -932,6 +1044,10 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
       }
     } catch (e: any) {
       console.warn(`[GEMINI-IMG] 原生 API 调用失败: ${e.message}`)
+      if (params.requireReferenceImages && (params.referenceImageUrl || params.referenceImages?.length)) {
+        console.warn(`[GEMINI-IMG] requireReferenceImages=true，禁止返回无参考图 Mock`)
+        throw e
+      }
       // 继续走 fallback/Mock 链
       const lastError = e
       console.warn(
@@ -974,12 +1090,22 @@ async function _generateImageInner(params: GenerateImageParams): Promise<Generat
   // Phase 1: 尝试所有模型（带参考图）→ Phase 2: 移除参考图后重试 → Mock 兜底
   for (const phase of [false, true]) {
     if (phase && !hasRefs) break
+    if (phase && params.requireReferenceImages) {
+      console.warn(`[Image] requireReferenceImages=true，禁止移除参考图后重试`)
+      break
+    }
     if (phase) {
       console.warn(`[Image] Phase 1 全部失败，移除参考图后重试所有模型`)
       params = { ...params, referenceImageUrl: undefined, referenceImages: undefined }
     }
     for (const tryModel of modelsToTry) {
       const subParams = { ...params, model: tryModel }
+      const tryKind = classifyModel(tryModel)
+      if (subParams.requireReferenceImages && (tryKind === 'dalle' || tryKind === 'flux' || tryKind === 'generic')) {
+        lastError = new Error(`MODEL_REQUIRES_REFERENCES_UNSUPPORTED: ${tryModel} 会忽略参考图，已阻止无参考图生成`)
+        console.warn(`[Image] ${lastError.message}`)
+        continue
+      }
       for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
         try {
           console.log(`[Image] model=${tryModel} phase=${phase ? 2 : 1} attempt=${attempt + 1}/${BACKOFF_MS.length + 1}`)
@@ -2676,8 +2802,8 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
       imageUrl: firstFrameUrl,
       model,
       resolution: '480P',
-      promptExtend: true,
-      audio: true,
+      promptExtend: false,
+      audio: false,
       pollTimeoutSec,
       pollIntervalMs,
     })
@@ -2693,7 +2819,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
       first_frame_image: firstFrameB64,
       duration: duration === 10 ? 10 : 6,
       resolution: '1080P',
-      prompt_optimizer: true,
+      prompt_optimizer: false,
       fast_pretreatment: true,
       callback_url: '',
       aigc_watermark: false,
@@ -2762,7 +2888,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
       model: VIDEO_PROVIDER_MAP[model] || 'veo3-fast-frames',
       prompt: prompt.slice(0, PROMPT_MAX_LEN),
       images,
-      enhance_prompt: true,
+      enhance_prompt: false,
       enable_upsample: true,
       aspect_ratio: aspectRatio,
     }

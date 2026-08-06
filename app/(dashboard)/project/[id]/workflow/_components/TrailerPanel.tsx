@@ -194,7 +194,7 @@ export default function TrailerPanel({
   const { data: segmentData } = useSWR(
     `/api/projects/${projectId}/video-segments?stepName=TRAILER`,
     fetcher,
-    { refreshInterval: 3000 }
+    { refreshInterval: 10000 }
   )
 
   const segments = segmentData?.segments || []

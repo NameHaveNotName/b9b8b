@@ -181,7 +181,7 @@ export default function FloatingGenerationPanel({
   const { data } = useSWR(
     externalSteps ? null : `/api/projects/${projectId}`,
     fetcher,
-    { refreshInterval: 3000 }
+    { refreshInterval: 10000 }
   )
 
   const steps: WorkflowStep[] = externalSteps || data?.project?.steps || []

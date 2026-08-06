@@ -5,6 +5,8 @@ import { MINIMAX_TTS_VOICES, MINIMAX_DEFAULT_VOICE_ID, findVoiceById } from '@/l
 import CostBadge from '@/components/CostBadge'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
+const SHOW_BATCH_VIDEO_GENERATION = false
+
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 interface VideoDirectPanelProps {
@@ -21,6 +23,45 @@ function ProcessingBlock({ message }: { message: string }) {
     <div className="flex flex-col items-center justify-center py-16">
       <LoaderCircle className="h-8 w-8 animate-spin text-stone-400" />
       <p className="mt-3 text-sm text-stone-500">{message}</p>
+    </div>
+  )
+}
+
+function BgmPreview({
+  musicUrl,
+  musicIsMock,
+  bgmPrompt,
+  bgmProvider,
+  bgmModel,
+}: {
+  musicUrl: string | null
+  musicIsMock?: boolean
+  bgmPrompt?: string
+  bgmProvider?: string
+  bgmModel?: string
+}) {
+  if (!musicUrl) return null
+  return (
+    <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-stone-600">
+          背景音乐 {musicIsMock ? '(静音)' : ''}
+        </span>
+        {(bgmProvider || bgmModel) && (
+          <span className="text-[11px] text-stone-400">
+            {[bgmProvider, bgmModel].filter(Boolean).join(' / ')}
+          </span>
+        )}
+      </div>
+      <audio src={musicUrl} controls preload="metadata" className="mt-2 w-full" />
+      {bgmPrompt && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-stone-500">查看 BGM 提示词</summary>
+          <pre className="mt-2 whitespace-pre-wrap rounded-md bg-white p-2 text-[11px] leading-relaxed text-stone-600">
+            {bgmPrompt}
+          </pre>
+        </details>
+      )}
     </div>
   )
 }
@@ -376,7 +417,7 @@ export default function VideoDirectPanel({
   const { data: segmentData } = useSWR(
     `/api/projects/${projectId}/video-segments?stepName=VIDEO_DIRECT`,
     fetcher,
-    { refreshInterval: 3000 }
+    { refreshInterval: 10000 }
   )
 
   // 读取分镜信息用于按幕分组和显示 shot 详情
@@ -389,7 +430,12 @@ export default function VideoDirectPanel({
   const { data: voiceoverData, mutate: mutateVoiceover } = useSWR(
     `/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`,
     fetcher,
-    { refreshInterval: 3000 }
+    { refreshInterval: 10000 }
+  )
+  const { data: directStepData, mutate: mutateDirectStep } = useSWR(
+    `/api/projects/${projectId}/steps/video-direct`,
+    fetcher,
+    { refreshInterval: 5000 }
   )
 
   const segments = segmentData?.segments || []
@@ -402,8 +448,11 @@ export default function VideoDirectPanel({
   const stepOutput = (step?.outputData as any) || {}
   const combinedVideoUrl = stepOutput.combinedVideoUrl || stepOutput.videoUrl || null
   const combinedVideoStatus = stepOutput.combinedVideoStatus || null
-  const musicUrl = stepOutput.musicUrl || null
-  const musicIsMock = stepOutput.musicIsMock ?? true
+  const musicUrl = stepOutput.musicUrl || directStepData?.musicUrl || null
+  const musicIsMock = stepOutput.musicIsMock ?? directStepData?.musicIsMock ?? true
+  const bgmPrompt = stepOutput.bgmPrompt || directStepData?.bgmPrompt || ''
+  const bgmProvider = stepOutput.bgmProvider || directStepData?.bgmProvider || ''
+  const bgmModel = stepOutput.bgmModel || directStepData?.bgmModel || ''
 
   const isExecuting = executing === 'VIDEO_DIRECT'
 
@@ -411,10 +460,8 @@ export default function VideoDirectPanel({
 
   // 按幕分组片段（与分镜设计/生成尾帧一致的纵向卡片布局）
   const findShotForSegment = useCallback((segment: any) => {
-    if (typeof segment?.sequence === 'number' && shots[segment.sequence]) {
-      return shots[segment.sequence]
-    }
     return shots.find((s: any) => s.shotId === segment.shotId && s.actNumber === segment.actNumber)
+      || (typeof segment?.sequence === 'number' ? shots[segment.sequence] : null)
       || shots.find((s: any) => s.shotId === segment.shotId)
   }, [shots])
 
@@ -439,12 +486,13 @@ export default function VideoDirectPanel({
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || '生成失败')
+      await mutateDirectStep()
     } catch (e: any) {
       console.error('[BGM] 生成失败:', e)
     } finally {
       setIsGeneratingBgm(false)
     }
-  }, [projectId])
+  }, [projectId, mutateDirectStep])
 
   // 配音操作
   const handleGenerateVoiceoverScripts = useCallback(async () => {
@@ -594,8 +642,8 @@ export default function VideoDirectPanel({
     onExecute('VIDEO_DIRECT', { action: 'generate-segment-prompts' })
   }
 
-  const handleGenerateSegment = (segmentId: string) => {
-    onExecute('VIDEO_DIRECT', { action: 'generate-segment-video', segmentId })
+  const handleGenerateSegment = (segmentId: string, force = false) => {
+    onExecute('VIDEO_DIRECT', { action: 'generate-segment-video', segmentId, force })
   }
 
   const handleGenerateAll = () => {
@@ -630,11 +678,14 @@ export default function VideoDirectPanel({
             <span>{segments.length} 个片段</span>
           </div>
           {musicUrl && (
-            <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
-              <span className="text-xs text-stone-500">
-                背景音乐 {musicIsMock ? '(静音)' : ''}
-              </span>
-              <audio src={musicUrl} controls className="mt-1 w-full" />
+            <div className="mt-2">
+              <BgmPreview
+                musicUrl={musicUrl}
+                musicIsMock={musicIsMock}
+                bgmPrompt={bgmPrompt}
+                bgmProvider={bgmProvider}
+                bgmModel={bgmModel}
+              />
             </div>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
@@ -819,7 +870,7 @@ export default function VideoDirectPanel({
                 生成配音文案
               </button>
             )}
-            {summary?.pending > 0 && (
+            {SHOW_BATCH_VIDEO_GENERATION && summary?.pending > 0 && (
               <div className="relative inline-block">
                 <button
                   onClick={handleGenerateAll}
@@ -879,6 +930,14 @@ export default function VideoDirectPanel({
             )}
           </div>
         </div>
+
+        <BgmPreview
+          musicUrl={musicUrl}
+          musicIsMock={musicIsMock}
+          bgmPrompt={bgmPrompt}
+          bgmProvider={bgmProvider}
+          bgmModel={bgmModel}
+        />
 
         {/* 配音分屏视图 */}
         {voiceoverMode && voiceoverSegments.length > 0 && (
@@ -1027,6 +1086,17 @@ export default function VideoDirectPanel({
                               >
                                 <RefreshCw className="h-3 w-3" />
                                 重试
+                              </button>
+                            )}
+                            {segment.status === 'completed' && (
+                              <button
+                                onClick={() => handleGenerateSegment(segment.id, true)}
+                                disabled={isExecuting}
+                                className="flex items-center gap-1 rounded border border-stone-200 bg-white px-2 py-1 text-[10px] text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
+                                title="基于最新的分镜首帧重新生成此视频片段（用于分镜重做后视频仍是旧图的情况）"
+                              >
+                                <RefreshCw className="h-3 w-3" />
+                                重新生成
                               </button>
                             )}
                             {segment.status === 'generating' && (

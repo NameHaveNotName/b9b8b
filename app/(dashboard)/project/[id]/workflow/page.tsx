@@ -25,9 +25,8 @@ import {
   Square,
   Upload,
   Clock,
+  X,
 } from 'lucide-react'
-// @ts-ignore — xlsx 包类型定义不完整，运行时可用
-import * as XLSX from 'xlsx'
 import TopStepper from './_components/TopStepper'
 import TrailerPanel from './_components/TrailerPanel'
 import VideoDirectPanel from './_components/VideoDirectPanel'
@@ -40,7 +39,7 @@ import { PROJECT_TAG_OPTIONS, PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import HoverImageBadge from '@/components/generation/HoverImageBadge'
 import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
-import { DEFAULT_GENERATE_COST } from '@/lib/points-config'
+import { DEFAULT_GENERATE_COST, getImageGenerationCost } from '@/lib/points-config'
 import { getStepDisplayState, prismaTypeToStepId } from '@/lib/workflow-state'
 import { exportFrameworkToWord } from '@/lib/framework-export'
 import FrameworkImportModal from '@/components/framework/FrameworkImportModal'
@@ -49,6 +48,8 @@ import ReferenceBar from '@/components/workflow/ReferenceBar'
 import FloatingGenerationPanel from '@/components/workflow/FloatingGenerationPanel'
 import WorkflowInspectorDrawer from '@/components/workflow/WorkflowInspectorDrawer'
 import SuggestionBar from '@/components/workflow/SuggestionBar'
+import { exportStoryboardExcel } from '@/lib/storyboard-excel-export'
+import { proxiedMediaUrl } from '@/lib/media-url'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -80,6 +81,77 @@ const API_STEP_MAP: Record<string, string> = {
   VIDEO_RENDER: 'video-render',
   CAMERA: 'camera',
   REVIEW: 'review',
+}
+
+const SHOW_STORYBOARD_BATCH_CONTROLS = false
+
+function normalizeOptionalInt(value: unknown, fallback = 0): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isInteger(parsed) ? parsed : fallback
+}
+
+function formatFrameworkText(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value.map(formatFrameworkText).filter(Boolean).join('、')
+  }
+  if (typeof value === 'object') {
+    const labels: Record<string, string> = {
+      spaceLayout: '空间布局',
+      buildingStyle: '建筑风格',
+      structuralDetails: '结构细节',
+      architecturalFeatures: '建筑特征',
+      lighting: '光影',
+      colorPalette: '色彩',
+      props: '道具',
+      atmosphere: '氛围',
+      culture: '人文',
+      distinctive: '辨识度',
+      storyFunction: '叙事功能',
+    }
+
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => {
+        const text = formatFrameworkText(item)
+        return text ? `${labels[key] || key}：${text}` : ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return String(value)
+}
+
+/**
+ * 简单 fetch 重试：对 5xx / 网络错误做指数退避重试，最多 2 次。
+ * 用于处理供应商 API 偶发的 503/504 等临时性故障。
+ */
+async function fetchWithRetry(url: string, init: RequestInit, maxRetries = 2): Promise<Response> {
+  let lastErr: any = null
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, init)
+      // 2xx 直接返回
+      if (res.ok) return res
+      // 5xx 重试（除了 501 Not Implemented）
+      if (res.status >= 500 && res.status !== 501 && attempt < maxRetries) {
+        console.warn(`[fetchWithRetry] ${url} → HTTP ${res.status}, attempt ${attempt + 1}/${maxRetries + 1}, retrying...`)
+        await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt)))
+        continue
+      }
+      return res
+    } catch (err: any) {
+      lastErr = err
+      if (attempt < maxRetries) {
+        console.warn(`[fetchWithRetry] ${url} → network error, attempt ${attempt + 1}/${maxRetries + 1}, retrying...`, err?.message)
+        await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt)))
+        continue
+      }
+      throw err
+    }
+  }
+  throw lastErr ?? new Error('fetch failed after retries')
 }
 
 export default function WorkflowPage({ params }: { params: { id: string } }) {
@@ -165,7 +237,14 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
         if (stepType === 'CHARACTER' && !isAvailable) {
           const styleStep = steps.find((s: any) => s.stepType === 'STYLE')
           const styleOutput = (styleStep?.outputData as any) || {}
-          if (styleOutput.selectedStyleId || styleOutput.styleRefUrl || project?.selectedStyleId) {
+          if (
+            styleOutput.selectedStyleId ||
+            styleOutput.selectedRef ||
+            styleOutput.styleRefUrl ||
+            styleOutput.selectedStyleImage ||
+            styleOutput.selectedStyle?.url ||
+            project?.selectedStyleId
+          ) {
             isAvailable = true
           }
         }
@@ -263,8 +342,16 @@ export default function WorkflowPage({ params }: { params: { id: string } }) {
   // 暴露 executeStep 到 window,让副工作台"确认生成"按钮可调用
   useEffect(() => {
     ;(window as any).__executeStep = executeStep
-    return () => { delete (window as any).__executeStep }
-  }, [executeStep])
+    // 暴露 mutate 给 retry 副工作台用
+    ;(window as any).__refreshProject = () => { mutate() }
+    // 暴露 toast
+    ;(window as any).__showToast = (t: { kind: 'success' | 'error'; message: string } | null) => setToast(t)
+    return () => {
+      delete (window as any).__executeStep
+      delete (window as any).__refreshProject
+      delete (window as any).__showToast
+    }
+  }, [executeStep, mutate])
 
   const selectStyle = useCallback(
     async (styleId: string, styleRefUrl?: string) => {
@@ -656,9 +743,10 @@ function WorkflowInspectorDrawerWrapper({
   const [isOpen, setIsOpen] = useState(false)
   const [confirmData, setConfirmData] = useState<any>(null)
   const [feedbackData, setFeedbackData] = useState<any>(null)
-  const [activeView, setActiveView] = useState<'task-queue' | 'generation-confirm' | 'result-feedback'>('task-queue')
+  const [retryEditData, setRetryEditData] = useState<any>(null)
+  const [activeView, setActiveView] = useState<'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit'>('task-queue')
 
-  const openInspector = useCallback((view: 'task-queue' | 'generation-confirm' | 'result-feedback') => {
+  const openInspector = useCallback((view: 'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit') => {
     setActiveView(view)
     setIsOpen(true)
   }, [])
@@ -704,16 +792,105 @@ function WorkflowInspectorDrawerWrapper({
     openInspector('result-feedback')
   }, [openInspector])
 
+  // 打开分镜重试副工作台（StoryboardPanel 通过 window 调用）
+  const openRetryEditForStoryboard = useCallback((payload: {
+    shotId: string
+    actNumber?: number
+    targetLabel: string
+    basePrompt: string
+    baseRefs: Array<{ url: string; label: string; type: 'character' | 'style' | 'previous-shot' | 'user-upload' | 'user-dragged'; removable: boolean }>
+    originalImageUrl: string | null
+    currentModel: string
+    aspectRatio: string
+  }) => {
+    setRetryEditData({
+      stepType: 'storyboard',
+      targetId: payload.shotId,
+      actNumber: payload.actNumber,
+      targetLabel: payload.targetLabel,
+      basePrompt: payload.basePrompt,
+      baseRefs: payload.baseRefs,
+      originalImageUrl: payload.originalImageUrl,
+      currentModel: payload.currentModel,
+      aspectRatio: payload.aspectRatio,
+      pointCost: 5,
+    })
+    openInspector('retry-edit')
+  }, [openInspector])
+
+  // 重试副工作台的"重新生成"按钮实际执行
+  const executeRetryRegenerate = useCallback(async (data: any, options: { promptOverride: string; refs: string[] }) => {
+    setIsOpen(false)
+    try {
+      const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shotId: data.targetId,
+          actNumber: data.actNumber,
+          aspectRatio: data.aspectRatio,
+          imageModel: data.currentModel,
+          mode: 'regenerate',
+          promptOverride: options.promptOverride,
+          refImages: options.refs,
+        }),
+      })
+      const result = await res.json()
+      if (!res.ok || !result.success) throw new Error(result.message || `HTTP ${res.status}`)
+      // 触发项目数据刷新（主页面 useSWR）
+      if ((window as any).__refreshProject) (window as any).__refreshProject()
+      if (result.isMock) {
+        ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，请切换模型重试' })
+      } else {
+        ;(window as any).__showToast?.({ kind: 'success', message: '分镜草图已重新生成' })
+      }
+    } catch (e: any) {
+      ;(window as any).__showToast?.({ kind: 'error', message: '重新生成失败：' + e?.message })
+    }
+  }, [projectId])
+
+  // 重试副工作台的"修改原图"按钮实际执行
+  const executeRetryEditOriginal = useCallback(async (data: any, options: { editInstruction: string; refs: string[] }) => {
+    setIsOpen(false)
+    try {
+      const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shotId: data.targetId,
+          actNumber: data.actNumber,
+          aspectRatio: data.aspectRatio,
+          imageModel: data.currentModel,
+          mode: 'edit-original',
+          editInstruction: options.editInstruction,
+          refImages: options.refs,
+        }),
+      })
+      const result = await res.json()
+      if (!res.ok || !result.success) throw new Error(result.message || `HTTP ${res.status}`)
+      if ((window as any).__refreshProject) (window as any).__refreshProject()
+      if (result.isMock) {
+        ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，请切换模型重试' })
+      } else {
+        ;(window as any).__showToast?.({ kind: 'success', message: '修改完成' })
+      }
+    } catch (e: any) {
+      ;(window as any).__showToast?.({ kind: 'error', message: '修改失败：' + e?.message })
+    }
+  }, [projectId])
+
   useEffect(() => {
     ;(window as any).__openInspector = openInspector
     ;(window as any).__buildConfirmFromCurrentStep = buildConfirmFromCurrentStep
     ;(window as any).__buildFeedbackFromStep = buildFeedbackFromStep
+    ;(window as any).__openRetryEditForStoryboard = openRetryEditForStoryboard
     return () => {
       delete (window as any).__openInspector
       delete (window as any).__buildConfirmFromCurrentStep
       delete (window as any).__buildFeedbackFromStep
+      delete (window as any).__openRetryEditForStoryboard
     }
-  }, [openInspector, buildConfirmFromCurrentStep, buildFeedbackFromStep])
+  }, [openInspector, buildConfirmFromCurrentStep, buildFeedbackFromStep, openRetryEditForStoryboard])
 
   useEffect(() => {
     if (!currentStep) return
@@ -742,6 +919,9 @@ function WorkflowInspectorDrawerWrapper({
         onViewChange={setActiveView}
         confirmData={confirmData}
         feedbackData={feedbackData}
+        retryEditData={retryEditData}
+        onRetryRegenerate={executeRetryRegenerate}
+        onRetryEditOriginal={executeRetryEditOriginal}
         onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
         onLocateTaskStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
         onConfirmGenerate={() => {
@@ -1969,6 +2149,35 @@ function FrameworkPanel({
     }, 500)
   }
 
+  function updateCharacter(ci: number, patch: Record<string, any>) {
+    const newChars = [...(localOutput.characters || [])]
+    newChars[ci] = { ...newChars[ci], ...patch }
+    updateField('characters', newChars)
+  }
+
+  function updateCharacterDeepened(ci: number, field: string, value: string) {
+    const current = localOutput.characters?.[ci] || {}
+    updateCharacter(ci, {
+      deepened: {
+        ...(current.deepened || {}),
+        [field]: value,
+      },
+    })
+  }
+
+  function updateCharacterAttitude(ci: number, target: string, value: string) {
+    const current = localOutput.characters?.[ci] || {}
+    updateCharacter(ci, {
+      deepened: {
+        ...(current.deepened || {}),
+        attitudes: {
+          ...(current.deepened?.attitudes || {}),
+          [target]: value,
+        },
+      },
+    })
+  }
+
   async function saveFramework(nextOutput: any) {
     try {
       const body: any = {}
@@ -2086,7 +2295,7 @@ function FrameworkPanel({
             {/* 右侧风格图 */}
             <div className="shrink-0">
               <img
-                src={localOutput.selectedStyleImage}
+                src={proxiedMediaUrl(localOutput.selectedStyleImage)}
                 alt="选定的视觉风格"
                 className="rounded-lg border border-stone-200 object-cover"
                 style={{ maxHeight: 200, maxWidth: 280, width: 'auto', height: 'auto' }}
@@ -2122,8 +2331,20 @@ function FrameworkPanel({
                   <span className="rounded bg-stone-800 px-2 py-0.5 text-xs font-medium text-white">
                     {c.id}
                   </span>
-                  <span className="font-medium text-stone-800">{c.name}</span>
-                  <span className="text-xs text-stone-500">{c.role}</span>
+                  <ReadOrEdit
+                    readOnly={readOnly}
+                    value={c.name || ''}
+                    onSave={(newVal) => updateCharacter(ci, { name: newVal })}
+                    className="font-medium text-stone-800"
+                    placeholder="角色姓名"
+                  />
+                  <ReadOrEdit
+                    readOnly={readOnly}
+                    value={c.role || ''}
+                    onSave={(newVal) => updateCharacter(ci, { role: newVal })}
+                    className="text-xs text-stone-500"
+                    placeholder="角色定位"
+                  />
                 </div>
 
                 {/* 左右分栏：文字 | 图片 */}
@@ -2171,19 +2392,37 @@ function FrameworkPanel({
                         {c.deepened.appearance && (
                           <div>
                             <span className="text-xs text-stone-400">形象外貌</span>
-                            <p className="text-sm text-stone-600">{c.deepened.appearance}</p>
+                            <ReadOrEdit
+                              readOnly={readOnly}
+                              value={formatFrameworkText(c.deepened.appearance)}
+                              onSave={(newVal) => updateCharacterDeepened(ci, 'appearance', newVal)}
+                              className="text-sm text-stone-600"
+                              placeholder="形象外貌..."
+                            />
                           </div>
                         )}
                         {c.deepened.personality && (
                           <div>
                             <span className="text-xs text-stone-400">性格深度</span>
-                            <p className="text-sm text-stone-600">{c.deepened.personality}</p>
+                            <ReadOrEdit
+                              readOnly={readOnly}
+                              value={formatFrameworkText(c.deepened.personality)}
+                              onSave={(newVal) => updateCharacterDeepened(ci, 'personality', newVal)}
+                              className="text-sm text-stone-600"
+                              placeholder="性格深度..."
+                            />
                           </div>
                         )}
                         {c.deepened.catchphrase && (
                           <div>
                             <span className="text-xs text-stone-400">口头禅</span>
-                            <p className="text-sm font-medium text-amber-700">「{c.deepened.catchphrase}」</p>
+                            <ReadOrEdit
+                              readOnly={readOnly}
+                              value={formatFrameworkText(c.deepened.catchphrase)}
+                              onSave={(newVal) => updateCharacterDeepened(ci, 'catchphrase', newVal)}
+                              className="text-sm font-medium text-amber-700"
+                              placeholder="口头禅..."
+                            />
                           </div>
                         )}
                         {c.deepened.attitudes && Object.keys(c.deepened.attitudes).length > 0 && (
@@ -2193,7 +2432,13 @@ function FrameworkPanel({
                               {Object.entries(c.deepened.attitudes).map(([target, attitude]: [string, any]) => (
                                 <div key={target} className="flex items-start gap-2 text-sm">
                                   <span className="shrink-0 rounded bg-stone-200 px-1.5 py-0.5 text-xs text-stone-600">{target}</span>
-                                  <span className="text-stone-600">{attitude}</span>
+                                  <ReadOrEdit
+                                    readOnly={readOnly}
+                                    value={formatFrameworkText(attitude)}
+                                    onSave={(newVal) => updateCharacterAttitude(ci, target, newVal)}
+                                    className="min-w-0 flex-1 text-stone-600"
+                                    placeholder="关系态度..."
+                                  />
                                 </div>
                               ))}
                             </div>
@@ -2202,7 +2447,13 @@ function FrameworkPanel({
                         {c.deepened.memoryPoints && (
                           <div>
                             <span className="text-xs text-stone-400">记忆点</span>
-                            <p className="text-sm font-medium text-stone-700">{c.deepened.memoryPoints}</p>
+                            <ReadOrEdit
+                              readOnly={readOnly}
+                              value={formatFrameworkText(c.deepened.memoryPoints)}
+                              onSave={(newVal) => updateCharacterDeepened(ci, 'memoryPoints', newVal)}
+                              className="text-sm font-medium text-stone-700"
+                              placeholder="记忆点..."
+                            />
                           </div>
                         )}
                       </div>
@@ -2221,7 +2472,7 @@ function FrameworkPanel({
                       <div className="flex flex-col items-center">
                         <div className="relative w-full overflow-hidden rounded-lg shadow-md">
                           <img
-                            src={charImageUrl}
+                            src={proxiedMediaUrl(charImageUrl)}
                             alt={c.name}
                             className="h-auto w-full object-cover"
                             loading="lazy"
@@ -2337,8 +2588,13 @@ function FrameworkPanel({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {Array.isArray(localOutput.environments) && localOutput.environments.map((env: any, ei: number) => {
             const isObject = typeof env === 'object' && env !== null
-            const name = isObject ? env.name : String(env)
-            const brief = isObject ? env.brief : ''
+            const name = isObject ? formatFrameworkText(env.name) : formatFrameworkText(env)
+            const brief = isObject ? formatFrameworkText(env.brief) : ''
+            const architecture = isObject ? formatFrameworkText(env.architecture) : ''
+            const atmosphere = isObject ? formatFrameworkText(env.atmosphere) : ''
+            const culture = isObject ? formatFrameworkText(env.culture) : ''
+            const distinctive = isObject ? formatFrameworkText(env.distinctive) : ''
+            const storyFunction = isObject ? formatFrameworkText(env.storyFunction) : ''
             return (
               <div key={ei} className="rounded-lg border border-stone-200 bg-stone-50/50 p-4">
                 <div className="flex items-center gap-2">
@@ -2352,34 +2608,34 @@ function FrameworkPanel({
                 )}
                 {isObject && (
                   <div className="mt-3 space-y-2">
-                    {env.architecture && (
+                    {architecture && (
                       <div>
                         <span className="text-xs text-stone-400">建筑风格</span>
-                        <p className="text-sm text-stone-600">{env.architecture}</p>
+                        <p className="whitespace-pre-line text-sm text-stone-600">{architecture}</p>
                       </div>
                     )}
-                    {env.atmosphere && (
+                    {atmosphere && (
                       <div>
                         <span className="text-xs text-stone-400">影调氛围</span>
-                        <p className="text-sm text-stone-600">{env.atmosphere}</p>
+                        <p className="whitespace-pre-line text-sm text-stone-600">{atmosphere}</p>
                       </div>
                     )}
-                    {env.culture && (
+                    {culture && (
                       <div>
                         <span className="text-xs text-stone-400">人文情况</span>
-                        <p className="text-sm text-stone-600">{env.culture}</p>
+                        <p className="whitespace-pre-line text-sm text-stone-600">{culture}</p>
                       </div>
                     )}
-                    {env.distinctive && (
+                    {distinctive && (
                       <div>
                         <span className="text-xs text-stone-400">辨识度</span>
-                        <p className="text-sm font-medium text-stone-700">{env.distinctive}</p>
+                        <p className="whitespace-pre-line text-sm font-medium text-stone-700">{distinctive}</p>
                       </div>
                     )}
-                    {env.storyFunction && (
+                    {storyFunction && (
                       <div>
                         <span className="text-xs text-stone-400">叙事功能</span>
-                        <p className="text-sm text-stone-600">{env.storyFunction}</p>
+                        <p className="whitespace-pre-line text-sm text-stone-600">{storyFunction}</p>
                       </div>
                     )}
                   </div>
@@ -2490,7 +2746,7 @@ function StylePanel({
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
     console.log('[PROMPT-BUGFIX] StylePanel PROMPT_READY detected, prompts:', step.outputData.prompts.length)
     const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
-    const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
+    const defaultModel = IMAGE_MODELS.primary
     return (
       <PromptPreviewWithRatio
         prompts={step.outputData.prompts}
@@ -2586,7 +2842,7 @@ function StylePanel({
             const hasPrompts = step.outputData?.prompts?.length > 0
             if (hasPrompts) {
               const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
-              const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
+              const defaultModel = IMAGE_MODELS.primary
               onExecute('STYLE', { action: 'generate-images', force: true, aspectRatio: defaultRatio, imageModel: defaultModel })
             } else {
               onExecute('STYLE', { action: 'generate-prompts' })
@@ -2746,7 +3002,7 @@ function AspectAwareImage({
       )}
       {src ? (
         <img
-          src={src}
+          src={proxiedMediaUrl(src)}
           alt={alt || ''}
           className={`absolute inset-0 h-full w-full object-cover ${className || ''}`}
           loading="lazy"
@@ -2780,7 +3036,7 @@ const IMAGE_MODEL_OPTIONS = IMAGE_MODELS.available
   .map(m => ({
   label: m.label,
   value: m.id,
-  desc: m.tags.join(' · '),
+  desc: `${getImageGenerationCost(m.id)} 点/张 · ${m.tags.join(' · ')}`,
   provider: m.provider,
 }))
 
@@ -3169,7 +3425,7 @@ function StyleCard({
           onClick={onSelect}
         >
           <HoverImageBadge
-            src={option.imageUrl}
+            src={proxiedMediaUrl(option.imageUrl)}
             alt={option.styleName}
             aspectRatio={cardRatio}
             imageModel={selectedModel}
@@ -3308,13 +3564,85 @@ function CharacterPanel({
   const [generatingAct, setGeneratingAct] = useState<number | null>(null)
   const [ratios, setRatios] = useState<Record<string, number>>({})
   const [expandedPromptIds, setExpandedPromptIds] = useState<Set<string>>(new Set())
+  const [dragOverCharacterId, setDragOverCharacterId] = useState<string | null>(null)
+  const [assigningCharacterId, setAssigningCharacterId] = useState<string | null>(null)
+  const [justAssignedCharacterId, setJustAssignedCharacterId] = useState<string | null>(null)
   const promptSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedPromptsRef = useRef<any[]>(step.outputData?.prompts || [])
+
+  const assignReferenceToCharacter = useCallback(async (input: {
+    characterId: string
+    assetId?: string
+    referenceAssetId?: string
+    referenceUrl: string
+  }) => {
+    setAssigningCharacterId(input.characterId)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/character/assign-reference`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || data.error || `HTTP ${res.status}`)
+      }
+      setJustAssignedCharacterId(input.characterId)
+      setTimeout(() => setJustAssignedCharacterId((prev) => prev === input.characterId ? null : prev), 2200)
+      setToast?.({ kind: 'success', message: '参考图已设为角色图' })
+      await mutate()
+    } catch (e: any) {
+      onError('设置角色参考图失败：' + (e?.message || e))
+    } finally {
+      setAssigningCharacterId(null)
+    }
+  }, [projectId, mutate, onError, setToast])
+
+  useEffect(() => {
+    function findCharacterFromEl(el: Element | null): { characterId: string | null; assetId?: string } {
+      let cur: Element | null = el
+      while (cur && cur !== document.body) {
+        const ds = (cur as HTMLElement).dataset
+        if (ds?.characterId) return { characterId: ds.characterId, assetId: ds.characterAssetId }
+        cur = cur.parentElement
+      }
+      return { characterId: null }
+    }
+
+    function handleDragMove(e: any) {
+      const el = document.elementFromPoint(e.detail?.clientX || 0, e.detail?.clientY || 0)
+      const { characterId } = findCharacterFromEl(el)
+      setDragOverCharacterId((prev) => prev === characterId ? prev : characterId)
+    }
+
+    function handleCustomDrop(e: any) {
+      const item = e.detail?.item
+      const el = document.elementFromPoint(e.detail?.clientX || 0, e.detail?.clientY || 0)
+      const { characterId, assetId } = findCharacterFromEl(el)
+      if (characterId && item?.url) {
+        assignReferenceToCharacter({ characterId, assetId, referenceAssetId: item.id, referenceUrl: item.url })
+      }
+      setDragOverCharacterId(null)
+    }
+
+    function handleDragEnd() {
+      setDragOverCharacterId(null)
+    }
+
+    window.addEventListener('customdragmove', handleDragMove as EventListener)
+    window.addEventListener('customdrop', handleCustomDrop as EventListener)
+    window.addEventListener('customdragend', handleDragEnd as EventListener)
+    return () => {
+      window.removeEventListener('customdragmove', handleDragMove as EventListener)
+      window.removeEventListener('customdrop', handleCustomDrop as EventListener)
+      window.removeEventListener('customdragend', handleDragEnd as EventListener)
+    }
+  }, [assignReferenceToCharacter])
 
   // PROMPT_READY：提示词预览（必须在 PROCESSING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
     const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
-    const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
+    const defaultModel = IMAGE_MODELS.primary
     return (
       <PromptPreviewWithRatio
         prompts={step.outputData.prompts}
@@ -3345,7 +3673,11 @@ function CharacterPanel({
               const data = await res.json()
               if (data.synced) {
                 await mutate()
-                setToast?.({ kind: 'success', message: '状态已同步' })
+                if (data.timedOut) {
+                  setToast?.({ kind: 'error', message: `超时未完成（${data.actualCount}/${data.expectedCount}），已保存现有结果` })
+                } else {
+                  setToast?.({ kind: 'success', message: '状态已同步' })
+                }
               } else if (data.actualCount < data.expectedCount) {
                 setToast?.({ kind: 'error', message: `生成中（${data.actualCount}/${data.expectedCount}），请稍后再试` })
               } else {
@@ -3390,18 +3722,24 @@ function CharacterPanel({
     )
   }
 
-  async function handleRegenerate(assetId: string, aspectRatio?: string, imageModel?: string) {
-    setRegeneratingId(assetId)
+  async function handleRegenerate(assetId?: string, characterId?: string, aspectRatio?: string, imageModel?: string) {
+    const id = assetId || characterId
+    if (!id) return
+    setRegeneratingId(id)
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/character/regenerate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetId, aspectRatio, imageModel }),
+        body: JSON.stringify({ assetId, characterId, aspectRatio, imageModel }),
       })
       const data = await res.json()
       if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`)
       await mutate()
-      setToast({ kind: 'success', message: '角色已重新生成' })
+      if (data.isMock) {
+        setToast({ kind: 'error', message: data.warning || '当前模型不可用，返回了占位图，请切换模型重试' })
+      } else {
+        setToast({ kind: 'success', message: '角色已重新生成' })
+      }
     } catch (e: any) {
       onError('重新生成失败：' + e?.message)
     } finally {
@@ -3449,33 +3787,58 @@ function CharacterPanel({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-stone-600">已生成 {assets.length} 个角色人像：</p>
+      {(() => {
+        const failedCount = (step.outputData?.failedCharacters || []).length
+        return (
+          <p className="text-sm text-stone-600">
+            已生成 {assets.length} 个角色人像
+            {failedCount > 0 && (
+              <span className="ml-2 text-xs text-red-500">（{failedCount} 个生成失败，可点击下方失败卡片单独重试）</span>
+            )}
+          </p>
+        )
+      })()}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         {assets.map((asset: any) => {
           const isRegenerating = regeneratingId === asset.id
+          const characterId = asset.metadata?.characterId
+          const isDragTarget = characterId && dragOverCharacterId === characterId
+          const isAssigning = characterId && assigningCharacterId === characterId
+          const justAssigned = characterId && justAssignedCharacterId === characterId
           const cardRatio = asset.metadata?.aspectRatio || '16:9'
-          const cardModel = asset.metadata?.imageModel || IMAGE_MODELS.primary
+          // 默认 gpt-image-2（除非用户手动选择其他模型）
+          const cardModel = IMAGE_MODELS.primary
           return (
             <div
               key={asset.id}
-              className="group relative overflow-hidden rounded-lg border border-stone-200 bg-white"
+              data-character-id={characterId || ''}
+              data-character-asset-id={asset.id}
+              className={`group relative overflow-hidden rounded-lg border bg-white transition ${
+                isDragTarget ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-stone-200'
+              }`}
             >
               <div
                 className="relative w-full bg-stone-100 transition-all duration-300"
                 style={{ aspectRatio: ratios[asset.id] || 1 }}
               >
                 <HoverImageBadge
-                  src={asset.url}
+                  src={proxiedMediaUrl(asset.url)}
                   alt={asset.metadata?.characterName}
                   aspectRatio={cardRatio}
                   imageModel={cardModel}
                   isMock={!!asset.metadata?.isMock}
-                  onRegenerate={(ar, model) => handleRegenerate(asset.id, ar, model)}
+                  onRegenerate={(ar, model) => handleRegenerate(asset.id, undefined, ar, model)}
                   isRegenerating={isRegenerating}
                   anyRegenerating={!!regeneratingId}
                   onLoad={(w, h) => setRatios(prev => ({ ...prev, [asset.id]: w / h }))}
                   wrapperClassName="absolute inset-0"
                 />
+                {(isAssigning || justAssigned) && (
+                  <div className="absolute inset-0 z-30 flex items-center justify-center bg-emerald-50/80 text-xs font-medium text-emerald-700">
+                    {isAssigning ? <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}
+                    {isAssigning ? '设置中' : '已替换'}
+                  </div>
+                )}
               </div>
               <div className="p-3">
                 <p className="text-sm font-medium text-stone-800">
@@ -3511,6 +3874,63 @@ function CharacterPanel({
             </div>
           )
         })}
+
+        {/* 生成失败的角色卡片：保留并允许单独重新生成 */}
+        {(() => {
+          const failed: any[] = step.outputData?.failedCharacters || []
+          const existingCharacterIds = new Set(
+            assets.map((a: any) => a.metadata?.characterId).filter(Boolean)
+          )
+          const pendingFailed = failed.filter((f: any) => !existingCharacterIds.has(f.characterId))
+          return pendingFailed.map((f: any) => {
+            const isRetrying = regeneratingId === f.characterId
+            const isDragTarget = dragOverCharacterId === f.characterId
+            const isAssigning = assigningCharacterId === f.characterId
+            const justAssigned = justAssignedCharacterId === f.characterId
+            return (
+              <div
+                key={`failed-${f.characterId}`}
+                data-character-id={f.characterId}
+                className={`relative overflow-hidden rounded-lg border bg-red-50 transition ${
+                  isDragTarget ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-red-100'
+                }`}
+              >
+                <div
+                  className="relative flex w-full flex-col items-center justify-center gap-2 bg-red-100/50 p-4 text-center"
+                  style={{ aspectRatio: project.selectedAspectRatio || '16:9' }}
+                >
+                  <ImageIcon className="h-8 w-8 text-red-300" />
+                  <p className="text-xs text-red-400">生成失败</p>
+                  {(isAssigning || justAssigned) && (
+                    <div className="absolute inset-0 z-30 flex items-center justify-center bg-emerald-50/85 text-xs font-medium text-emerald-700">
+                      {isAssigning ? (
+                        <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      {isAssigning ? '设置中' : '已设置'}
+                    </div>
+                  )}
+                </div>
+                <div className="p-3">
+                  <p className="text-sm font-medium text-stone-800">{f.characterName}</p>
+                  <p className="text-xs text-stone-500 line-clamp-2">{f.chineseDesc || f.role}</p>
+                  <button
+                    onClick={() => handleRegenerate(undefined, f.characterId, project.selectedAspectRatio)}
+                    disabled={isRetrying || !!regeneratingId}
+                    className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md bg-stone-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
+                  >
+                    {isRetrying ? (
+                      <><LoaderCircle className="h-3 w-3 animate-spin" />重新生成中...</>
+                    ) : (
+                      <><RefreshCw className="h-3 w-3" />重新生成</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        })()}
       </div>
 
       {step.status === 'COMPLETED' && assets.length > 0 && (
@@ -3671,7 +4091,7 @@ function ConceptPanel({
     // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
     const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
-    const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
+    const defaultModel = IMAGE_MODELS.primary
     return (
       <PromptPreviewWithRatio
         prompts={step.outputData.prompts}
@@ -3833,12 +4253,13 @@ function ConceptPanel({
                 }
                 const isRegenerating = regeneratingId === asset.id
                 const cardRatio = asset.metadata?.aspectRatio || '16:9'
-                const cardModel = asset.metadata?.imageModel || IMAGE_MODELS.primary
+                // 默认 gpt-image-2（除非用户手动选择其他模型）
+                const cardModel = IMAGE_MODELS.primary
                 return (
                   <div key={asset.id} className="group relative overflow-hidden rounded-lg border border-stone-200">
                     <div className="relative w-full bg-stone-100 transition-all duration-300" style={{ aspectRatio: ratios[asset.id] || 1.78 }}>
                       <HoverImageBadge
-                        src={asset.url}
+                        src={proxiedMediaUrl(asset.url)}
                         alt={asset.metadata?.sceneDesc}
                         aspectRatio={cardRatio}
                         imageModel={cardModel}
@@ -3957,12 +4378,115 @@ function StoryboardPanel({
   readOnly?: boolean
   framework?: any
 }) {
-  const shots = step.outputData?.shots || []
-  const shotAssets = step.resultAssets || []
+  const shots = useMemo(
+    () => (step.outputData?.shots || []).map((shot: any) => ({
+      ...shot,
+      actNumber: normalizeOptionalInt(shot.actNumber),
+    })),
+    [step.outputData?.shots]
+  )
+  const shotAssets = useMemo(
+    () => (step.resultAssets || []).map((asset: any) => ({
+      ...asset,
+      metadata: asset.metadata
+        ? { ...asset.metadata, actNumber: normalizeOptionalInt(asset.metadata.actNumber) }
+        : asset.metadata,
+    })),
+    [step.resultAssets]
+  )
   const isExecuting = executing === step.stepType
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
   const [confirmingShotId, setConfirmingShotId] = useState<string | null>(null)
+  const generatingShots: Record<string, any> = step.outputData?.generatingShots || {}
+
+  // [DRAG-REF] 用户拖入到分镜卡片的额外参考图（key = `${shotId}_${actNumber}` 或仅 shotId）
+// 从 outputData.shotExtraRefs 初始化，刷新后保留
+  const persistedExtraRefs: Record<string, Array<{ url: string; id?: string }>> = step.outputData?.shotExtraRefs || {}
+  const [shotExtraRefs, setShotExtraRefs] = useState<Record<string, { url: string; id?: string }[]>>(persistedExtraRefs)
+  const [dragOverShotId, setDragOverShotId] = useState<string | null>(null)
+  const [justDroppedShotId, setJustDroppedShotId] = useState<string | null>(null)
+
+  // 当 outputData.shotExtraRefs 从服务器更新时（如 mutate 后），同步本地 state
+  useEffect(() => {
+    setShotExtraRefs(step.outputData?.shotExtraRefs || {})
+  }, [step.outputData?.shotExtraRefs])
+
+  // [DRAG-REF] 监听 useDragRef 的自定义事件，通过 elementFromPoint + DOM 向上查找命中哪个 shot
+  useEffect(() => {
+    function findShotShotIdFromEl(el: Element | null): string | null {
+      while (el && el !== document.body) {
+        const id = (el as HTMLElement).dataset?.shotId
+        if (id) return id
+        el = el.parentElement
+      }
+      return null
+    }
+    function findShotShotIdAndActFromEl(el: Element | null): { shotId: string | null; actNumber: number | null } {
+      // DOM 向上查找同时带有 data-shot-id 和 data-shot-act 的最近祖先，
+      // 这样可以正确处理不同幕中相同 shotId 的情况。
+      let cur: Element | null = el
+      while (cur && cur !== document.body) {
+        const dsid = (cur as HTMLElement).dataset?.shotId
+        const dsact = (cur as HTMLElement).dataset?.shotAct
+        if (dsid && dsact && dsact !== '') {
+          const parsed = parseInt(dsact, 10)
+          if (!isNaN(parsed)) return { shotId: dsid, actNumber: parsed }
+        }
+        cur = cur.parentElement
+      }
+      // 兜底：data-shot-act 缺失时退回到 shots.find（老项目兼容）
+      const shotId = findShotShotIdFromEl(el)
+      if (!shotId) return { shotId: null, actNumber: null }
+      const shot = shots.find((s: any) => s.shotId === shotId)
+      return { shotId, actNumber: shot?.actNumber ?? null }
+    }
+    function handleDragMove(e: any) {
+      const x = e.detail?.clientX || 0
+      const y = e.detail?.clientY || 0
+      const el = document.elementFromPoint(x, y)
+      const shotId = findShotShotIdFromEl(el)
+      setDragOverShotId(prev => prev === shotId ? prev : shotId)
+    }
+    function handleCustomDrop(e: any) {
+      const x = e.detail?.clientX || 0
+      const y = e.detail?.clientY || 0
+      const el = document.elementFromPoint(x, y)
+      const data = findShotShotIdAndActFromEl(el)
+      const shotId = data.shotId
+      const actNum = data.actNumber
+      const item = e.detail?.item
+      if (shotId && item?.url) {
+        const extraRefsKey = actNum != null ? `${shotId}_${actNum}` : shotId
+        setShotExtraRefs(prev => {
+          const existing = prev[extraRefsKey] || []
+          if (existing.some(e => e.url === item.url)) return prev
+          return { ...prev, [extraRefsKey]: [...existing, { url: item.url, id: item.id }] }
+        })
+        setJustDroppedShotId(shotId)
+        setTimeout(() => setJustDroppedShotId(prev => prev === shotId ? null : prev), 2200)
+        // 持久化到后端：actNumber 也写入，刷新后保留
+        const newRefs = (shotExtraRefs[extraRefsKey] || []).filter(r => r.url !== item.url).concat({ url: item.url, id: item.id })
+        fetch(`/api/projects/${projectId}/steps/storyboard/shot-extra-refs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shotId, actNumber: actNum, refs: newRefs }),
+        }).catch(err => console.warn('[DRAG-REF] 持久化失败:', err))
+      }
+      setDragOverShotId(null)
+    }
+    function handleDragEnd() {
+      setDragOverShotId(null)
+    }
+    window.addEventListener('customdragmove', handleDragMove as EventListener)
+    window.addEventListener('customdrop', handleCustomDrop as EventListener)
+    window.addEventListener('customdragend', handleDragEnd as EventListener)
+    return () => {
+      window.removeEventListener('customdragmove', handleDragMove as EventListener)
+      window.removeEventListener('customdrop', handleCustomDrop as EventListener)
+      window.removeEventListener('customdragend', handleDragEnd as EventListener)
+    }
+  }, [])
 
   // [ACT-QUEUE] 每幕异步生图进度（独立轮询，不占用全局 executing 状态）
   const [actProgress, setActProgress] = useState<Record<number, { current: number; total: number; shotId: string | null }>>({})
@@ -3977,7 +4501,7 @@ function StoryboardPanel({
   // 初始化每幕的默认设置
   useEffect(() => {
     const defaultRatio = step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
-    const defaultModel = step.outputData?.imageModel || IMAGE_MODELS.primary
+    const defaultModel = IMAGE_MODELS.primary
     const settings: Record<number, { ratio: string; model: string }> = {}
     for (const shot of shots) {
       const act = shot.actNumber || 0
@@ -4027,7 +4551,7 @@ function StoryboardPanel({
     try {
       let remaining = total
       while (remaining > 0) {
-        const res = await fetch(`/api/projects/${projectId}/steps/storyboard`, {
+        const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -4076,7 +4600,7 @@ function StoryboardPanel({
     const { ratio, model } = getActSettings(actNumber)
     setActProgress(prev => ({ ...prev, [actNumber]: { current: 0, total: 1, shotId } }))
     try {
-      const res = await fetch(`/api/projects/${projectId}/steps/storyboard`, {
+      const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -4102,20 +4626,75 @@ function StoryboardPanel({
     }
   }
 
+  async function clearShotGenerationState(actNumber: number, shotId: string) {
+    const key = `${actNumber}_${shotId}`
+    const qs = new URLSearchParams({ key, actNumber: String(actNumber), shotId })
+    const res = await fetch(`/api/projects/${projectId}/steps/storyboard/generation-state?${qs.toString()}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, actNumber, shotId }),
+    })
+    const result = await res.json().catch(() => ({}))
+    if (!res.ok || !result.success) throw new Error(result.message || result.error || `HTTP ${res.status}`)
+    await mutate()
+  }
+
+  async function handleInterruptAndRetry(actNumber: number, shotId: string) {
+    try {
+      await clearShotGenerationState(actNumber, shotId)
+      await handleGenerateSingleShot(actNumber, shotId)
+    } catch (e: any) {
+      onError('中断并重试失败：' + e?.message)
+    }
+  }
+
   async function handleRegenerate(shotId: string, aspectRatio?: string, imageModel?: string, actNumber?: number) {
     setRegeneratingId(shotId)
     try {
-      const res = await fetch(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shotId, actNumber, aspectRatio, imageModel }),
+      // 收集当前所有参考图和 prompt，打开重试副工作台
+      const allRefs: Array<{ url: string; label: string; type: 'character' | 'style' | 'previous-shot' | 'user-upload' | 'user-dragged'; removable: boolean }> = []
+
+      // 1) 用户拖入的最高优先级参考（持久化的）
+      const extraRefsKey = actNumber != null ? `${shotId}_${actNumber}` : shotId
+      const extras = shotExtraRefs[extraRefsKey] || shotExtraRefs[shotId] || []
+      extras.forEach((r) => allRefs.push({ url: r.url, label: r.id || '最高优先级', type: 'user-dragged', removable: true }))
+
+      // 2) 角色图、风格图、上一帧、用户参考（直接从后端拉取）
+      try {
+        const refRes = await fetch(`/api/projects/${projectId}/steps/storyboard/regenerate-prefill?shotId=${shotId}&actNumber=${actNumber || ''}`)
+        if (refRes.ok) {
+          const refData = await refRes.json()
+          refData.refs?.forEach((r: any) => {
+            if (!allRefs.find(x => x.url === r.url)) {
+              allRefs.push({ url: r.url, label: r.label, type: r.type, removable: true })
+            }
+          })
+        }
+      } catch {}
+
+      // 3) 镜头当前 prompt
+      const stepOutput = step.outputData || {}
+      const shotPrompts: any[] = stepOutput.shotPrompts || []
+      const currentShotPrompt = shotPrompts.find((p: any) => p.shotId === shotId && (actNumber == null || p.actNumber == null || p.actNumber === actNumber))
+      const basePrompt = currentShotPrompt?.prompt || ''
+
+      // 4) 镜头当前原图（修改原图模式用）
+      const asset = (step.resultAssets || []).find((a: any) => {
+        const m = (a.metadata || {}) as any
+        return m.shotId === shotId && (m.actNumber === actNumber || (!actNumber && !m.actNumber))
       })
-      const data = await res.json()
-      if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`)
-      await mutate()
-      setToast({ kind: 'success', message: '分镜草图已重新生成' })
-    } catch (e: any) {
-      onError('重新生成失败：' + e?.message)
+      const originalImageUrl = asset?.url || null
+
+      ;(window as any).__openRetryEditForStoryboard?.({
+        shotId,
+        actNumber,
+        targetLabel: `${shotId}（第${actNumber || '?'}幕）`,
+        basePrompt,
+        baseRefs: allRefs,
+        originalImageUrl,
+        currentModel: imageModel || IMAGE_MODELS.primary,
+        aspectRatio: aspectRatio || '16:9',
+      })
     } finally {
       setRegeneratingId(null)
     }
@@ -4184,6 +4763,7 @@ function StoryboardPanel({
           const allGenerated = generatedCount === totalCount && totalCount > 0
           const someGenerated = generatedCount > 0 && generatedCount < totalCount
           const { ratio, model } = getActSettings(actNumber)
+          const actHasServerGenerating = actShots.some((shot: any) => generatingShots[`${actNumber}_${shot.shotId}`]?.status === 'processing')
 
           return (
             <div key={actNumber} className="rounded-lg border border-stone-200 bg-white overflow-hidden">
@@ -4217,14 +4797,23 @@ function StoryboardPanel({
                 {actShots.map((shot: any) => {
                   const asset = actAssetsMap.get(shot.shotId)
                   const isRegenerating = regeneratingId === shot.shotId
+                  const generationKey = `${actNumber}_${shot.shotId}`
+                  const generationState = generatingShots[generationKey]
+                  const isServerGenerating = generationState?.status === 'processing'
+                  const generationStartedAt = generationState?.startedAt ? new Date(generationState.startedAt).getTime() : 0
+                  const generationIsStale = isServerGenerating && generationStartedAt > 0 && Date.now() - generationStartedAt > 12 * 60 * 1000
+                  const blocksGeneration = isServerGenerating && !generationIsStale
                   const cardRatio = asset?.metadata?.aspectRatio || '16:9'
-                  const cardModel = asset?.metadata?.imageModel || IMAGE_MODELS.primary
+                  // 默认 gpt-image-2（除非用户手动选择其他模型）
+                  const cardModel = IMAGE_MODELS.primary
                   const mappedChars = shot.characters?.map((cid: string) => characterMap[cid] || cid).join('、')
 
                   return (
                     <div
                       key={shot.shotId}
-                      className="flex flex-col sm:flex-row gap-4 px-4 py-3"
+                      data-shot-id={shot.shotId}
+                      data-shot-act={shot.actNumber ?? ''}
+                      className={`flex flex-col sm:flex-row gap-4 px-4 py-3 transition-colors ${dragOverShotId === shot.shotId ? 'bg-emerald-50/40' : ''}`}
                     >
                       {/* 左侧：镜头信息 */}
                       <div className="flex-1 min-w-0">
@@ -4233,6 +4822,22 @@ function StoryboardPanel({
                             {shot.shotId}
                           </span>
                           <span className="text-sm font-medium text-stone-800">{shot.sceneName}</span>
+                          {isServerGenerating && (
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${generationIsStale ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                              <LoaderCircle className="h-3 w-3 animate-spin" />
+                              {generationIsStale ? '生成可能超时' : '正在生成'}
+                            </span>
+                          )}
+                          {generationState?.status === 'failed' && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700" title={generationState.message || ''}>
+                              生成失败
+                            </span>
+                          )}
+                          {dragOverShotId === shot.shotId && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-medium text-white">
+                              释放以置顶参考
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-stone-600 leading-relaxed mb-2">{shot.description}</p>
                         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-500">
@@ -4252,26 +4857,95 @@ function StoryboardPanel({
                       </div>
 
                       {/* 右侧：图片区 */}
-                      <div className="w-full sm:w-44 shrink-0">
+                      <div className="w-full sm:w-60 shrink-0">
+                        {(() => {
+                          const extraRefsKey = actNumber != null ? `${shot.shotId}_${actNumber}` : shot.shotId
+                          const refs = shotExtraRefs[extraRefsKey] || []
+                          if (refs.length === 0) return null
+                          return (
+                          <div className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+                            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+                              <Check className="h-3 w-3" />
+                              <span>已添加 {refs.length} 个最高优先级参考</span>
+                              <button
+                                onClick={() => {
+                                  setShotExtraRefs(prev => { const n = { ...prev }; delete n[extraRefsKey]; return n })
+                                  fetch(`/api/projects/${projectId}/steps/storyboard/shot-extra-refs`, {
+                                    method: 'DELETE',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ shotId: shot.shotId, actNumber }),
+                                  }).catch(err => console.warn('[DRAG-REF] 清除失败:', err))
+                                }}
+                                className="ml-auto text-stone-400 hover:text-stone-600"
+                                title="清除"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {refs.map((r, i) => (
+                                <div key={i} className="relative h-12 w-16 overflow-hidden rounded border border-emerald-200">
+                                  <img src={proxiedMediaUrl(r.url)} alt="" className="h-full w-full object-cover" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          )
+                        })()}
                         {asset ? (
-                          <div className="group/thumb relative w-full" style={{ aspectRatio: '16/9' }}>
+                          <div
+                            className={`group/thumb relative w-full transition ${dragOverShotId === shot.shotId ? 'ring-2 ring-emerald-400 ring-offset-1 rounded' : ''}`}
+                            style={{ aspectRatio: cardRatio.replace(':', '/') }}
+                          >
                             <img
-                              src={asset.url}
+                              src={proxiedMediaUrl(asset.url)}
                               alt=""
                               className="h-full w-full rounded object-cover"
                             />
                             <HoverImageBadge
-                              src={asset.url}
+                              src={proxiedMediaUrl(asset.url)}
                               aspectRatio={cardRatio}
                               imageModel={cardModel}
                               onRegenerate={(ar, m) => handleRegenerate(shot.shotId, ar, m, actNumber)}
                               isRegenerating={isRegenerating}
-                              anyRegenerating={!!regeneratingId}
+                              anyRegenerating={!!regeneratingId || blocksGeneration}
                               wrapperClassName="absolute inset-0"
                             />
+                            {isServerGenerating && (
+                              <div className={`absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 rounded bg-black/55 text-white ${generationIsStale ? '' : 'pointer-events-none'}`}>
+                                <LoaderCircle className="h-5 w-5 animate-spin" />
+                                <span className="text-xs font-medium">{generationIsStale ? '生成可能超时' : '正在生成'}</span>
+                                {generationIsStale && !readOnly && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleInterruptAndRetry(actNumber, shot.shotId)
+                                    }}
+                                    disabled={!!actProgress[actNumber]}
+                                    className="rounded-md bg-white px-3 py-1 text-[11px] font-medium text-stone-800 shadow transition hover:bg-stone-100 disabled:opacity-50"
+                                  >
+                                    中断并重试
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                            {generationState?.status === 'failed' && (
+                              <div className="absolute inset-x-1 bottom-1 z-30 rounded bg-red-600/90 px-2 py-1 text-[10px] text-white" title={generationState.message || ''}>
+                                生成失败：{String(generationState.message || '').slice(0, 28)}
+                              </div>
+                            )}
+                            {justDroppedShotId === shot.shotId && (
+                              <div className="pointer-events-none absolute right-1 top-1 z-30 flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-medium text-white shadow">
+                                <Check className="h-3 w-3" />
+                                参考已置顶
+                              </div>
+                            )}
                           </div>
                         ) : (
-                          <div className="relative flex w-full flex-col items-center justify-center overflow-hidden rounded border-2 border-dashed border-stone-300 bg-stone-100" style={{ aspectRatio: '16/9' }}>
+                          <div
+                            className={`relative flex w-full flex-col items-center justify-center overflow-hidden rounded border-2 border-dashed transition-colors ${dragOverShotId === shot.shotId ? 'border-emerald-400 bg-emerald-50' : 'border-stone-300 bg-stone-100'}`}
+                            style={{ aspectRatio: '16/9' }}
+                          >
                             <span className="font-mono text-sm font-bold text-stone-600">{shot.shotId || ''}</span>
                             <span className="mt-1 max-w-[90%] truncate px-2 text-xs text-stone-400">{(shot.sceneName || '').slice(0, 14)}</span>
                             {!readOnly && (
@@ -4286,18 +4960,29 @@ function StoryboardPanel({
                                       >取消</button>
                                       <button
                                         onClick={() => { setConfirmingShotId(null); handleGenerateSingleShot(actNumber, shot.shotId) }}
-                                        disabled={isExecuting || !!actProgress[actNumber]}
+                                        disabled={isExecuting || !!actProgress[actNumber] || blocksGeneration}
                                         className="rounded-md bg-amber-600 px-3 py-1 text-[11px] font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
                                       >确认生成</button>
                                     </div>
                                   </div>
                                 ) : (
                                   <button
-                                    onClick={() => setConfirmingShotId(shot.shotId)}
-                                    disabled={isExecuting || !!actProgress[actNumber]}
+                                    onClick={() => {
+                                      if (generationIsStale) {
+                                        handleInterruptAndRetry(actNumber, shot.shotId)
+                                      } else {
+                                        setConfirmingShotId(shot.shotId)
+                                      }
+                                    }}
+                                    disabled={isExecuting || !!actProgress[actNumber] || blocksGeneration}
                                     className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded bg-stone-100/80 text-xs font-medium text-stone-600 transition hover:bg-stone-200/90 hover:text-stone-800 disabled:opacity-50"
                                   >
-                                    {actProgress[actNumber]?.shotId === shot.shotId ? (
+                                    {generationIsStale ? (
+                                      <>
+                                        <RefreshCw className="h-4 w-4" />
+                                        中断并重试
+                                      </>
+                                    ) : actProgress[actNumber]?.shotId === shot.shotId || isServerGenerating ? (
                                       <>
                                         <LoaderCircle className="h-4 w-4 animate-spin" />
                                         生成中
@@ -4361,20 +5046,21 @@ function StoryboardPanel({
                       ))}
                     </select>
                   </div>
+                  {SHOW_STORYBOARD_BATCH_CONTROLS && (
                   <div className="relative inline-block ml-auto">
                     <button
                       onClick={() => handleGenerateAct(actNumber, allGenerated)}
-                      disabled={isExecuting || !!actProgress[actNumber]}
+                      disabled={isExecuting || !!actProgress[actNumber] || actHasServerGenerating}
                       className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium transition disabled:opacity-50 ${
                         allGenerated
                           ? 'border border-stone-300 bg-white text-stone-700 hover:bg-stone-100'
                           : 'bg-stone-900 text-white hover:bg-stone-800'
                       }`}
                     >
-                      {actProgress[actNumber] ? (
+                      {actProgress[actNumber] || actHasServerGenerating ? (
                         <>
                           <LoaderCircle className="h-3 w-3 animate-spin" />
-                          {actProgress[actNumber].current}/{actProgress[actNumber].total}
+                          {actProgress[actNumber] ? `${actProgress[actNumber].current}/${actProgress[actNumber].total}` : '生成中'}
                         </>
                       ) : allGenerated ? (
                         <><RefreshCw className="h-3 w-3" /> 重新生图</>
@@ -4384,6 +5070,7 @@ function StoryboardPanel({
                     </button>
                     {!allGenerated && !actProgress[actNumber] && <CostBadge cost={DEFAULT_GENERATE_COST} />}
                   </div>
+                  )}
                 </div>
               )}
             </div>
@@ -4400,7 +5087,7 @@ function StoryboardPanel({
             进入分镜编辑器
           </Link>
 
-          {!showConfirmAll ? (
+          {SHOW_STORYBOARD_BATCH_CONTROLS && (!showConfirmAll ? (
             <button
               onClick={() => setShowConfirmAll(true)}
               disabled={isExecuting}
@@ -4431,7 +5118,7 @@ function StoryboardPanel({
                 </div>
               </div>
             </div>
-          )}
+          ))}
         </div>
       </div>
     )
@@ -4496,16 +5183,25 @@ function KeyframesPanel({
   const { data: keyframesRes, mutate: mutateKeyframes } = useSWR(
     `/api/projects/${projectId}/steps/keyframes`,
     fetcher,
-    { refreshInterval: 3000 }
+    { refreshInterval: 10000 }
   )
 
   const [localShots, setLocalShots] = useState<KeyframeShot[]>([])
   const [hasSynced, setHasSynced] = useState(false)
   const [viewMode, setViewMode] = useState<'table' | 'canvas'>('table')
+  const [exportProgress, setExportProgress] = useState<string | null>(null)
 
   // 从 storyboard outputData 读取 shots
   const storyboardShots: KeyframeShot[] = storyboardRes?.outputData?.shots || []
   const storyboardAssets = storyboardRes?.assets || []
+  const exportCharacterMap = useMemo(() => {
+    const chars = project?.framework?.characters || []
+    const map: Record<string, string> = {}
+    for (const c of chars) {
+      if (c?.id && c?.name) map[c.id] = c.name
+    }
+    return map
+  }, [project?.framework])
 
   // 从 KEYFRAMES outputData 读取 keyframes 数据（包含 lastFrameUrl 和 actionChange）
   const keyframesData = keyframesRes?.outputData?.keyframes || keyframesRes?.outputData?.results || []
@@ -4556,10 +5252,24 @@ function KeyframesPanel({
   }
 
   // 工作指令.txt（2026-05-24）：保存动作变化描述到 KEYFRAMES outputData
-  async function handleActionChange(shotId: string, actionChange: string) {
-    const nextKeyframes = keyframesData.map((kf: any) =>
-      kf.shotId === shotId ? { ...kf, actionChange } : kf
-    )
+  async function handleActionChange(shotId: string, actionChange: string, actNumber = 0) {
+    const shot = storyboardShots.find((s: any) => s.shotId === shotId && (s.actNumber || 0) === actNumber)
+    let found = false
+    const nextKeyframes = keyframesData.map((kf: any) => {
+      const matched = kf.shotId === shotId && (kf.actNumber || 0) === actNumber
+      if (matched) found = true
+      return matched ? { ...kf, actionChange, actNumber } : kf
+    })
+    if (!found) {
+      nextKeyframes.push({
+        shotId,
+        actNumber,
+        firstFrameUrl: shot?.firstFrameUrl || shot?.referenceImageUrl || '',
+        lastFrameUrl: shot?.lastFrameUrl || '',
+        description: shot?.description || '',
+        actionChange,
+      })
+    }
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/keyframes`, {
         method: 'PATCH',
@@ -4575,7 +5285,7 @@ function KeyframesPanel({
   }
 
   // 导出分镜（与 storyboard/page.tsx 共用同一逻辑，支持 JSON / Excel 双格式）
-  function handleExport(format: 'json' | 'excel') {
+  async function handleExport(format: 'json' | 'excel') {
     console.log('[KEYFRAMES-EXPORT] 导出分镜, format:', format)
     if (typeof window === 'undefined') return
     const projectName = storyboardRes?.project?.title || 'project'
@@ -4614,32 +5324,20 @@ function KeyframesPanel({
       }
     } else if (format === 'excel') {
       try {
-        const worksheetData = data.shots
-        const worksheet = XLSX.utils.json_to_sheet(worksheetData)
-        const colWidths = [
-          { wch: 8 },  // 镜头序号
-          { wch: 40 }, // 镜头描述
-          { wch: 12 }, // 运镜方式
-          { wch: 8 },  // 时长
-          { wch: 12 }, // 角色
-          { wch: 60 }, // 图片URL
-          { wch: 60 }, // 尾帧URL
-        ]
-        worksheet['!cols'] = colWidths
-        const workbook = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(workbook, worksheet, '分镜表')
-        const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
-        const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${projectName}_分镜解读_${new Date().toISOString().slice(0, 10)}.xlsx`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
+        await exportStoryboardExcel({
+          exportKey: `project:${projectId}:storyboard:${localShots[0]?.mode || 'keyframe'}`,
+          projectName,
+          shots: localShots,
+          characterMap: exportCharacterMap,
+          mode: localShots[0]?.mode || 'keyframe',
+          onProgress: (progress) => {
+            setExportProgress(`${progress.message} (cached ${progress.reused}, fetched ${progress.fetched})`)
+          },
+        })
+        setTimeout(() => setExportProgress(null), 5000)
         console.log('[KEYFRAMES-EXPORT] Excel 下载触发成功')
       } catch (err: any) {
+        setExportProgress(`Excel export failed: ${err?.message || err}`)
         console.error('[KEYFRAMES-EXPORT] Excel 导出失败:', err?.message || err)
       }
     }
@@ -4662,7 +5360,7 @@ function KeyframesPanel({
   // PROMPT_READY：提示词预览（仅在没有 shots 时显示，作为引导）
   const kfPrompts = keyframesRes?.outputData?.prompts || step.outputData?.prompts || []
   const kfDefaultRatio = keyframesRes?.outputData?.aspectRatio || step.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
-  const kfDefaultModel = keyframesRes?.outputData?.imageModel || step.outputData?.imageModel || IMAGE_MODELS.primary
+  const kfDefaultModel = IMAGE_MODELS.primary
 
   // 无 shots 时显示提示词预览（引导用户先生成分镜）
   if (!hasShots) {
@@ -4702,7 +5400,8 @@ function KeyframesPanel({
             </div>
 
             {/* 导出按钮 — JSON + Excel 双格式 */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col items-start gap-1">
+              <div className="flex items-center gap-2">
               <button
                 onClick={() => handleExport('json')}
                 className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
@@ -4717,6 +5416,12 @@ function KeyframesPanel({
                 <FileSpreadsheet className="h-4 w-4" />
                 Excel
               </button>
+              </div>
+              {exportProgress && (
+                <p className="max-w-[360px] truncate text-xs text-stone-500" title={exportProgress}>
+                  {exportProgress}
+                </p>
+              )}
             </div>
           </div>
 
