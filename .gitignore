@@ -43,3 +43,9 @@ next-env.d.ts
 # mock storage (migrated to Supabase)
 public/mock-storage/
 settings.local.json
+
+# local workflow runner state
+.local-runner/
+
+# agent working files (migrated to .cursor/rules/project-knowledge.md)
+.kimi/
