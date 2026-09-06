@@ -104,14 +104,14 @@ async function main() {
 
   console.log('解析到', shots.length, '个镜头')
 
-  // Step 4: 导入分镜表（替代模式）
-  console.log('\n[4/4] 导入分镜表（替代模式）...')
+  // Step 4: 导入分镜表（AI补完模式）
+  console.log('\n[4/4] 导入分镜表（AI补完模式）...')
   const importRes = await fetch(`${BASE_URL}/api/projects/${projectId}/import-storyboard`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       shots: shots,
-      mode: 'replace',
+      mode: 'ai_complete',
     }),
   })
 
