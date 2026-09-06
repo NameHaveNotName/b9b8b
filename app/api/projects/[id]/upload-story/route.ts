@@ -85,7 +85,7 @@ async function parseXlsx(buffer: Buffer): Promise<{ type: 'storyboard' | 'text',
   }
 
   // 查找表头行（第一行非空行）
-  let headerRowIndex = 0
+  let headerRowIndex = -1
   for (let i = 0; i < Math.min(5, data.length); i++) {
     if (data[i] && data[i].length >= 3) {
       headerRowIndex = i
@@ -93,11 +93,16 @@ async function parseXlsx(buffer: Buffer): Promise<{ type: 'storyboard' | 'text',
     }
   }
 
+  if (headerRowIndex === -1) {
+    throw new Error('Excel 文件内容为空或格式不正确')
+  }
+
+  // 方法1：尝试通过表头列名检测
   const headers = (data[headerRowIndex] || []).map((h: any) => String(h || '').trim())
   const columnMap = detectStoryboardColumns(headers)
 
   if (columnMap) {
-    // 检测到分镜表格式
+    // 检测到分镜表格式（有表头）
     const shots: StoryboardShot[] = []
     for (let i = headerRowIndex + 1; i < data.length; i++) {
       const row = data[i]
@@ -129,7 +134,50 @@ async function parseXlsx(buffer: Buffer): Promise<{ type: 'storyboard' | 'text',
     }
 
     if (shots.length > 0) {
-      // 将分镜表转换为文本格式
+      const textContent = shots.map(s =>
+        `镜头${s.shotId}：${s.description}${s.cameraMove ? `（运镜：${s.cameraMove}）` : ''}${s.narration ? `【旁白：${s.narration}】` : ''}`
+      ).join('\n')
+
+      return { type: 'storyboard', content: textContent, shots }
+    }
+  }
+
+  // 方法2：检测是否为无表头的分镜表（数据格式：编号 | 时间码 | 时长 | ...）
+  // 检查前几行是否符合分镜表数据格式
+  const isStoryboardData = checkIfStoryboardData(data, headerRowIndex)
+  if (isStoryboardData) {
+    const shots: StoryboardShot[] = []
+    for (let i = headerRowIndex; i < data.length; i++) {
+      const row = data[i]
+      if (!row || row.length < 3) continue
+
+      const shotId = String(row[0] || '').trim()
+      // 跳过标题行（如"信念陪伴动画MV分镜表"）
+      if (!shotId || shotId.length > 10 || shotId.includes('分镜') || shotId.includes('表')) continue
+
+      const timecode = String(row[1] || '').trim()
+      const duration = parseTimecodeToSeconds(String(row[2] || ''))
+      const narration = row[3] ? String(row[3]).trim() : ''
+      const cameraMove = row[4] ? String(row[4]).trim() : ''
+      const description = row[5] ? String(row[5]).trim() : ''
+      const visualDetail = row[6] ? String(row[6]).trim() : ''
+      const transition = row[7] ? String(row[7]).trim() : ''
+
+      if (description || cameraMove) {
+        shots.push({
+          shotId,
+          timecode,
+          duration,
+          narration,
+          cameraMove,
+          description,
+          visualDetail,
+          transition,
+        })
+      }
+    }
+
+    if (shots.length > 0) {
       const textContent = shots.map(s =>
         `镜头${s.shotId}：${s.description}${s.cameraMove ? `（运镜：${s.cameraMove}）` : ''}${s.narration ? `【旁白：${s.narration}】` : ''}`
       ).join('\n')
@@ -145,6 +193,36 @@ async function parseXlsx(buffer: Buffer): Promise<{ type: 'storyboard' | 'text',
     .join('\n')
 
   return { type: 'text', content: textContent }
+}
+
+// 检查数据是否符合无表头分镜表的格式
+function checkIfStoryboardData(data: any[][], startIndex: number): boolean {
+  // 检查前3行数据是否符合分镜表格式
+  // 格式：第一列是数字编号，第二列是时间码（如 0:00.00-0:05.00），第三列是时长（数字）
+  let matchCount = 0
+  const checkRows = Math.min(3, data.length - startIndex)
+
+  for (let i = startIndex; i < startIndex + checkRows; i++) {
+    const row = data[i]
+    if (!row || row.length < 3) continue
+
+    const col0 = String(row[0] || '').trim()
+    const col1 = String(row[1] || '').trim()
+    const col2 = String(row[2] || '').trim()
+
+    // 检查第一列是否是数字编号（如 001, 002, 003）
+    const isNumericId = /^\d{1,4}$/.test(col0)
+    // 检查第二列是否是时间码格式（如 0:00.00-0:05.00）
+    const isTimecode = /^\d+:\d{2}\.\d{2}-\d+:\d{2}\.\d{2}$/.test(col1)
+    // 检查第三列是否是数字（时长）
+    const isDuration = !isNaN(parseFloat(col2))
+
+    if (isNumericId && (isTimecode || isDuration)) {
+      matchCount++
+    }
+  }
+
+  return matchCount >= 2
 }
 
 async function parseTxt(buffer: Buffer): Promise<string> {
