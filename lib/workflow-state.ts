@@ -176,7 +176,7 @@ export function computeProjectStateFromSteps(
   steps: Array<{ stepType: string; status: string }>
 ): ProjectState {
   const isDone = (type: string) =>
-    steps.some((s) => s.stepType === type && s.status === 'COMPLETED')
+    steps.some((s) => s.stepType === type && (s.status === 'COMPLETED' || s.status === 'SKIPPED'))
 
   return {
     stepIdeaDone: isDone('IDEATION'),
