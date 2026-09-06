@@ -1501,6 +1501,9 @@ function IdeationPanel({
   const [uploadedFileName, setUploadedFileName] = useState<string>('')
   const [uploadError, setUploadError] = useState<string>('')
   const [showPreview, setShowPreview] = useState(false)
+  const [contentType, setContentType] = useState<'story' | 'storyboard'>('story')
+  const [storyboardShots, setStoryboardShots] = useState<any[] | null>(null)
+  const [showStoryboardChoice, setShowStoryboardChoice] = useState(false)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
@@ -1614,9 +1617,10 @@ function IdeationPanel({
       'text/plain',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/pdf',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ]
     if (!allowedTypes.includes(file.type)) {
-      setUploadError('不支持的文件格式，请上传 txt、docx 或 pdf 文件')
+      setUploadError('不支持的文件格式，请上传 txt、docx、pdf 或 xlsx 文件')
       return
     }
 
@@ -1642,7 +1646,17 @@ function IdeationPanel({
         throw new Error(uploadData.message || '上传失败')
       }
 
-      // 上传成功，开始提取框架
+      // 检查是否是分镜表
+      if (uploadData.contentType === 'storyboard' && uploadData.storyboardShots) {
+        setContentType('storyboard')
+        setStoryboardShots(uploadData.storyboardShots)
+        setShowStoryboardChoice(true)
+        await mutate()
+        return
+      }
+
+      // 普通故事，开始提取框架
+      setContentType('story')
       setExtracting(true)
       const extractRes = await fetch(`/api/projects/${projectId}/extract-framework`, {
         method: 'POST',
@@ -1686,6 +1700,36 @@ function IdeationPanel({
       }
 
       setShowPreview(false)
+      setShowUploadPanel(false)
+      await mutate()
+    } catch (e: any) {
+      setUploadError(e.message || '导入失败')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // 导入分镜表
+  async function handleImportStoryboard(mode: 'replace' | 'reference') {
+    if (!storyboardShots || storyboardShots.length === 0) return
+
+    setImporting(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/import-storyboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shots: storyboardShots,
+          mode,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok || data.error) {
+        throw new Error(data.message || '导入失败')
+      }
+
+      setShowStoryboardChoice(false)
       setShowUploadPanel(false)
       await mutate()
     } catch (e: any) {
@@ -1836,6 +1880,87 @@ function IdeationPanel({
     </div>
   )
 
+  // 分镜表导入选择模态框
+  const storyboardChoiceModal = showStoryboardChoice && storyboardShots && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-200 bg-white px-6 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-stone-800">检测到分镜表</h2>
+            <p className="text-sm text-stone-500">
+              已从文件「{uploadedFileName}」中识别出 {storyboardShots.length} 个镜头
+            </p>
+          </div>
+          <button
+            onClick={() => setShowStoryboardChoice(false)}
+            className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-6 p-6">
+          {/* 分镜预览 */}
+          <div className="rounded-lg border border-stone-200 p-4">
+            <h3 className="mb-3 text-sm font-semibold text-stone-700">分镜预览</h3>
+            <div className="max-h-60 overflow-y-auto space-y-2">
+              {storyboardShots.slice(0, 10).map((shot: any, idx: number) => (
+                <div key={idx} className="rounded-md bg-stone-50 p-2 text-xs">
+                  <span className="font-medium text-stone-800">镜头 {shot.shotId}</span>
+                  <span className="mx-2 text-stone-400">|</span>
+                  <span className="text-stone-600">{shot.description?.slice(0, 60)}...</span>
+                </div>
+              ))}
+              {storyboardShots.length > 10 && (
+                <p className="text-xs text-stone-400">...还有 {storyboardShots.length - 10} 个镜头</p>
+              )}
+            </div>
+          </div>
+
+          {/* 选择按钮 */}
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-stone-700">请选择导入方式：</p>
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                onClick={() => handleImportStoryboard('replace')}
+                disabled={importing}
+                className="flex flex-col items-center gap-2 rounded-lg border-2 border-stone-200 p-4 transition hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
+                  <FileSpreadsheet className="h-5 w-5 text-amber-600" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-stone-800">完全替代</p>
+                  <p className="text-xs text-stone-500">跳过 AI 生成，直接使用导入的分镜表</p>
+                </div>
+              </button>
+              <button
+                onClick={() => handleImportStoryboard('reference')}
+                disabled={importing}
+                className="flex flex-col items-center gap-2 rounded-lg border-2 border-stone-200 p-4 transition hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
+                  <Sparkles className="h-5 w-5 text-blue-600" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-stone-800">作为参考</p>
+                  <p className="text-xs text-stone-500">AI 基于导入的分镜表进行优化</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {importing && (
+            <div className="flex items-center justify-center gap-2 py-2 text-sm text-stone-500">
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+              导入中...
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
   if (step.status === 'PENDING') {
     const canGenerate = creativeInput.trim().length >= 10
     const isImportedFramework = project.frameworkSource === 'imported' || project.frameworkSource === 'mixed'
@@ -1859,7 +1984,7 @@ function IdeationPanel({
                 </div>
                 <div>
                   <p className="text-sm font-medium text-stone-800">已有故事？上传文件！</p>
-                  <p className="text-xs text-stone-500">支持 txt、docx、pdf 格式，系统将自动提取故事框架</p>
+                  <p className="text-xs text-stone-500">支持 txt、docx、pdf、xlsx 格式（xlsx 可导入分镜表）</p>
                 </div>
               </div>
               <label className="cursor-pointer rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600">
@@ -1873,7 +1998,7 @@ function IdeationPanel({
                 )}
                 <input
                   type="file"
-                  accept=".txt,.docx,.pdf"
+                  accept=".txt,.docx,.pdf,.xlsx"
                   onChange={handleFileSelect}
                   className="hidden"
                   disabled={uploading || extracting}
@@ -1966,6 +2091,7 @@ function IdeationPanel({
           </div>
         </div>
         {previewModal}
+        {storyboardChoiceModal}
       </div>
     )
   }
@@ -1975,6 +2101,7 @@ function IdeationPanel({
       <>
         <ProcessingBlock message="正在扩散创意方向..." />
         {previewModal}
+        {storyboardChoiceModal}
       </>
     )
   }
@@ -2109,6 +2236,7 @@ function IdeationPanel({
           </div>
         )}
         {previewModal}
+        {storyboardChoiceModal}
       </div>
     )
   }
@@ -2189,6 +2317,7 @@ function IdeationPanel({
           </button>
         </div>
         {previewModal}
+        {storyboardChoiceModal}
       </div>
     )
   }
@@ -2197,6 +2326,7 @@ function IdeationPanel({
     <>
       <ProcessingBlock message="暂无创意方向数据" />
       {previewModal}
+      {storyboardChoiceModal}
     </>
   )
 }
