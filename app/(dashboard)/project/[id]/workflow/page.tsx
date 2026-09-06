@@ -1,7 +1,7 @@
 'use client'
 // force-rebuild: 2026-06-21-1732
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, use } from 'react';
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -154,7 +154,8 @@ async function fetchWithRetry(url: string, init: RequestInit, maxRetries = 2): P
   throw lastErr ?? new Error('fetch failed after retries')
 }
 
-export default function WorkflowPage({ params }: { params: { id: string } }) {
+export default function WorkflowPage(props: { params: Promise<{ id: string }> }) {
+  const params = use(props.params);
   const { data, error, mutate, isLoading } = useSWR(`/api/projects/${params.id}`, fetcher, {
     refreshInterval: 3000,
   })
@@ -770,7 +771,7 @@ function WorkflowInspectorDrawerWrapper({
     setConfirmData({
       stepType: targetStepType,
       inputDeps: getInputDeps(targetStepType, project),
-      model: out.imageModel || out.modelId || 'gpt-image-2',
+      model: out.imageModel || out.modelId || 'gpt-image-1',
       aspectRatio: out.aspectRatio || project.selectedAspectRatio || '16:9',
       prompt,
       pointCost: 5,
@@ -1491,6 +1492,15 @@ function IdeationPanel({
   const [deepenMode, setDeepenMode] = useState(false)
   const [iterations, setIterations] = useState<any[]>([])
   const [isLoadingIterations, setIsLoadingIterations] = useState(false)
+  // 故事文件上传相关状态
+  const [showUploadPanel, setShowUploadPanel] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [extracting, setExtracting] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [extractedFramework, setExtractedFramework] = useState<any>(null)
+  const [uploadedFileName, setUploadedFileName] = useState<string>('')
+  const [uploadError, setUploadError] = useState<string>('')
+  const [showPreview, setShowPreview] = useState(false)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
@@ -1598,6 +1608,101 @@ function IdeationPanel({
     }, 800)
   }
 
+  // 故事文件上传处理
+  async function handleFileUpload(file: File) {
+    const allowedTypes = [
+      'text/plain',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/pdf',
+    ]
+    if (!allowedTypes.includes(file.type)) {
+      setUploadError('不支持的文件格式，请上传 txt、docx 或 pdf 文件')
+      return
+    }
+
+    setUploading(true)
+    setUploadError('')
+    setUploadedFileName(file.name)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const uploadRes = await fetch(`/api/projects/${projectId}/upload-story`, {
+        method: 'POST',
+        body: formData,
+      })
+      const uploadData = await uploadRes.json()
+
+      if (!uploadRes.ok || uploadData.error) {
+        if (uploadData.error === 'CONTENT_TOO_SHORT') {
+          setUploadError(uploadData.message)
+          return
+        }
+        throw new Error(uploadData.message || '上传失败')
+      }
+
+      // 上传成功，开始提取框架
+      setExtracting(true)
+      const extractRes = await fetch(`/api/projects/${projectId}/extract-framework`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const extractData = await extractRes.json()
+
+      if (!extractRes.ok || extractData.error) {
+        throw new Error(extractData.message || '提取失败')
+      }
+
+      setExtractedFramework(extractData.data)
+      setShowPreview(true)
+      await mutate()
+    } catch (e: any) {
+      setUploadError(e.message || '处理失败')
+    } finally {
+      setUploading(false)
+      setExtracting(false)
+    }
+  }
+
+  // 导入提取的框架
+  async function handleImportFramework() {
+    if (!extractedFramework?.framework) return
+
+    setImporting(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/import-framework`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          framework: extractedFramework.framework,
+          storyLength: extractedFramework.framework.storyLength,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok || data.error) {
+        throw new Error(data.message || '导入失败')
+      }
+
+      setShowPreview(false)
+      setShowUploadPanel(false)
+      await mutate()
+    } catch (e: any) {
+      setUploadError(e.message || '导入失败')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // 文件选择处理
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleFileUpload(file)
+    }
+  }
+
   async function saveStoryLength(key: string, opt?: typeof STORY_LENGTH_OPTIONS[0]) {
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/ideation`, {
@@ -1677,6 +1782,58 @@ function IdeationPanel({
             <span className="text-sm font-semibold text-stone-700">{project.title}</span>
           </div>
         </div>
+
+        {/* 已有故事？上传文件！ */}
+        {!isImportedFramework && (
+          <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/50 px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
+                  <Upload className="h-5 w-5 text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-stone-800">已有故事？上传文件！</p>
+                  <p className="text-xs text-stone-500">支持 txt、docx、pdf 格式，系统将自动提取故事框架</p>
+                </div>
+              </div>
+              <label className="cursor-pointer rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600">
+                {uploading || extracting ? (
+                  <span className="flex items-center gap-2">
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    {uploading ? '上传中...' : '提取中...'}
+                  </span>
+                ) : (
+                  '选择文件'
+                )}
+                <input
+                  type="file"
+                  accept=".txt,.docx,.pdf"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  disabled={uploading || extracting}
+                />
+              </label>
+            </div>
+            {uploadError && (
+              <div className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">
+                {uploadError}
+                {uploadError.includes('过短') && (
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => {
+                        setUploadError('')
+                        setShowUploadPanel(false)
+                      }}
+                      className="rounded-md bg-stone-900 px-3 py-1.5 text-xs text-white hover:bg-stone-800"
+                    >
+                      继续手动输入
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 框架导入兼容：显示导入来源 */}
         {isImportedFramework && (
@@ -1962,7 +2119,191 @@ function IdeationPanel({
     )
   }
 
-  return <ProcessingBlock message="暂无创意方向数据" />
+  return (
+    <>
+      <ProcessingBlock message="暂无创意方向数据" />
+
+      {/* 提取结果预览/编辑模态框 */}
+      {showPreview && extractedFramework && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-200 bg-white px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-stone-800">故事框架预览</h2>
+                <p className="text-sm text-stone-500">
+                  已从文件「{uploadedFileName}」提取框架，请检查并编辑
+                </p>
+              </div>
+              <button
+                onClick={() => setShowPreview(false)}
+                className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-6 p-6">
+              {/* 缺失字段提示 */}
+              {extractedFramework.missingFields?.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm font-medium text-amber-800">以下信息在故事中缺失，已自动补充：</p>
+                  <ul className="mt-2 list-inside list-disc text-sm text-amber-700">
+                    {extractedFramework.missingFields.map((field: string, idx: number) => (
+                      <li key={idx}>{field}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* 框架内容预览 */}
+              <FrameworkPreview framework={extractedFramework.framework} />
+
+              {/* 操作按钮 */}
+              <div className="flex justify-end gap-3 border-t border-stone-200 pt-4">
+                <button
+                  onClick={() => setShowPreview(false)}
+                  className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleImportFramework}
+                  disabled={importing}
+                  className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+                >
+                  {importing ? (
+                    <>
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      导入中...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-4 w-4" />
+                      确认导入
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+/** 框架预览组件 */
+function FrameworkPreview({ framework }: { framework: any }) {
+  if (!framework) return null
+
+  return (
+    <div className="space-y-6">
+      {/* 灵感阐释 */}
+      {framework.inspiration && (
+        <div className="rounded-lg border border-stone-200 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-stone-700">灵感阐释</h3>
+          <p className="text-sm leading-relaxed text-stone-600">{framework.inspiration}</p>
+        </div>
+      )}
+
+      {/* 风格规范 */}
+      {framework.styleGuide && (
+        <div className="rounded-lg border border-stone-200 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-stone-700">风格规范</h3>
+          <p className="text-sm leading-relaxed text-stone-600">{framework.styleGuide}</p>
+        </div>
+      )}
+
+      {/* 背景环境 */}
+      {framework.background && (
+        <div className="rounded-lg border border-stone-200 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-stone-700">背景环境设定</h3>
+          <p className="text-sm leading-relaxed text-stone-600">{framework.background}</p>
+        </div>
+      )}
+
+      {/* 角色设定 */}
+      {framework.characters?.length > 0 && (
+        <div className="rounded-lg border border-stone-200 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-stone-700">角色设定</h3>
+          <div className="space-y-3">
+            {framework.characters.map((char: any, idx: number) => (
+              <div key={idx} className="rounded-md bg-stone-50 p-3">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-stone-800">{char.name}</span>
+                  <span className="rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-600">
+                    {char.role}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-stone-600">{char.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 故事梗概 */}
+      {framework.synopsis && (
+        <div className="rounded-lg border border-stone-200 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-stone-700">故事梗概</h3>
+          <p className="text-sm leading-relaxed text-stone-600">{framework.synopsis}</p>
+        </div>
+      )}
+
+      {/* 幕结构 */}
+      {framework.acts?.length > 0 && (
+        <div className="rounded-lg border border-stone-200 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-stone-700">
+            幕结构（{framework.acts.length} 幕，预估 {framework.totalDuration || '未知'}）
+          </h3>
+          <div className="space-y-3">
+            {framework.acts.map((act: any, idx: number) => (
+              <div key={idx} className="rounded-md bg-stone-50 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-stone-800">
+                    第{act.actNo || idx + 1}幕：{act.title}
+                  </span>
+                  <div className="flex items-center gap-2 text-xs text-stone-500">
+                    <span>{act.estimatedDuration}</span>
+                    <span>·</span>
+                    <span>{act.estimatedShots} 镜</span>
+                  </div>
+                </div>
+                <p className="mt-1 text-sm text-stone-600">{act.content}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+                    {act.pacing}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 环境列表 */}
+      {framework.environments?.length > 0 && (
+        <div className="rounded-lg border border-stone-200 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-stone-700">环境场景</h3>
+          <div className="flex flex-wrap gap-2">
+            {framework.environments.map((env: string, idx: number) => (
+              <span key={idx} className="rounded-full bg-blue-100 px-3 py-1 text-xs text-blue-700">
+                {env}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 整体节奏 */}
+      {framework.overallPacing && (
+        <div className="rounded-lg border border-stone-200 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-stone-700">整体节奏策略</h3>
+          <p className="text-sm leading-relaxed text-stone-600">{framework.overallPacing}</p>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** 将纯文本按换行符格式化为段落，对话行自动单独成段 */
@@ -1998,10 +2339,10 @@ function FormattedText({ text, className }: { text: string; className?: string }
               )
             })}
           </div>
-        )
+        );
       })}
     </div>
-  )
+  );
 }
 
 function DeepeningStatus({ deepening }: { deepening?: any }) {
@@ -3806,7 +4147,7 @@ function CharacterPanel({
           const isAssigning = characterId && assigningCharacterId === characterId
           const justAssigned = characterId && justAssignedCharacterId === characterId
           const cardRatio = asset.metadata?.aspectRatio || '16:9'
-          // 默认 gpt-image-2（除非用户手动选择其他模型）
+          // 默认 gpt-image-1（除非用户手动选择其他模型）
           const cardModel = IMAGE_MODELS.primary
           return (
             <div
@@ -4253,7 +4594,7 @@ function ConceptPanel({
                 }
                 const isRegenerating = regeneratingId === asset.id
                 const cardRatio = asset.metadata?.aspectRatio || '16:9'
-                // 默认 gpt-image-2（除非用户手动选择其他模型）
+                // 默认 gpt-image-1（除非用户手动选择其他模型）
                 const cardModel = IMAGE_MODELS.primary
                 return (
                   <div key={asset.id} className="group relative overflow-hidden rounded-lg border border-stone-200">
@@ -4804,7 +5145,7 @@ function StoryboardPanel({
                   const generationIsStale = isServerGenerating && generationStartedAt > 0 && Date.now() - generationStartedAt > 12 * 60 * 1000
                   const blocksGeneration = isServerGenerating && !generationIsStale
                   const cardRatio = asset?.metadata?.aspectRatio || '16:9'
-                  // 默认 gpt-image-2（除非用户手动选择其他模型）
+                  // 默认 gpt-image-1（除非用户手动选择其他模型）
                   const cardModel = IMAGE_MODELS.primary
                   const mappedChars = shot.characters?.map((cid: string) => characterMap[cid] || cid).join('、')
 

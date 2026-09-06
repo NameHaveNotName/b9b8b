@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { Film, Eye, EyeOff } from 'lucide-react'
+import { Film, Eye, EyeOff, ArrowRight } from 'lucide-react'
 
 export default function LoginForm() {
   const router = useRouter()
@@ -206,6 +207,16 @@ export default function LoginForm() {
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
+            {!isRegister && (
+              <div className="mt-1 text-right">
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-stone-500 hover:text-stone-700 hover:underline"
+                >
+                  忘记密码？
+                </Link>
+              </div>
+            )}
           </div>
 
           {isRegister && (
