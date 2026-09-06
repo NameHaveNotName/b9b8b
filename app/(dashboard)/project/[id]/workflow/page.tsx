@@ -1770,6 +1770,72 @@ function IdeationPanel({
 
   const displayDirections = step.status === 'COMPLETED' ? localDirections : directions
 
+  // 提取结果预览/编辑模态框（全局渲染，不受 step.status 影响）
+  const previewModal = showPreview && extractedFramework && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-200 bg-white px-6 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-stone-800">故事框架预览</h2>
+            <p className="text-sm text-stone-500">
+              已从文件「{uploadedFileName}」提取框架，请检查并编辑
+            </p>
+          </div>
+          <button
+            onClick={() => setShowPreview(false)}
+            className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-6 p-6">
+          {/* 缺失字段提示 */}
+          {extractedFramework.missingFields?.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-medium text-amber-800">以下信息在故事中缺失，已自动补充：</p>
+              <ul className="mt-2 list-inside list-disc text-sm text-amber-700">
+                {extractedFramework.missingFields.map((field: string, idx: number) => (
+                  <li key={idx}>{field}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* 框架内容预览 */}
+          <FrameworkPreview framework={extractedFramework.framework} />
+
+          {/* 操作按钮 */}
+          <div className="flex justify-end gap-3 border-t border-stone-200 pt-4">
+            <button
+              onClick={() => setShowPreview(false)}
+              className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-50"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleImportFramework}
+              disabled={importing}
+              className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+            >
+              {importing ? (
+                <>
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  导入中...
+                </>
+              ) : (
+                <>
+                  <Check className="h-4 w-4" />
+                  确认导入
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
   if (step.status === 'PENDING') {
     const canGenerate = creativeInput.trim().length >= 10
     const isImportedFramework = project.frameworkSource === 'imported' || project.frameworkSource === 'mixed'
@@ -1899,12 +1965,18 @@ function IdeationPanel({
             <CostBadge cost={DEFAULT_GENERATE_COST} />
           </div>
         </div>
+        {previewModal}
       </div>
     )
   }
 
   if (step.status === 'PROCESSING') {
-    return <ProcessingBlock message="正在扩散创意方向..." />
+    return (
+      <>
+        <ProcessingBlock message="正在扩散创意方向..." />
+        {previewModal}
+      </>
+    )
   }
 
   if (step.status === 'COMPLETED' && directions.length > 0) {
@@ -2036,6 +2108,7 @@ function IdeationPanel({
             加载历史版本...
           </div>
         )}
+        {previewModal}
       </div>
     )
   }
@@ -2115,6 +2188,7 @@ function IdeationPanel({
             )}
           </button>
         </div>
+        {previewModal}
       </div>
     )
   }
@@ -2122,72 +2196,7 @@ function IdeationPanel({
   return (
     <>
       <ProcessingBlock message="暂无创意方向数据" />
-
-      {/* 提取结果预览/编辑模态框 */}
-      {showPreview && extractedFramework && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-200 bg-white px-6 py-4">
-              <div>
-                <h2 className="text-lg font-semibold text-stone-800">故事框架预览</h2>
-                <p className="text-sm text-stone-500">
-                  已从文件「{uploadedFileName}」提取框架，请检查并编辑
-                </p>
-              </div>
-              <button
-                onClick={() => setShowPreview(false)}
-                className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="space-y-6 p-6">
-              {/* 缺失字段提示 */}
-              {extractedFramework.missingFields?.length > 0 && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <p className="text-sm font-medium text-amber-800">以下信息在故事中缺失，已自动补充：</p>
-                  <ul className="mt-2 list-inside list-disc text-sm text-amber-700">
-                    {extractedFramework.missingFields.map((field: string, idx: number) => (
-                      <li key={idx}>{field}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* 框架内容预览 */}
-              <FrameworkPreview framework={extractedFramework.framework} />
-
-              {/* 操作按钮 */}
-              <div className="flex justify-end gap-3 border-t border-stone-200 pt-4">
-                <button
-                  onClick={() => setShowPreview(false)}
-                  className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-50"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleImportFramework}
-                  disabled={importing}
-                  className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
-                >
-                  {importing ? (
-                    <>
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      导入中...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="h-4 w-4" />
-                      确认导入
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {previewModal}
     </>
   )
 }
