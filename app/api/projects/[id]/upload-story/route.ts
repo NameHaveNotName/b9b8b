@@ -21,10 +21,10 @@ const STORYBOARD_COLUMN_MAP = {
   timecode: ['时间码', '时间', 'timecode', 'time'],
   duration: ['时长', 'duration', '秒'],
   narration: ['旁白', '台词', '台词/旁白', 'narration', 'dialogue'],
-  cameraMove: ['运镜', '运镜描述', '镜头运动', 'camera', 'camera_move', 'movement'],
-  description: ['画面描述', '描述', '画面', 'description', 'scene'],
-  visualDetail: ['视觉细节', '细节', '备注', 'visual', 'detail', 'note'],
-  transition: ['剪辑点', '转场', 'transition', 'cut'],
+  cameraMove: ['运镜', '运镜描述', '镜头运动', 'camera', 'camera_move', 'movement', '景别', '景别／运镜', '景别/运镜'],
+  description: ['画面描述', '描述', '画面', 'description', 'scene', '镜头画面描述', '镜头画面'],
+  visualDetail: ['视觉细节', '细节', '备注', 'visual', 'detail', 'note', 'AI镜头画面'],
+  transition: ['剪辑点', '转场', 'transition', 'cut', '章节'],
 }
 
 interface StoryboardShot {
@@ -84,25 +84,26 @@ async function parseXlsx(buffer: Buffer): Promise<{ type: 'storyboard' | 'text',
     throw new Error('Excel 文件内容为空或格式不正确')
   }
 
-  // 查找表头行（第一行非空行）
+  // 方法1：遍历所有行，查找包含"镜号"等关键词的表头行
   let headerRowIndex = -1
-  for (let i = 0; i < Math.min(5, data.length); i++) {
-    if (data[i] && data[i].length >= 3) {
+  let columnMap: Record<string, number> | null = null
+
+  for (let i = 0; i < Math.min(30, data.length); i++) {
+    const row = data[i]
+    if (!row || row.length < 3) continue
+
+    const headers = row.map((h: any) => String(h || '').trim())
+    const detectedMap = detectStoryboardColumns(headers)
+    if (detectedMap) {
       headerRowIndex = i
+      columnMap = detectedMap
       break
     }
   }
 
-  if (headerRowIndex === -1) {
-    throw new Error('Excel 文件内容为空或格式不正确')
-  }
-
-  // 方法1：尝试通过表头列名检测
-  const headers = (data[headerRowIndex] || []).map((h: any) => String(h || '').trim())
-  const columnMap = detectStoryboardColumns(headers)
-
-  if (columnMap) {
+  if (headerRowIndex >= 0 && columnMap) {
     // 检测到分镜表格式（有表头）
+    console.log(`[UPLOAD-STORY] 检测到表头行在第 ${headerRowIndex} 行`)
     const shots: StoryboardShot[] = []
     for (let i = headerRowIndex + 1; i < data.length; i++) {
       const row = data[i]
@@ -110,6 +111,9 @@ async function parseXlsx(buffer: Buffer): Promise<{ type: 'storyboard' | 'text',
 
       const shotId = columnMap.shotId !== undefined ? String(row[columnMap.shotId] || '').trim() : ''
       if (!shotId) continue
+
+      // 跳过非数据行（如"三、分镜表"等章节标题）
+      if (shotId.length > 10 || shotId.includes('分镜表') || shotId.includes('、')) continue
 
       const timecode = columnMap.timecode !== undefined ? String(row[columnMap.timecode] || '').trim() : ''
       const duration = columnMap.duration !== undefined ? parseTimecodeToSeconds(String(row[columnMap.duration] || '')) : 5
@@ -143,11 +147,24 @@ async function parseXlsx(buffer: Buffer): Promise<{ type: 'storyboard' | 'text',
   }
 
   // 方法2：检测是否为无表头的分镜表（数据格式：编号 | 时间码 | 时长 | ...）
-  // 检查前几行是否符合分镜表数据格式
-  const isStoryboardData = checkIfStoryboardData(data, headerRowIndex)
+  // 找到第一个数据行
+  let dataStartIndex = 0
+  for (let i = 0; i < Math.min(10, data.length); i++) {
+    const row = data[i]
+    if (row && row.length >= 3) {
+      const col0 = String(row[0] || '').trim()
+      // 检查是否是数字编号
+      if (/^\d{1,4}$/.test(col0)) {
+        dataStartIndex = i
+        break
+      }
+    }
+  }
+
+  const isStoryboardData = checkIfStoryboardData(data, dataStartIndex)
   if (isStoryboardData) {
     const shots: StoryboardShot[] = []
-    for (let i = headerRowIndex; i < data.length; i++) {
+    for (let i = dataStartIndex; i < data.length; i++) {
       const row = data[i]
       if (!row || row.length < 3) continue
 
