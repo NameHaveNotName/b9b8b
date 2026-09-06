@@ -1710,7 +1710,7 @@ function IdeationPanel({
   }
 
   // 导入分镜表
-  async function handleImportStoryboard(mode: 'replace' | 'reference') {
+  async function handleImportStoryboard(mode: 'ai_complete' | 'skip_framework') {
     if (!storyboardShots || storyboardShots.length === 0) return
 
     setImporting(true)
@@ -1922,29 +1922,29 @@ function IdeationPanel({
             <p className="text-sm font-medium text-stone-700">请选择导入方式：</p>
             <div className="grid grid-cols-2 gap-4">
               <button
-                onClick={() => handleImportStoryboard('replace')}
+                onClick={() => handleImportStoryboard('ai_complete')}
                 disabled={importing}
                 className="flex flex-col items-center gap-2 rounded-lg border-2 border-stone-200 p-4 transition hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50"
               >
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
-                  <FileSpreadsheet className="h-5 w-5 text-amber-600" />
+                  <Sparkles className="h-5 w-5 text-amber-600" />
                 </div>
                 <div className="text-center">
-                  <p className="text-sm font-medium text-stone-800">完全替代</p>
-                  <p className="text-xs text-stone-500">跳过 AI 生成，直接使用导入的分镜表</p>
+                  <p className="text-sm font-medium text-stone-800">AI 补完框架</p>
+                  <p className="text-xs text-stone-500">AI 从分镜表提取框架、生成风格和人物提示词，你来生图</p>
                 </div>
               </button>
               <button
-                onClick={() => handleImportStoryboard('reference')}
+                onClick={() => handleImportStoryboard('skip_framework')}
                 disabled={importing}
                 className="flex flex-col items-center gap-2 rounded-lg border-2 border-stone-200 p-4 transition hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50"
               >
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
-                  <Sparkles className="h-5 w-5 text-blue-600" />
+                  <FileSpreadsheet className="h-5 w-5 text-blue-600" />
                 </div>
                 <div className="text-center">
-                  <p className="text-sm font-medium text-stone-800">作为参考</p>
-                  <p className="text-xs text-stone-500">AI 基于导入的分镜表进行优化</p>
+                  <p className="text-sm font-medium text-stone-800">跳过框架，直接生图</p>
+                  <p className="text-xs text-stone-500">隐藏创意扩散→宣传片，直接进入分镜生图</p>
                 </div>
               </button>
             </div>
