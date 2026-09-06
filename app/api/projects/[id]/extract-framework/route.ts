@@ -64,6 +64,14 @@ const EXTRACT_PROMPT = `角色：高端艺术电影 AI 编剧与结构顾问
 用户提供的故事文本：
 {{USER_INPUT}}`
 
+// 重试配置
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 2000
+
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params
   const userId = await getCurrentUserId()
@@ -87,57 +95,77 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     }, { status: 400 })
   }
 
-  try {
-    const textClient = await getTextClient()
+  let lastError: Error | null = null
 
-    const prompt = EXTRACT_PROMPT.replace('{{USER_INPUT}}', project.rawIdea)
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        console.log(`[EXTRACT-FRAMEWORK] 重试第 ${attempt} 次，等待 ${RETRY_DELAY_MS}ms`)
+        await sleep(RETRY_DELAY_MS * attempt)
+      }
 
-    console.log('[EXTRACT-FRAMEWORK] 开始提取，内容长度:', project.rawIdea.length)
-    const resultText = await textClient.generate(prompt, {
-      temperature: 0.3,
-      maxTokens: 12000,
-    })
+      const textClient = await getTextClient()
+      const prompt = EXTRACT_PROMPT.replace('{{USER_INPUT}}', project.rawIdea)
 
-    console.log('[EXTRACT-FRAMEWORK] LLM 返回长度:', resultText.length)
+      console.log('[EXTRACT-FRAMEWORK] 开始提取，内容长度:', project.rawIdea.length, 'attempt:', attempt + 1)
+      const resultText = await textClient.generate(prompt, {
+        temperature: 0.3,
+        maxTokens: 12000,
+      })
 
-    const parsed = extractJsonFromMarkdown(resultText)
+      console.log('[EXTRACT-FRAMEWORK] LLM 返回长度:', resultText.length)
 
-    if (!parsed.framework) {
-      throw new Error('LLM 未返回有效的 framework 结构')
+      const parsed = extractJsonFromMarkdown(resultText)
+
+      if (!parsed.framework) {
+        throw new Error('LLM 未返回有效的 framework 结构')
+      }
+
+      // 确保必要字段存在
+      const framework = parsed.framework
+      if (!framework.characters || !Array.isArray(framework.characters)) {
+        framework.characters = []
+      }
+      if (!framework.acts || !Array.isArray(framework.acts)) {
+        framework.acts = []
+      }
+      if (!framework.environments || !Array.isArray(framework.environments)) {
+        framework.environments = []
+      }
+
+      // 自动判断 storyLength
+      const contentLength = project.rawIdea.length
+      if (!framework.storyLength) {
+        if (contentLength < 500) framework.storyLength = 'sketch'
+        else if (contentLength < 1500) framework.storyLength = 'short'
+        else if (contentLength < 5000) framework.storyLength = 'medium'
+        else if (contentLength < 15000) framework.storyLength = 'feature'
+        else framework.storyLength = 'epic'
+      }
+
+      const result = {
+        framework,
+        missingFields: parsed.missingFields || [],
+        supplementedContent: parsed.supplementedContent || {},
+        rawText: resultText.slice(0, 3000),
+      }
+
+      console.log('[EXTRACT-FRAMEWORK] 提取成功，attempt:', attempt + 1)
+      return NextResponse.json({ success: true, data: result })
+    } catch (e: any) {
+      lastError = e
+      console.error(`[EXTRACT-FRAMEWORK] attempt ${attempt + 1} 失败:`, e.message)
+
+      // 客户端错误不重试
+      if (e.message?.includes('401') || e.message?.includes('403') || e.message?.includes('400')) {
+        break
+      }
     }
-
-    // 确保必要字段存在
-    const framework = parsed.framework
-    if (!framework.characters || !Array.isArray(framework.characters)) {
-      framework.characters = []
-    }
-    if (!framework.acts || !Array.isArray(framework.acts)) {
-      framework.acts = []
-    }
-    if (!framework.environments || !Array.isArray(framework.environments)) {
-      framework.environments = []
-    }
-
-    // 自动判断 storyLength
-    const contentLength = project.rawIdea.length
-    if (!framework.storyLength) {
-      if (contentLength < 500) framework.storyLength = 'sketch'
-      else if (contentLength < 1500) framework.storyLength = 'short'
-      else if (contentLength < 5000) framework.storyLength = 'medium'
-      else if (contentLength < 15000) framework.storyLength = 'feature'
-      else framework.storyLength = 'epic'
-    }
-
-    const result = {
-      framework,
-      missingFields: parsed.missingFields || [],
-      supplementedContent: parsed.supplementedContent || {},
-      rawText: resultText.slice(0, 3000),
-    }
-
-    return NextResponse.json({ success: true, data: result })
-  } catch (e: any) {
-    console.error('[EXTRACT-FRAMEWORK] Error:', e.message)
-    return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
+
+  console.error('[EXTRACT-FRAMEWORK] 所有重试均失败')
+  return NextResponse.json({
+    error: 'API_001',
+    message: lastError?.message || '提取失败，请稍后重试'
+  }, { status: 500 })
 }
