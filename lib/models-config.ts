@@ -4,7 +4,7 @@
 
 export const IMAGE_MODELS = {
   // 主模型（默认）
-  primary: 'gpt-image-2' as const,
+  primary: 'gpt-image-1' as const,
 
   // 全部可用模型
   available: [
@@ -17,9 +17,17 @@ export const IMAGE_MODELS = {
       supportedModes: ['text-to-image', 'image-to-image', 'multi-image'],
     },
     {
+      id: 'gpt-image-1',
+      label: 'GPT Image 1 · 默认',
+      provider: 'OpenAI（经 OpenLux）',
+      tags: ['默认', '高精度', '生成与编辑'],
+      defaultAspectRatio: '16:9',
+      supportedModes: ['text-to-image', 'image-to-image'],
+    },
+    {
       id: 'gpt-image-2',
       label: 'GPT Image 2 · 高精度',
-      provider: 'OpenAI',
+      provider: 'OpenAI（经 OpenLux）',
       tags: ['高精度', 'edits', 'variations'],
       defaultAspectRatio: '16:9',
       supportedModes: ['text-to-image', 'image-to-image'],
@@ -78,6 +86,7 @@ export type ImageModelId = typeof IMAGE_MODELS.available[number]['id'];
 /** 模型简称映射（角标显示用） */
 export const MODEL_SHORT_NAME: Record<string, string> = {
   'doubao-seedream-4.5': '即梦4.5',
+  'gpt-image-1': 'GPT-1',
   'gpt-image-2': 'GPT-2',
   'flux.1-kontext-pro': 'Flux-K',
   'kling-omni-image': '可灵O',
@@ -95,6 +104,14 @@ export const MODEL_SIZE_MAP: Record<string, Record<string, string>> = {
     '4:3': '1024x768',
     '3:4': '768x1024',
     '21:9': '1344x576',
+  },
+  'gpt-image-1': {
+    '16:9': '1536x1024',
+    '9:16': '1024x1536',
+    '1:1': '1024x1024',
+    '4:3': '1536x1024',
+    '3:4': '1024x1536',
+    '21:9': '1536x1024',
   },
   'gpt-image-2': {
     '16:9': '1792x1024',
@@ -200,12 +217,12 @@ Object.defineProperty(IMAGE_MODELS, 'KEYFRAME', {
 
 export const TEXT_MODELS = {
   // 创意扩散、框架搭建、分镜设计：推荐 DeepSeek（便宜，中文好）
-  IDEATION: 'deepseek-chat',
-  FRAMEWORK: 'deepseek-chat',
-  STORYBOARD: 'deepseek-chat',
+  IDEATION: 'deepseek-v3',
+  FRAMEWORK: 'deepseek-v3',
+  STORYBOARD: 'deepseek-v3',
 
   // 风格统一：推荐 DeepSeek（JSON 结构化输出稳定，中文理解好）
-  STYLE: 'deepseek-chat',
+  STYLE: 'deepseek-v3',
 
   // 评测、一致性检测：推荐 GPT-4o（结构化输出稳定）
   REVIEW: 'gpt-4o-mini',
@@ -215,45 +232,49 @@ export const TEXT_MODELS = {
 
   // 工作指令.txt（Round 7）：宣传片每个 5s 片段的视频提示词生成
   // 需要输出 JSON {videoPrompt, cameraMotion, duration}，DeepSeek 即可
-  TRAILER_PROMPT: 'deepseek-chat',
+  TRAILER_PROMPT: 'deepseek-v3',
   TRAILER_PROMPT_FALLBACK: 'gpt-4o-mini',
 
   // 多模态视觉文本生成（用户上传参考图时使用）
   VISION: 'gpt-4o-mini',
 
   // 音色匹配：使用 MiniMax M3（角色描述 → 最佳音色 ID）
-  VOICE_ASSIGNMENT: 'deepseek-chat',
+  VOICE_ASSIGNMENT: 'deepseek-v3',
 }
 
 export const VIDEO_MODELS = {
-  // 2026-06-24: 通义万象 wan2.5-i2v-preview 已验证可用（yunwu.ai /alibailian/...）
-  //   primary  → 通义万象 wan2.5-i2v-preview（POST /alibailian/api/v1/services/aigc/video-generation/video-synthesis）
-  //   fallback → Veo veo3-fast-frames（当前 503 无渠道，保留待恢复）
+  // 2026-08-27: 默认切换到 OpenLux 的 Vidu Q2 Turbo。
+  //   primary  → viduq2-turbo（POST /ent/v2/img2video）
+  //   query    → GET /ent/v2/tasks/{id}/creations
   //   mockMode 保留，作为最后兜底（Ken Burns）。
   trailer: {
-    primary: 'wan2.5-i2v-preview',
-    fallback: 'veo3-fast-frames',
+    primary: 'viduq2-turbo',
+    fallback: 'wan2.5-i2v-preview',
     mockMode: false,
     duration: 5,
     aspectRatio: '16:9',
   },
 
-  // 2026-06-24: 直生视频同步接入通义万象
-  // 基于供应商代理实际支持的端点配置
-  //   - Wan: /alibailian/api/v1/services/aigc/video-generation/video-synthesis ✅ 已验证
-  //   - Hailuo: /minimax/v1/video_generation，支持 first_frame_image + last_frame_image ✅ 已验证
-  //   - Veo: 503 渠道未开通，暂不配置
-  //   - Jimeng: 503 渠道未开通，暂不配置
+  // Vidu 为 OpenLux 默认路由；Wan/Hailuo 保留为旧项目兼容选项，需按 OpenLux
+  // 当前渠道支持情况另行验证，不能沿用旧聚合供应商的“已验证”结论。
   direct: {
-    primary: 'wan2.5-i2v-preview',
+    primary: 'viduq2-turbo',
     available: [
+      {
+        id: 'viduq2-turbo',
+        label: 'Vidu Q2 Turbo · OpenLux',
+        short: 'Vidu Q2',
+        provider: 'Vidu（经 OpenLux）',
+        tags: ['图生视频', '快速', '默认'],
+        supportedModes: ['first-frame'],
+      },
       {
         id: 'wan2.5-i2v-preview',
         label: '通义万象 Wan 2.5 I2V · 阿里',
         short: '万象',
         provider: 'Alibaba',
         price: 0.5,
-        tags: ['图生视频', '已验证', '音频'],
+        tags: ['图生视频', '兼容选项', '音频'],
         supportedModes: ['first-frame'],
       },
       {
@@ -262,7 +283,7 @@ export const VIDEO_MODELS = {
         short: '海螺',
         provider: 'MiniMax',
         price: 3.2,
-        tags: ['首尾帧', '运动自然', '高性价比', '已验证'],
+        tags: ['首尾帧', '运动自然', '兼容选项'],
         supportedModes: ['first-last-frame', 'first-frame'],
       },
     ] as const,
@@ -288,6 +309,7 @@ export const ASPECT_RATIO_OPTIONS = [
 
 /** 视频模型简称映射 */
 export const VIDEO_MODEL_SHORT_NAME: Record<string, string> = {
+  'viduq2-turbo': 'Vidu Q2',
   'wan2.5-i2v-preview': '万象',
   'minimax-hailuo-2.3': '海螺',
 };

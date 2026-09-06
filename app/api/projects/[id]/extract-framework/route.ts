@@ -65,8 +65,8 @@ const EXTRACT_PROMPT = `角色：高端艺术电影 AI 编剧与结构顾问
 {{USER_INPUT}}`
 
 // 重试配置
-const MAX_RETRIES = 2
-const RETRY_DELAY_MS = 2000
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 5000
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -156,9 +156,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       lastError = e
       console.error(`[EXTRACT-FRAMEWORK] attempt ${attempt + 1} 失败:`, e.message)
 
-      // 客户端错误不重试
+      // 客户端错误不重试（但429限流要重试）
       if (e.message?.includes('401') || e.message?.includes('403') || e.message?.includes('400')) {
-        break
+        if (!e.message?.includes('429')) {
+          break
+        }
       }
     }
   }
