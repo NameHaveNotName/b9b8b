@@ -4961,10 +4961,44 @@ function StoryboardPanel({
     window.addEventListener('customdragmove', handleDragMove as EventListener)
     window.addEventListener('customdrop', handleCustomDrop as EventListener)
     window.addEventListener('customdragend', handleDragEnd as EventListener)
+
+    // [DRAG-REF] 监听参考图拖拽事件，转换为 customdragmove/customdrop
+    let currentRefItem: { url: string; id: string } | null = null
+    function handleRefDragStart(e: Event) {
+      const detail = (e as CustomEvent).detail
+      currentRefItem = { url: detail.url, id: detail.id }
+    }
+    function handleRefDragOver(e: DragEvent) {
+      if (!currentRefItem) return
+      window.dispatchEvent(new CustomEvent('customdragmove', {
+        detail: { clientX: e.clientX, clientY: e.clientY }
+      }))
+    }
+    function handleRefDrop(e: DragEvent) {
+      if (!currentRefItem) return
+      e.preventDefault()
+      window.dispatchEvent(new CustomEvent('customdrop', {
+        detail: { clientX: e.clientX, clientY: e.clientY, item: currentRefItem }
+      }))
+      currentRefItem = null
+    }
+    function handleRefDragEnd() {
+      currentRefItem = null
+      window.dispatchEvent(new CustomEvent('customdragend'))
+    }
+    window.addEventListener('refdragstart', handleRefDragStart as EventListener)
+    window.addEventListener('dragover', handleRefDragOver as EventListener)
+    window.addEventListener('drop', handleRefDrop as EventListener)
+    window.addEventListener('refdragend', handleRefDragEnd as EventListener)
+
     return () => {
       window.removeEventListener('customdragmove', handleDragMove as EventListener)
       window.removeEventListener('customdrop', handleCustomDrop as EventListener)
       window.removeEventListener('customdragend', handleDragEnd as EventListener)
+      window.removeEventListener('refdragstart', handleRefDragStart as EventListener)
+      window.removeEventListener('dragover', handleRefDragOver as EventListener)
+      window.removeEventListener('drop', handleRefDrop as EventListener)
+      window.removeEventListener('refdragend', handleRefDragEnd as EventListener)
     }
   }, [])
 

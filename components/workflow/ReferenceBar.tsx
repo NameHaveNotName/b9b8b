@@ -205,6 +205,18 @@ export default function ReferenceBar({ projectId, defaultExpanded = false }: Ref
                       alt="Reference"
                       className="h-full w-full object-cover"
                       loading="lazy"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', ref.url)
+                        e.dataTransfer.effectAllowed = 'copy'
+                        // 触发自定义事件，通知 workflow 页面
+                        window.dispatchEvent(new CustomEvent('refdragstart', {
+                          detail: { url: ref.url, id: ref.id, labels: ref.metadata?.labels }
+                        }))
+                      }}
+                      onDragEnd={() => {
+                        window.dispatchEvent(new CustomEvent('refdragend'))
+                      }}
                     />
                     <button
                       onClick={() => deleteRef(ref.id)}
