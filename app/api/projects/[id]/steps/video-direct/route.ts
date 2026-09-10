@@ -6,6 +6,7 @@ process.env.TEMP_DIR = '/tmp'
 import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { startStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
@@ -154,7 +155,8 @@ async function backgroundComposeDirectVideo(projectId: string) {
 // ============================================================
 // POST: 主入口（支持 action 分发）
 // ============================================================
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -169,7 +171,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return access.response
   }
 
-  if (!await canExecuteStep(params.id, 'VIDEO_DIRECT')) {
+  if (!(await canExecuteStep(params.id, 'VIDEO_DIRECT'))) {
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
@@ -239,7 +241,7 @@ async function handleGenerateDirectPrompts(projectId: string, stepId: string, us
       data: {
         status: 'PENDING' as any,
         outputData: {
-          ...(await prisma.workflowStep.findUnique({ where: { id: stepId } }))?.outputData as any || {},
+          ...((await prisma.workflowStep.findUnique({ where: { id: stepId } }))?.outputData as any || {}),
           segmentPromptsGenerated: true,
           segmentCount: segments.length,
         },
@@ -506,7 +508,11 @@ async function handleGenerateDirectBgm(projectId: string, stepId: string, userId
 // ============================================================
 // GET
 // ============================================================
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const access = await checkProjectPermission(params.id)
+  if (!access.allowed) return access.response
+
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'VIDEO_DIRECT' } }
   })

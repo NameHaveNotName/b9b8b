@@ -5,7 +5,8 @@
 import fs from 'fs'
 import path from 'path'
 
-const MINIMAX_API_KEY = 'sk-cp-PGjJcZY1YinI9d-WpH_6VY49xmIYlnvGKlQnO9QCq3y4hq-cGclDWFKU4Rj9tjYdTYYbViRRPnFqaeTpoD6WvhgBf2lcBaIEggqAjl5cQf4ervVWCfwKk1A'
+const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY
+if (!MINIMAX_API_KEY) throw new Error('Missing required environment variable: MINIMAX_API_KEY')
 
 // MiniMax 官方 endpoint（根据文档）
 const OFFICIAL_URL = 'https://api.minimax.chat/v1/music_generation'

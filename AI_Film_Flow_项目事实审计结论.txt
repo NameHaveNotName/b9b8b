@@ -1,0 +1,357 @@
+AI Film Flow 项目事实审计结论
+
+审计日期：2026-08-30（Asia/Shanghai）
+审计对象：当前工作区 D:\.pogget\user_storage\u_461180\b9b8b
+Git 基线：main / 71450b2，共 273 个提交
+审计原则：代码、数据库模型、API 路由、脚本、测试产物和 Git 历史优先；README、宣传文字、旧审计报告和代码注释只作为待验证线索。
+
+一、先给结论
+
+1. 这个项目不是“12 步全部完成的 AI 电影平台”。数据库枚举定义了 12 步，但当前前端只展示 9 步：创意扩散、框架搭建、风格统一、人物设计、概念图、宣传片、分镜设计、生成尾帧、直生视频。VIDEO_RENDER（AI 渲染）、CAMERA（电脑运镜）、REVIEW（评测优化）只有枚举/模型或提示词预留，没有对应完整 API 与界面工作流。
+
+2. 代码中真正形成的主链是：用户创意 → 创意方向 → 叙事框架 → 风格/角色/概念图或分镜 → 首帧/可选尾帧 → 分段图生视频 → FFmpeg 拼接 → 可选 BGM 混音 → R2 中的 MP4。宣传片是“概念图驱动”的旁支，直生视频是“分镜首帧驱动”的主成片路径。
+
+3. “项目级导出”没有完成。/project/[id]/export 页面只有一行占位文本。已实现的是局部导出：框架可导出 Word；分镜可导出 JSON/Excel；合成视频以签名 URL 播放/下载。没有把剧本、图片、音频、视频和元数据整体打包的项目导出。
+
+4. 配音模块能生成文案、分配音色、调用 MiniMax TTS、保存音频并在界面预览，但独立 TTS 音轨没有被 FFmpeg 混入最终视频。最终合成只处理视频片段的原声与 BGM。因此不能写“配音已自动合成进成片”。配音文字会被注入视频生成提示词，但这与把 TTS 音频混入成片不是一回事。
+
+5. 当前工作树并非可验收发布状态。npm run build 失败；npx tsc --noEmit 也失败，包含缺失 getImageGenerationCost 导出、groupId 不存在、组件类型不匹配等错误。Next.js 配置还设置了 ignoreBuildErrors=true，这会掩盖类型问题。
+
+6. 当前 .env.local 指向的 Supabase 项目不可达：对象存储域名 DNS 解析失败，PostgreSQL 返回 tenant/user not found。由于登录与数据库仍依赖 Supabase，当前配置下真实在线主流程不能运行。R2 则可读，本次只读盘点得到 646 个对象、约 1325.16 MB。
+
+7. Supabase→R2 不是“Supabase 全面迁移”。迁移的是对象存储主写路径；Supabase Auth 和 Supabase PostgreSQL 仍是核心依赖。代码还保留 Supabase Storage S3 作为 R2 未配置时的回退，因此架构上仍有双路径，但同一次 uploadFile 调用只选择一个后端，不是双写。
+
+8. R2 迁移存在未闭环问题：大量数据库字段和 WorkflowStep.outputData 直接保存短期签名 URL；assets API 返回旧 URL 时没有统一按 storageKey 刷新。如果旧数据保存的是 Supabase URL，即使同名对象已复制到 R2，前端仍可能访问旧 Supabase URL。当前数据库不可达，无法统计这一问题的实际数量。
+
+9. 当前 AI 接入的准确说法应是“存在可调用适配代码”，不能等同于“所有模型已在当前供应商、当前密钥、当前版本通过真实验收”。仓库里的 7 模型测试结果是 0 个真实成功、7 个 Mock，占位图不能作为模型可用证据。
+
+10. Git 历史能证明开发过程越来越细化、越来越重视架构边界与验收，但不能仅凭 Git 证明早期代码是“AI 一次性生成”，也不能证明后期每一段代码由 AI 还是人工编写。可谨慎表述为“开发方式从大批量初始化，逐步转向分阶段设计、故障定位、局部实现和专项验证”。
+
+
+二、问题 1：当前真实完成的核心工作流
+
+（一）入口与项目状态
+
+用户通过 Supabase Auth 登录。项目创建 API 写入 Project，并初始化 12 条 WorkflowStep 记录。实际界面只渲染 9 个可见步骤。项目状态同时存在两套数据：WorkflowStep.status 与 Project.step*Done 布尔字段；workflow-state.ts 用 DAG 条件决定解锁与隐藏。
+
+当前问题：Supabase Auth/PostgreSQL 配置不可达，因此以下是“代码已经连接的调用路径”，不是本次审计时可在线跑通的证明。
+
+（二）已连接的文本与视觉链
+
+1. 创意输入：Project.rawIdea 保存用户原始创意。
+2. 创意扩散：IDEATION 路由读取 rawIdea、项目标签和可选参考图，生成多个方向及初步框架；用户选择方向后保存 selectedDirection。
+3. 框架搭建：FRAMEWORK 读取原始创意、选定方向和参考信息，生成背景、角色、梗概、幕结构等；支持局部深化和导入外部框架文本。
+4. 风格统一：先生成三组风格提示词，再生成三张候选风格图；用户选中一张，selectedStyleId/styleRefUrl 成为后续视觉参考。
+5. 人物设计：按框架角色生成英文提示词和角色图，参考已选风格图及用户参考图。
+6. 概念图：按幕生成场景提示词和概念图，尝试同时使用风格、角色和用户参考图。
+7. 分镜设计：按幕生成结构化 shots，再按镜头生成首帧/参考图；支持单镜头重生成、分页、缩略图、编辑和 JSON/Excel 导出。
+8. 尾帧：KEYFRAMES 根据分镜、首帧、动作变化、风格和角色参考生成可选尾帧。
+
+上述 1—8 均有数据库写入、API 路由和前端入口，属于代码层已接通。真实模型调用失败时部分图像步骤会返回带 isMock 标记的 Sharp 占位图，因此“步骤完成”不必然等于“真实 AI 生成成功”。
+
+（三）两条视频路径
+
+路径 A：宣传片
+
+FRAMEWORK + CONCEPT 概念图 → 为每张概念图生成视频提示词 → 建立 VideoSegment → 单段/批量图生视频 → 失败时 Ken Burns 兜底 → FFmpeg 统一分辨率并拼接 → 千问百聆 BGM，失败转 MiniMax，最终失败转静音 → 裁剪音频 → 原声与 BGM 混音 → 上传 R2。
+
+限制：虽然 DAG 在框架完成后就解锁 TRAILER，但当前新版宣传片提示词/旧版一键流程都实际要求概念图。界面解锁条件与运行前置条件并不完全一致。
+
+路径 B：直生视频
+
+STORYBOARD shots/firstFrameUrl + 可选 KEYFRAMES lastFrameUrl → 生成每镜头 VideoSegment 提示词 → 单段/批量调用图生视频 API → 失败时单帧 Ken Burns → FFmpeg 拼接 → 可选 BGM 混音 → 上传 R2。
+
+当前未提交工作树把默认视频模型切到 Vidu Q2 Turbo；该协议只使用首帧，明确忽略尾帧。只有 Hailuo 分支明确发送首尾帧。因而不能笼统写“直生视频默认使用首尾帧约束”。更准确的说法是“系统保存首尾帧并按模型能力使用；当前默认 Vidu 路径只用首帧”。
+
+（四）最终产物与未闭环处
+
+已接通：分段 MP4、合成 MP4、可选 BGM、R2 上传、前端播放器。
+
+未闭环：
+1. 新版 trailer/video-direct compose 分支只把 combinedVideoUrl 写入 step.outputData，没有调用 completeStep/markProjectStepDone；工作流完成标志可能仍是 PENDING/false。
+2. 独立 TTS 配音没有进入 FFmpeg 合成。
+3. 项目整体导出页面未实现。
+4. VIDEO_RENDER、CAMERA、REVIEW 未实现。
+5. 当前构建失败且数据库不可达，不能声称当前版本端到端在线可用。
+
+
+三、问题 2：最核心的 8 个技术特点
+
+1. 条件解锁的研究性创作 DAG，而非单按钮生成。系统把创作拆成可选择、可回退、可重生成的阶段，框架完成后可分别进入视觉探索、宣传片或分镜路径。
+
+2. “文本—图像—视频”的资产谱系。WorkflowStep.outputData 保存结构化中间结果，Asset 保存 storageKey、类型和 metadata，后续步骤通过项目/步骤/shotId 追踪参考来源。
+
+3. 人工决策点嵌入自动生成链。用户要选择创意方向、视觉风格、分镜模式、图像/视频模型，并可编辑提示词、重生成单个角色/镜头/尾帧/视频片段。
+
+4. 视觉一致性参考链。用户参考图、选定风格图、角色图、前一镜头图会按步骤注入后续提示词或图像请求；这比每次独立生成更接近“连续创作”，但模型降级到纯文生图时一致性会减弱。
+
+5. 片段级视频任务模型。每个镜头独立持久化为 VideoSegment，包含 prompt、sequence、duration、status、URL、storageKey、isMock 和错误信息；失败可以针对单段重试，而不是整片重做。
+
+6. 真实 API + 本地可交付兜底。图像失败可生成明确标记的 Mock 图；视频失败可用 Ken Burns 生成可播放片段；音乐失败可生成静音。这保证流程演示不被外部 API 完全阻断，但论文必须区分“可播放兜底”与“真实生成模型产物”。
+
+7. 面向 serverless 限制的任务拆分。代码使用 waitUntil、前端分批、单镜头请求、超时状态回收、原子状态更新，避免长生成任务把整个请求拖死。BullMQ 只在特定开关下使用。
+
+8. 存储后端抽象与媒体优化。统一 r2.ts 在 R2、Supabase Storage S3、本地 Mock 三者中选择；分镜图片增加 640px WebP 缩略图、分页、文件大小限制、替换清理和项目级删除。
+
+
+四、问题 3：各基础组件的实际职责
+
+Next.js 14：承担 App Router 页面、工作流前端、Route Handler API、服务器端鉴权入口和 Vercel waitUntil 后台任务。它不是单纯静态界面，而是当前业务编排层。但生产构建在本次环境失败。
+
+PostgreSQL/Prisma：保存用户、项目、工作流步骤、中间 JSON、资产索引、视频片段、配音片段、点数、操作日志、充值单等。Prisma 是业务状态的主要访问层。当前数据库连接到 Supabase PostgreSQL，配置不可达。Mock Prisma 只在 URL 为空/占位/localhost 时启用；当前 URL 看起来是真实 Supabase URL，所以连接失败不会自动回退 Mock。
+
+Supabase：仍承担两项核心职责：Supabase Auth 和 PostgreSQL 托管。Storage 已不再是优先路径，但仍保留 S3 兼容回退。Auth.js/NextAuth 代码也存在，但页面中真实认证主路径是 Supabase，形成一定的双认证历史遗留。
+
+Cloudflare R2：当前对象存储优先后端，保存图片、缩略图、视频片段、合成视频、BGM、配音和参考图；数据库主要保存 storageKey 和 URL。R2 本次只读盘点成功，646 个对象、约 1.29 GiB。
+
+Redis/BullMQ：可选任务队列。STYLE_USE_QUEUE=1 时风格图入队，TRAILER_USE_QUEUE=1 时旧版宣传片入队。默认新版视频分段主要走 waitUntil。package.json、Dockerfile 和 docker-compose 都没有启动 worker 的命令，只有 scripts/image-style-worker.ts 与 scripts/video-worker.ts 可手动运行。因此它属于“已写适配、可实验启用”，不是默认生产主干。
+
+FFmpeg：是真实核心组件，不是预留。用于 Ken Burns 兜底、片段裁剪、统一画幅/帧率/编码、拼接、BGM 裁剪、原声+BGM 混音、最终 MP4 输出。代码还包含 Vercel/Docker/Windows 多路径探测和 /tmp 临时目录处理。
+
+
+五、问题 4：实际 AI 模型/API 与预留接口
+
+必须分三层描述：“有当前调用路径”“有历史/兼容代码”“有真实验收证据”。
+
+（一）当前调用路径存在
+
+1. 文本：MiniMax 官方 MiniMax-Text-01 为有密钥时的最高优先级；失败后通过 OpenLux 的 /v1/chat/completions 调用业务指定模型，通常是 deepseek-chat。视觉理解路径使用 gpt-4o，失败可降级为纯文本 deepseek-chat。
+2. 图像：当前未提交工作树默认 gpt-image-1，经 OpenLux；还列出 gpt-image-2、doubao-seedream-4.5（实际映射为 seedream 5.0 lite）、Flux Kontext、Grok Image、Qwen Image。GPT Image 有 generations/edits 两种协议及参考图处理。
+3. 视频：当前未提交工作树默认 Vidu Q2 Turbo，经 OpenLux；Wan 2.5 I2V 与 MiniMax Hailuo 2.3 保留兼容选项。代码也存在 Veo、Jimeng 的提交/轮询实现，但不在当前可选主列表。
+4. TTS：MiniMax speech-2.8-hd，有真实 HTTP 客户端、VoiceoverSegment 状态和 R2 上传路径。
+5. 音乐：DashScope fun-music-v1 为主，MiniMax music-2.6 为回退，均失败时用 FFmpeg 静音。
+
+（二）当前禁用或预留
+
+1. kling-omni-image 与 gemini-3.1-flash-image 在 models-config 中 disabled=true；不能写成当前可选已用模型。
+2. VIDEO_RENDER、CAMERA、REVIEW 没有完整路由和界面，只是枚举/提示词/模型配置预留。
+3. RUNWAY_API_KEY、PIKA_API_KEY、KLING_API_KEY、KIMI_API_KEY、DEEPSEEK_API_KEY、ZHIPU_API_KEY、SILICONFLOW_API_KEY 等环境变量多数没有对应当前直接客户端；DeepSeek 是经聚合网关使用，不等于直连 DeepSeek 官方 API。
+4. lib/api-clients/video.ts 的 realVideoClient 三个方法全部直接抛出“not implemented”；真实业务实际绕过它，使用 mock-video 编排器或 xiaomi.ts/OpenLux 具体函数。
+5. Suno 有较完整的历史接口代码和测试脚本，但当前 bgm-generator.ts 的有效降级链没有调用 Suno，应标为历史/实验接口。
+6. 代码注释称音色分配使用“MiniMax M3”，实际调用 getTextClient，MiniMax 官方分支固定 MiniMax-Text-01；不能写成已确认 M3 接入。
+
+（三）验收证据的限制
+
+test-7-models/summary.json 显示 successCount=0、mockCount=7。很多 test/probe 脚本只是打印响应，没有断言和稳定退出码；package.json 也没有 test 脚本。当前 OpenLux/Vidu 改动尚未提交且没有随仓库保存的成功响应。因此“API 适配已写”可以确认，“当前全部真实可用”无法确认。
+
+
+六、问题 5：相对逐个平台手工生成，工程上真正解决的问题
+
+1. 上下文不再靠人复制粘贴：创意、框架、角色、分镜、提示词和资产被绑定到同一 projectId/stepId/shotId。
+2. 参考关系可复用：选定风格图和角色图可自动进入后续生成，而不是每个平台重新上传、重新解释。
+3. 批量素材有顺序和状态：镜头 sequence、pending/generating/completed/failed、错误信息和单段重试都被持久化。
+4. 长任务失败的损失更小：可以只重做一个镜头、一个尾帧或一个视频片段。
+5. 生成后处理被自动化：下载、裁剪、统一编码、画幅适配、拼接、BGM 混音和上传不再完全依赖人工剪辑。
+6. 创作决策有中间检查点：方向、风格、角色、概念图和分镜都可以先审阅，再进入昂贵的视频生成。
+7. 模型接口被统一封装：上层路由使用相似参数，具体供应商协议与轮询集中在客户端层。
+
+没有解决或未完全解决：最终 TTS 配音混音、完整项目打包、专业时间线剪辑、真正的连续性自动评分、多人协作、全部模型稳定可用。
+
+
+七、问题 6：与常见 AI 视频平台相比的区分度
+
+从代码能确认的内部差异是：它以“研究性创作过程”而非“一条提示词出一段视频”为中心，把方向选择、叙事框架、视觉基准、角色资产、概念图、分镜、关键帧和分段视频组织成有依赖关系的项目；并保留提示词编辑、单资产重生成和状态记录。
+
+代码还显示一个较有辨识度的双验证路径：概念图先生成短宣传片，用于较早验证视觉方向；分镜路径再生成更长的直生视频。这是一种“先小样验证、再扩大制作”的产品思路。
+
+但“它是否比可灵、Runway、即梦等市场产品更独特、更先进”无法从本仓库证明，需要外部竞品研究。不能凭代码猜测竞品没有故事板、资产库、角色一致性或工作流功能。
+
+
+八、问题 7：5 个典型复杂问题及解决过程
+
+案例 1：serverless 长任务与概念图生成
+
+Git 证据：4bdad6a 引入 waitUntil+轮询；5c615c5 因 Vercel 杀死后台循环而回退；dddf84f 改为前端逐张请求；644a86e/b34b659 再尝试 202+轮询；7b29c31 改 Promise.allSettled；636c992 改按幕分批；a07e400 最终把 generate-one 改同步，避免后台任务提前终止。
+
+这不是一次成功，而是多轮“方案—失败—修正”。最终形成按幕/单图拆分、状态接口、前端刷新和部分 waitUntil 并存的折中。
+
+案例 2：FFmpeg 在 Vercel 的路径与临时目录
+
+Git 证据：afca29e 把临时目录改为 /tmp；5093c62 做可写性探测；ca5eb89 简化 Linux /tmp；b8df032 抽出 temp-utils；0bf89f1、5699591、78f306a、ac01850、dedb0a7 逐步加入二进制下载、路径验证、includeFiles 与 public/ffmpeg 兜底。
+
+结果是统一的路径解析和错误诊断，但当前本机生产构建仍有与 Windows 路径/Terser 相关失败，不能宣称部署问题彻底消失。
+
+案例 3：视频片段状态卡死
+
+35c360d 把整片重构为 VideoSegment；9d84523 发现批量任务一开始把所有片段标记 generating，serverless 超时后剩余片段永久卡死，于是改为“处理到哪一段才标记 generating”，并新增 15 分钟 stale reset。
+
+这体现了从理想异步模型转向可恢复状态机的修正。
+
+案例 4：跨幕 shotId 冲突
+
+多个幕可能复用 shotId 或数组索引。2dfb1b9 修复第二/三幕错误使用第一幕提示词；37bc61c 用 composite key 修尾帧跨幕；6994e2d、a384053、8581ae5 处理配音跨幕泄漏。数据库迁移无法立即执行时，先撤销 actNumber 字段方案，再用 act{actNumber}_{shotId} 作为应用层复合 ID。
+
+这是数据身份设计问题，不只是 UI bug。
+
+案例 5：参考图与多模型协议不一致
+
+c98a602 统一多模型 payload；5b636b2 修复参考图不生效和提示词污染；随后在 gpt-image-2、doubao 之间多次切换；3f0cfec 对“不支持 image input”移除参考图重试；419fc28 改 multipart edits；69d2037 并行下载参考图；69f5e97 改成两阶段全模型带参考图/去参考图回退。
+
+结果是适配层更健壮，但去参考图回退会降低角色/风格一致性，且必须通过 isMock/modelUsed/metadata向用户说明实际路径。
+
+
+九、问题 8：Supabase→Cloudflare R2 专项审计
+
+（一）为什么迁移
+
+提交 2ccbafc 和 lib/r2.ts 注释给出的直接原因是：把 R2 设为优先存储，使用更大的免费存储/流量额度，并同时降低原图访问开销。该提交还引入缩略图与分页，说明迁移目标不仅是换供应商，也包括减少媒体带宽和页面负载。这里能确认的是“开发者在提交中这样说明”，不能仅凭仓库核算真实账单收益。
+
+（二）改动模块
+
+1. lib/r2.ts：后端优先级改为 R2→Supabase S3→本地 Mock；增加文件大小限制、批量删除项目/用户前缀、缩略图 URL 与孤儿清理。
+2. lib/thumbnail.ts：Sharp 生成 640px WebP 缩略图。
+3. storyboard route/regenerate：上传原图+缩略图，保存 thumbnailKey/thumbnailUrl，替换旧图时删除旧对象。
+4. StoryboardTable：优先展示缩略图、点击再用原图，并分页。
+5. project DELETE：删除数据库项目时尝试清理对象存储前缀。
+6. .env.example：新增/突出 R2 配置，同时保留 Supabase Storage S3 回退。
+7. 后续未提交脚本：inventory-storages、migrate-supabase-to-r2、migrate-missing-to-r2、check-r2-project-files、check-db-storage-refs、cleanup-supabase-migrated。
+
+（三）迁移脚本的真实行为
+
+migrate-supabase-to-r2.ts 不是“全量无损复制”：它把最近 7 天文件列为迁移对象，把更老文件列为删除对象；--yes 才实际执行。这个策略有数据丢失风险，不能称为标准全量迁移。
+
+migrate-missing-to-r2.ts 列出 15 个遗漏对象。此次只读 check-r2-project-files 验证这 15 个对象目前都存在于 R2。整个 R2 桶此次可读盘点为 646 个对象、约 1325.16 MB。
+
+（四）如何验证、验证到什么程度
+
+已验证：R2 凭据可用；R2 可列举；指定 15 个遗漏对象存在；总对象数和总大小可读取。
+
+未验证：迁移前 Supabase 完整对象清单、两边交集、仅 Supabase 对象、数据库中旧 URL 数量、cleanup 是否真正执行。原因是当前 Supabase 域名无法解析、数据库 tenant 不存在。
+
+（五）是否仍有 Supabase 流量或双路径
+
+一定仍有 Supabase 流量：认证和 PostgreSQL 仍走 Supabase。
+
+对象存储正常情况下不双写：R2 配置完整时 r2.ts 优先 R2；只有 R2 缺失时才选 Supabase S3。
+
+对象存储仍存在双路径风险：
+1. Supabase S3 客户端和环境变量仍保留。
+2. .env.vercel.prod 文件只列出 Supabase Storage 配置、未列出 R2；实际 Vercel 控制台环境无法从仓库确认。
+3. Asset.url、VideoSegment.videoUrl、VoiceoverSegment.audioUrl、WorkflowStep.outputData 中保存的是短期签名 URL或历史 URL。
+4. assets、references、video-segments 等若直接返回已存 URL，不一定按 storageKey 重新签 R2 URL。
+5. next.config.mjs 仍允许 *.supabase.co 图片域名。
+
+因此最准确结论是：新写入的对象存储主路径已切到 R2，但历史 URL、回退配置和 Supabase Auth/DB 使“完全去 Supabase”不成立；数据迁移完成度无法确认。
+
+（六）额外严重事实
+
+多份未提交迁移/盘点脚本把 Supabase S3 和 R2 访问凭据硬编码在源文件中。报告不记录具体值，但这些凭据应立即轮换，并改为环境变量。即使脚本未提交到 Git，它们仍存在于工作区，属于真实安全风险。
+
+
+十、问题 9：开发方式是否发生变化
+
+可验证事实：初始提交 1a9f07e 是一次极大的项目导入，包含应用代码、大量 Mock 数据、测试结果、图片和备份；之后 272 个提交越来越多地围绕单一问题、明确阶段、回退策略、状态边界和验证脚本展开。例如 DAG 被拆成 Phase 1+2、Phase 3+4、Phase 4+5+6；视频模块先引入 VideoSegment，再补迁移、BGM、原声混音；参考图一致性有专门验证脚本；超时、跨幕 ID、签名 URL、FFmpeg 路径均有多次定向修复。
+
+合理推论：开发过程从“大批量搭建/快速形成功能面”逐步转向“先定义数据模型和接口边界，再通过日志、脚本、提交和回退方案逐项修复”。这与“人为定义架构、边界、接口、验收标准，AI 完成局部实现”的工作方式相符。
+
+无法确认：Git 不能证明初始代码由 AI 一次性生成，也不能证明后续局部代码具体由 AI 编写。仓库存在 .kimi、.claude 工作记录，可以证明使用过 AI 工具，但不能据此精确分配人机贡献。论文应把结论写成“开发管理方式发生变化”，不要写成未经证实的“代码最初全部由 AI 一次生成”。
+
+测试质量也说明这种变化仍不彻底：有少量针对提示词约束的专项验证，但很多脚本只打印结果、不以非零退出码报告失败；package.json 没有统一 test 命令，也没有单元/集成测试框架。当前 tsc 与 build 失败，说明验收体系尚未形成稳定门禁。
+
+
+十一、问题 10：最能体现“拆解—比较—实现—测试—修正”的案例
+
+1. 概念图异步方案：比较 waitUntil、同步 300 秒、前端逐图、202+轮询、Promise.allSettled、按幕分批；根据 Vercel 行为多次回退，最终避免一次请求承担全部生成。
+
+2. FFmpeg 部署：先识别只读目录与临时目录问题，再比较环境变量、ffmpeg-static、构建下载、public 文件、系统 PATH 等路径；加入版本验证和错误日志；通过一系列提交修正部署包问题。
+
+3. 视频状态恢复：把整片任务拆成 VideoSegment；发现批量预标记造成卡死后，用“逐段置为 generating + 超时回收 + 单段重试”修正。
+
+4. 参考图一致性：识别不同模型 payload 结构不同；统一参数；比较 generation 与 edits；加入两阶段回退和专项 prompt 检查；再根据模型报错调整映射。
+
+5. 跨幕身份：从数组索引/shotId 错配定位到身份键问题；尝试数据库 actNumber；因迁移不可用撤回；最终以应用层 composite shotId 修复配音与尾帧。
+
+这些案例比“用了哪些框架”更适合论文，因为能显示工程推理和迭代证据，也能诚实呈现失败与折中。
+
+
+十二、问题 11：从影视创作角度说明连续系统的必要性
+
+创意决定主题与情绪，剧情把主题转成事件和节奏，角色让事件有主体，概念图定义视觉世界，分镜把叙事切成可拍摄镜头，首尾关键帧定义镜头起止状态，视频生成补出时间运动，配音确定语言信息与表演节奏，BGM和合成把各片段组织成完整观看体验。
+
+这些环节彼此依赖：
+
+1. 角色外观若不作为后续参考，同一人物会在不同镜头中变脸、换服装。
+2. 概念图若不继承风格，影片会在色彩、材质和光影上失去统一。
+3. 分镜若不保存镜头顺序、时长和动作，视频片段即使单独漂亮，也难以形成叙事节奏。
+4. 尾帧与动作变化提供镜头的时间方向，避免图生视频只做无意义晃动。
+5. 配音文字会影响镜头时长、口型、表演与剪辑点；BGM会影响情绪推进和段落强弱。
+6. 合成是检验前面所有决定是否真正协同的阶段。
+
+因此连续系统的核心价值不是“把很多 AI 放在一个网页”，而是让每一步的创作决定成为下一步的约束和可检查的中间成果。
+
+本项目已经实现其中一部分：风格/角色/分镜/首尾帧/视频的引用链和顺序链；尚未完成的是 TTS 音频进入最终混音、自动连续性评测和完整项目导出。
+
+
+十三、问题 12：4000 字论文最值得保留的 3 个案例
+
+案例一：从创意到分镜的条件工作流与人工决策点。
+重点写为什么要把生成拆成方向、框架、风格、角色、分镜；用 Project/WorkflowStep/Asset 说明中间结果可审阅、可修改、可追踪。不要把 12 步写成全部实现。
+
+案例二：分段视频生成应对长任务与失败恢复。
+重点写 VideoSegment、单段状态、waitUntil、超时回收、单段重试、FFmpeg 拼接。可以引用 9d84523 的修正过程，体现发现状态卡死后改变任务粒度。
+
+案例三：参考一致性与存储迁移中的工程权衡。
+可以把视觉引用链与 Supabase→R2 放在同一案例：生成层要保存稳定 storageKey，展示层要刷新短期 URL；R2 降低媒体存储压力，但旧 URL、认证/数据库依赖和迁移验证仍需处理。这个案例最能体现“方案不是改一个环境变量就完成”。
+
+建议删除或压缩的技术细节：
+
+1. 不列全部模型名、供应商端点和价格。
+2. 不写 FFmpeg 七层路径候选和每个命令参数。
+3. 不列 81 个音色或所有环境变量。
+4. 不逐条列 273 个提交，只保留 3—5 条关键提交链。
+5. 不详细介绍 Tailwind、lucide、SWR 等普通界面技术。
+6. 不把充值、管理员统计、版权材料生成写入核心研究内容。
+7. 不宣传“12 步闭环”“全模型已接入”“自动配音合成”“完整项目导出”。
+
+
+十四、问题 13：已验证事实 / 合理推论 / 无法确认
+
+已验证事实 | 合理推论 | 无法确认
+------------|----------|----------
+数据库定义 12 步，前端只展示 9 步 | 产品方向是以创作过程而非单次生成作为核心 | 隐藏三步未来是否会完成
+创意、框架、风格、角色、概念图、分镜、尾帧、分段视频均有 API/状态/资产代码 | 代码设计目标是形成可追踪的影视生产链 | 当前线上环境能否完整跑通
+新版视频可以按段生成并用 FFmpeg 合成 MP4 | 分段设计能降低失败重做成本 | 当前默认 Vidu 在真实密钥下的成功率与质量
+独立 TTS 配音可生成并保存 | 开发者计划让配音参与后续混音 | TTS 音频何时真正进入最终成片
+最终合成处理原声与 BGM，不处理 VoiceoverSegment.audioUrl | 当前“配音分屏”主要用于管理/试听 | 视频模型是否会根据提示词稳定生成中文口播和口型
+项目 export 页面是占位 | 完整打包导出仍在计划中 | 是否有仓库外的导出服务
+框架 Word、分镜 JSON/Excel 可导出 | 已具备局部文档化能力 | Excel 图片嵌入是否会由其他未见代码完成；当前实际页面只导 URL
+R2 可读，646 个对象，约 1325.16 MB | R2 已承载一批真实项目媒体 | 646 个对象是否覆盖全部历史媒体
+指定 15 个遗漏迁移对象均在 R2 | migrate-missing-to-r2 很可能执行过 | 主迁移脚本是否完整执行、何时执行、成功/失败统计
+Supabase 存储域名不可解析，数据库 tenant 不存在 | 原 Supabase 项目可能已删除、暂停或配置失效 | Supabase 控制台中的真实状态
+Supabase Auth/PostgreSQL 仍在代码主路径 | 即使对象存储迁移，平台仍强依赖 Supabase | 部署环境是否换了另一组未在仓库中的 Supabase 配置
+r2.ts 在 R2 配置完整时只写 R2 | 对象存储不是主动双写 | 线上环境是否实际配置了 R2
+数据库/JSON 保存签名 URL，多个接口直接返回旧 URL | 历史 Supabase URL可能造成断图/断视频 | 数据库中实际有多少旧 URL
+7 模型测试全部是 Mock | 早期测试主要验证兜底而非模型质量 | 当前 OpenLux 各模型的真实可用性
+Redis/BullMQ 有队列与 worker 代码 | 它是为独立 worker 部署准备的 | 线上是否另有未入库的 worker 服务
+package/docker-compose 不启动 worker | 默认仓库运行不是 BullMQ 主路径 | 线上平台是否手动启动 worker
+npm run build 与 tsc 当前失败 | 工作树处于开发中、未完成合并 | HEAD 在另一台 Linux/Vercel 环境是否能构建
+Git 有大量分阶段修复与专项提交 | 开发方式越来越接近架构先行、局部验收 | 哪些代码具体由 AI 或人工编写
+
+
+十五、问题 14：供另一个写作模型使用的项目事实摘要
+
+AI Film Flow 是一个以项目状态和资产依赖为中心的生成式影视创作原型。当前实际可见工作流为 9 步，不是宣传中的 12 步全实现：创意扩散、框架搭建、风格统一、人物设计、概念图、宣传片、分镜、尾帧、直生视频。系统用 PostgreSQL/Prisma 保存项目、步骤、中间 JSON、资产、视频片段和配音片段；用 Supabase Auth 登录；用 Cloudflare R2 优先保存媒体；用 Next.js API 编排模型调用；用 FFmpeg完成视频兜底、裁剪、拼接和 BGM 混音。
+
+真正的工程贡献是把一次性生成拆成可审阅的连续过程，并让风格图、角色图、分镜、首尾帧和视频片段建立引用关系。VideoSegment 使每个镜头可以独立生成、记录状态和重试；外部视频 API 失败时，系统可用 Ken Burns 生成可播放兜底片段。当前文本、图像、视频、音乐和 TTS 都有适配代码，但仓库没有足够证据证明所有模型在当前供应商和密钥下真实可用；已有 7 模型测试全部为 Mock。
+
+项目仍有重要缺口：VIDEO_RENDER/CAMERA/REVIEW 未实现；项目导出页是占位；独立 TTS 配音没有混入最终成片；新版视频合成没有完整同步工作流完成状态；当前工作树构建和类型检查失败；Supabase Auth/数据库配置不可达。R2 本次可读验证为 646 个对象、约 1325.16 MB，但 Supabase→R2 迁移无法证明全量完成，旧签名 URL 和回退配置仍可能造成双路径问题。
+
+论文可重点讨论三个案例：创作 DAG 与人工决策点；分段视频任务与 serverless 超时恢复；视觉引用链和对象存储迁移。不得写成“12 步全部完成”“所有 AI 模型均已真实接入”“配音已自动合成进视频”或“Supabase 已完全移除”。
+
+
+十六、主要证据索引
+
+工作流定义：lib/workflow.ts、lib/workflow-state.ts、lib/workflow-executor.ts
+数据模型：prisma/schema.prisma、prisma/migrations/
+文本/图像/视频模型：lib/models-config.ts、lib/api-clients/index.ts、lib/api-clients/xiaomi.ts
+视频片段与合成：lib/video-segment-utils.ts、lib/video-utils.ts
+宣传片/直生视频 API：app/api/projects/[id]/steps/trailer/route.ts、video-direct/route.ts
+配音：lib/voiceover-utils.ts、app/api/projects/[id]/voiceover/route.ts
+存储：lib/r2.ts、lib/thumbnail.ts、lib/media-url.ts
+导出：lib/framework-export.ts、app/(dashboard)/project/[id]/storyboard/page.tsx、app/(dashboard)/project/[id]/export/page.tsx
+队列：lib/queue.ts、scripts/video-worker.ts、scripts/image-style-worker.ts
+R2 迁移：提交 2ccbafc；scripts/migrate-supabase-to-r2.ts、migrate-missing-to-r2.ts、inventory-storages.ts、check-db-storage-refs.ts、cleanup-supabase-migrated.ts
+关键 Git 提交：036d0c5（DAG）、35c360d（VideoSegment）、9d84523（超时状态恢复）、2ccbafc（R2）、8581ae5（跨幕复合 ID）、419fc28/69f5e97（参考图协议与回退）
+反证测试：test-7-models/summary.json、TEST_REPORT.md
+
+审计结束。

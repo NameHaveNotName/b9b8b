@@ -1,4 +1,4 @@
-import { editImage } from '@/lib/api-clients/xiaomi'
+import { editImage } from '@/lib/api-clients/openlux'
 import * as fs from 'fs'
 import * as path from 'path'
 

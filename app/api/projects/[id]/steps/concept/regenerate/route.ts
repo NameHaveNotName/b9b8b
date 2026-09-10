@@ -10,7 +10,8 @@ import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -31,7 +32,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'VALIDATION_001', message: '缺少 assetId' }, { status: 400 })
   }
   const newRatio = aspectRatio || '16:9'
-  const newModel = imageModel || 'gpt-image-2'
+  const newModel = imageModel || 'gpt-image-1'
   console.log(`[REGENERATE-PARAMS] concept: ${assetId}, 新比例: ${newRatio}, 新模型: ${newModel}`)
 
   const step = await prisma.workflowStep.findUnique({

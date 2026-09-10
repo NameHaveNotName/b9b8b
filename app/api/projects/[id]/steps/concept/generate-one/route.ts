@@ -18,7 +18,8 @@ import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
  * Body: { actNumber: number, aspectRatio?: string, imageModel?: string }
  * Response: 200 { status: 'COMPLETED', actNumber } | 500 { error: ... }
  */
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   console.log('[CONCEPT-GEN] POST /generate-one called, params.id:', params.id)
   const userId = await getCurrentUserId()
   if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

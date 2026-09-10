@@ -8,7 +8,8 @@ import { prisma } from '@/lib/prisma'
  * 轮询概念图生成进度。
  * 返回已生成的图片列表和 step 状态。
  */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

@@ -19,7 +19,7 @@ import {
 import StepOperationChart from './_components/StepOperationChart'
 
 interface PageProps {
-  params: { id: string }
+  params: Promise<{ id: string }>
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -37,7 +37,8 @@ const STEP_LABELS: Record<string, string> = {
   REVIEW: '评测优化',
 }
 
-export default async function AdminUserProjectsPage({ params }: PageProps) {
+export default async function AdminUserProjectsPage(props: PageProps) {
+  const params = await props.params;
   const admin = await getCurrentUser()
   if (!admin || !admin.isAdmin) {
     redirect('/dashboard')

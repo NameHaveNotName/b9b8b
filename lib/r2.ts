@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, ObjectIdentifier } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, HeadBucketCommand, ObjectIdentifier } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import fs from "fs/promises";
 import path from "path";
@@ -79,7 +79,7 @@ async function ensureLocalDir(filePath: string) {
 // ======== 公共 URL 构建 ========
 function buildPublicUrl(key: string): string {
   const normalizedKey = key.split('\\').join('/')
-  if (isSupabaseS3Mode) {
+  if (!isR2Mode && isSupabaseS3Mode) {
     // 从 endpoint 提取项目 ref，构建标准公共访问 URL
     const endpoint = process.env.SUPABASE_STORAGE_S3_ENDPOINT!
     const projectRefMatch = endpoint.match(/https:\/\/([^.]+)\.supabase\.co/)
@@ -116,7 +116,7 @@ export async function uploadFile(key: string, body: Buffer, contentType: string)
     }
   }
 
-  if (isSupabaseS3Mode) {
+  if (!isR2Mode && isSupabaseS3Mode) {
     try {
       const command = new PutObjectCommand({
         Bucket: process.env.SUPABASE_STORAGE_BUCKET!,
@@ -153,7 +153,7 @@ export async function getSignedFileUrl(key: string, expiresIn: number = 3600) {
     return buildPublicUrl(key)
   }
 
-  if (isSupabaseS3Mode) {
+  if (!isR2Mode && isSupabaseS3Mode) {
     // Supabase 公共桶直接返回公共 URL，无需签名
     return buildPublicUrl(key)
   }
@@ -181,7 +181,7 @@ export async function deleteFile(key: string) {
     }
   }
 
-  if (isSupabaseS3Mode) {
+  if (!isR2Mode && isSupabaseS3Mode) {
     try {
       const command = new DeleteObjectCommand({
         Bucket: process.env.SUPABASE_STORAGE_BUCKET!,
@@ -212,6 +212,27 @@ export async function getPublicUrl(key: string) {
   return buildPublicUrl(key)
 }
 
+/** Read-only storage connectivity check. Never returns credentials or provider errors. */
+export async function checkStorageHealth(): Promise<{
+  status: 'ok' | 'unconfigured' | 'error'
+  provider: 'r2' | 'supabase-s3' | 'mock'
+}> {
+  if (isMockMode) return { status: 'unconfigured', provider: 'mock' }
+
+  const client = isR2Mode ? R2 : supabaseS3Client
+  const bucket = isR2Mode ? process.env.R2_BUCKET_NAME! : process.env.SUPABASE_STORAGE_BUCKET!
+  const provider = isR2Mode ? 'r2' : 'supabase-s3'
+
+  if (!client || !bucket) return { status: 'unconfigured', provider }
+
+  try {
+    await client.send(new HeadBucketCommand({ Bucket: bucket }))
+    return { status: 'ok', provider }
+  } catch {
+    return { status: 'error', provider }
+  }
+}
+
 // ============================================================
 // 缩略图上传（生成并上传缩略图，返回缩略图 URL）
 // ============================================================
@@ -221,7 +242,6 @@ export async function uploadThumbnail(
   contentType: string = 'image/png'
 ): Promise<{ originalKey: string; thumbnailKey: string; thumbnailUrl: string; originalUrl: string }> {
   const { generateThumbnail, getThumbnailKey } = await import('./thumbnail')
-  const { default: sharp } = await import('sharp')
 
   const { thumbnailBuffer, needsThumbnail } = await generateThumbnail(buffer)
 
@@ -420,10 +440,10 @@ export async function getThumbnailUrl(originalKey: string): Promise<string> {
 export async function cleanupOrphanedThumbnails(): Promise<{ deletedCount: number }> {
   if (isMockMode) return { deletedCount: 0 }
 
-  const client = isSupabaseS3Mode ? supabaseS3Client : R2
+  const client = isR2Mode ? R2 : supabaseS3Client
   if (!client) return { deletedCount: 0 }
 
-  const bucket = isSupabaseS3Mode ? process.env.SUPABASE_STORAGE_BUCKET! : process.env.R2_BUCKET_NAME!
+  const bucket = isR2Mode ? process.env.R2_BUCKET_NAME! : process.env.SUPABASE_STORAGE_BUCKET!
   let deletedCount = 0
   let continuationToken: string | undefined
 

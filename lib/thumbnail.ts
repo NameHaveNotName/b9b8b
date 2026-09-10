@@ -1,5 +1,3 @@
-'use client'
-
 import sharp from 'sharp'
 
 const THUMBNAIL_MAX_WIDTH = 640

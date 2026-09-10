@@ -8,7 +8,8 @@ import { completeStep } from '@/lib/workflow-executor'
 /**
  * 状态校准 API：查询资产库中角色图片数量，若与预期一致但步骤状态未同步，强制修正。
  */
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

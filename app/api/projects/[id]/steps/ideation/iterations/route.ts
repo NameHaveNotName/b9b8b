@@ -4,7 +4,8 @@ import { NextResponse } from 'next/server'
 import { checkProjectAccess, getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const userId = await getCurrentUserId()
     if (!userId) {
@@ -48,7 +49,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const userId = await getCurrentUserId()
     if (!userId) {

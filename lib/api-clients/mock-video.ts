@@ -96,7 +96,7 @@ import path from 'path'
 import os from 'os'
 import type { VideoClient, TrailerSegment } from './video'
 import { prisma } from '../prisma'
-import { generateText, generateVideoFromImage, generateMusic, generateMusicMinimax, decodeMinimaxHexToFile, generateDirectVideo as generateDirectVideoXiaomi, resolveImageToBase64 } from './xiaomi'
+import { generateText, generateVideoFromImage, generateMusic, generateMusicMinimax, decodeMinimaxHexToFile, generateDirectVideo as generateDirectVideoOpenLux, resolveImageToBase64 } from './openlux'
 import { generateMusicQwen } from './dashscope'
 import { TEXT_MODELS, VIDEO_MODELS, MUSIC_MODELS } from '../models-config'
 import {
@@ -711,7 +711,7 @@ export const mockVideoClient: VideoClient = {
         const lastFrameUrl = hasLastFrame ? await getSignedFileUrl(lastFrameKey, 3600) : null
 
         console.log(`[DIRECT-VIDEO] 尝试真实 API model=${modelId} shotId=${shotId}`)
-        const result = await generateDirectVideoXiaomi({
+        const result = await generateDirectVideoOpenLux({
           firstFrameUrl,
           lastFrameUrl,
           prompt: 'A cinematic shot with smooth camera motion, maintaining consistent visual style',

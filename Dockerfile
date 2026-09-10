@@ -1,5 +1,5 @@
-# 使用 Node.js 18 Alpine（轻量且兼容 Next.js 14）
-FROM node:18-alpine AS base
+# 与本地和 Vercel 生产环境保持一致，满足 Prisma 7 / Sharp 0.35 的运行时要求
+FROM node:24-alpine AS base
 
 # 安装系统依赖（ffmpeg、Python、构建工具）
 RUN apk add --no-cache ffmpeg python3 make g++ libc6-compat font-wqy-zenhei

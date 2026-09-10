@@ -8,7 +8,7 @@
  */
 
 import { prisma } from './prisma'
-import { generateText, generateVideoFromImage, generateDirectVideo as generateDirectVideoXiaomi } from './api-clients/xiaomi'
+import { generateText, generateVideoFromImage, generateDirectVideo as generateDirectVideoOpenLux } from './api-clients/openlux'
 import { loadPromptTemplate, extractJsonFromMarkdown } from './prompts'
 import { getTextClient } from './api-clients'
 import { TEXT_MODELS, VIDEO_MODELS } from './models-config'
@@ -486,10 +486,10 @@ export async function generateOneVideoSegment(args: {
     }
 
     if (isDirect) {
-      // Direct: 首尾帧视频生成（复用 Xiaomi 直生视频）
+      // Direct: 首尾帧视频生成（复用 OpenLux 直生视频）
       const modelId = videoModel || VIDEO_MODELS.direct.primary
       try {
-        const result = await generateDirectVideoXiaomi({
+        const result = await generateDirectVideoOpenLux({
           firstFrameUrl: imageUrl,
           lastFrameUrl: lastFrameUrlFromContext,
           prompt: finalPrompt || 'A cinematic shot with smooth camera motion',

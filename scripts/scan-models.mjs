@@ -14,8 +14,8 @@ for (const line of envContent.split('\n')) {
   if (m) env[m[1]] = m[2]
 }
 
-const API_KEY = env.XIAOMI_API_KEY
-const BASE_URL = env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
+const API_KEY = env.OPENLUX_API_KEY
+const BASE_URL = env.OPENLUX_BASE_URL || 'https://api.openlux.ai'
 
 async function test(label, payload) {
   try {

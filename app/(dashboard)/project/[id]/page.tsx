@@ -65,7 +65,8 @@ function formatDate(date: Date): string {
   })
 }
 
-export default async function ProjectPage({ params }: { params: { id: string } }) {
+export default async function ProjectPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await getCurrentUser()
     if (!user) {

@@ -86,7 +86,8 @@ async function generateCharacterPrompts(
   return { prompts, characterCount: characters.length }
 }
 
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -101,7 +102,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return access.response
   }
 
-  if (!await canExecuteStep(params.id, 'CHARACTER')) {
+  if (!(await canExecuteStep(params.id, 'CHARACTER'))) {
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
@@ -447,7 +448,8 @@ async function generateCharacterImagesBackground(
 }
 
 // 工作指令.txt（2026-05-24）：文本编辑 PATCH，保存用户编辑后的 prompts
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

@@ -6,7 +6,8 @@ import { prisma } from '@/lib/prisma'
 import { projectDetailSelect, projectCoreSelect } from '@/lib/db/project-select'
 import { computeProjectStateFromSteps } from '@/lib/workflow-state'
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const access = await checkProjectPermission(params.id)
     if (!access.allowed) return access.response
@@ -63,7 +64,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const access = await checkProjectPermission(params.id)
     if (!access.allowed) return access.response
@@ -136,7 +138,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const access = await checkProjectPermission(params.id)
     if (!access.allowed) return access.response

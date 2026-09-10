@@ -8,10 +8,8 @@ import { prisma } from '@/lib/prisma'
  * POST /api/admin/users/:id/points
  * Admin 手动给用户加点数（可正可负）
  */
-export async function POST(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const admin = await getCurrentUser()
     if (!admin || !admin.isAdmin) {

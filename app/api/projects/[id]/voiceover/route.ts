@@ -20,7 +20,8 @@ import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
  *
  * 返回项目的所有 VoiceoverSegment。
  */
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -86,7 +87,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
  * - generate-audio: 为单个配音片段生成音频
  * - generate-all-audio: 批量为所有 pending 配音片段生成音频
  */
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

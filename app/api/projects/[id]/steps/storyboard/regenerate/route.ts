@@ -6,7 +6,7 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { uploadFile, uploadThumbnail, getSignedFileUrl, deleteFile } from '@/lib/r2'
-import { generateImage } from '@/lib/api-clients/xiaomi'
+import { generateImage } from '@/lib/api-clients/openlux'
 import { getTextClient } from '@/lib/api-clients'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
@@ -15,7 +15,7 @@ import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 
-const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-2'
+const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 
 async function generateStoryboardImagePrompt(textClient: any, input: {
   currentDescription: string
@@ -57,7 +57,7 @@ function normalizeCharacterIds(value: any): string[] {
   return raw
     .flatMap((item) => String(item || '').split(/[、,，\s]+/))
     .map((id) => id.trim())
-    .filter(Boolean)
+    .filter(Boolean);
 }
 
 function assetCharacterId(asset: any): string {
@@ -109,7 +109,8 @@ function uniqueUrlList(...groups: string[][]): string[] {
   return result
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -187,7 +188,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     .filter((r: any) => typeof r?.url === 'string' && /^https?:\/\//i.test(r.url))
     .map((r: any) => r.url)
 
-  const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE), { projectId: params.id })
+  const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE))
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001' }, { status: 403 })
   }
@@ -286,7 +287,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     refImages.forEach((u, i) => console.log(`  [${i}] ${u.slice(0, 80)}`))
   }
 
-// ===== Option A：让 prompt "臣服"于参考图 =====
+  // ===== Option A：让 prompt "臣服"于参考图 =====
   // 关键：参考图（特别是用户拖入的最高优先级图）才是主要视觉源，
   // text prompt 只用于补充场景细节，避免与参考图冲突。
   let finalPrompt = ''
@@ -390,7 +391,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       model: newModel,
       prompt: guardedPromptFinal,
       referenceImages: refImages.length > 0 ? refImages : undefined,
-      // 修改原图模式：referenceImageUrl 作为编辑基础（gpt-image-2 edits 端点的 ref_0）
+      // 修改原图模式：referenceImageUrl 作为编辑基础（gpt-image-1 edits 端点的 ref_0）
       referenceImageUrl: mode === 'edit-original' ? primaryRefForEdit : undefined,
       aspectRatio: newRatio,
       watermark: false,
@@ -415,63 +416,63 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   // 找到该 shot 对应的所有旧 Asset（同时检查 outputData.shotAssets 和 step.resultAssets）
-const shotAssetsFromResult = await prisma.asset.findMany({
-  where: { projectId: params.id, stepId: step.id, type: 'IMAGE' },
-})
-const oldAssetIdsToDelete = new Set<string>()
+  const shotAssetsFromResult = await prisma.asset.findMany({
+    where: { projectId: params.id, stepId: step.id, type: 'IMAGE' },
+  })
+  const oldAssetIdsToDelete = new Set<string>()
 
-// 1) 从 outputData.shotAssets 找
-const oldFromOutput = shotAssets.find((a: any) => a.shotId === shotId && sameActNumber(a.actNumber, targetActNumber))
-if (oldFromOutput?.assetId) oldAssetIdsToDelete.add(oldFromOutput.assetId)
+  // 1) 从 outputData.shotAssets 找
+  const oldFromOutput = shotAssets.find((a: any) => a.shotId === shotId && sameActNumber(a.actNumber, targetActNumber))
+  if (oldFromOutput?.assetId) oldAssetIdsToDelete.add(oldFromOutput.assetId)
 
-// 2) 从 resultAssets（按 metadata）找
-for (const a of shotAssetsFromResult) {
-  const meta = (a.metadata || {}) as any
-  if (meta.shotId === shotId && sameActNumber(meta.actNumber, targetActNumber)) {
-    oldAssetIdsToDelete.add(a.id)
-  }
-}
-
-// 3) 兜底：按 url 匹配（删除旧 url 对应的 asset）
-if (oldFromOutput?.url) {
+  // 2) 从 resultAssets（按 metadata）找
   for (const a of shotAssetsFromResult) {
-    if (a.url === oldFromOutput.url) oldAssetIdsToDelete.add(a.id)
-  }
-}
-
-// 先获取旧 Asset 的 storageKey（用于删除文件）
-const oldAssetsToDelete = await prisma.asset.findMany({
-  where: { id: { in: Array.from(oldAssetIdsToDelete) } },
-})
-
-// 删除旧文件（storageKey 和 thumbnailKey）
-for (const asset of oldAssetsToDelete) {
-  try {
-    // 删除原图
-    if (asset.storageKey) {
-      await deleteFile(asset.storageKey)
-      console.log(`[STORYBOARD-REGENERATE] 删除旧文件: ${asset.storageKey}`)
+    const meta = (a.metadata || {}) as any
+    if (meta.shotId === shotId && sameActNumber(meta.actNumber, targetActNumber)) {
+      oldAssetIdsToDelete.add(a.id)
     }
-    // 删除缩略图（如果存在）
-    const meta = (asset.metadata || {}) as any
-    if (meta.thumbnailKey) {
-      await deleteFile(meta.thumbnailKey)
-      console.log(`[STORYBOARD-REGENERATE] 删除旧缩略图: ${meta.thumbnailKey}`)
-    }
-  } catch (e: any) {
-    console.warn(`[STORYBOARD-REGENERATE] 删除旧文件失败:`, e?.message)
   }
-}
 
-// 删除旧 Asset 数据库记录
-for (const id of Array.from(oldAssetIdsToDelete)) {
-  try {
-    await prisma.asset.delete({ where: { id } })
-    console.log(`[STORYBOARD-REGENERATE] 删除旧 Asset: ${id}`)
-  } catch (e: any) {
-    console.warn(`[STORYBOARD-REGENERATE] 删除旧 Asset ${id} 失败:`, e?.message)
+  // 3) 兜底：按 url 匹配（删除旧 url 对应的 asset）
+  if (oldFromOutput?.url) {
+    for (const a of shotAssetsFromResult) {
+      if (a.url === oldFromOutput.url) oldAssetIdsToDelete.add(a.id)
+    }
   }
-}
+
+  // 先获取旧 Asset 的 storageKey（用于删除文件）
+  const oldAssetsToDelete = await prisma.asset.findMany({
+    where: { id: { in: Array.from(oldAssetIdsToDelete) } },
+  })
+
+  // 删除旧文件（storageKey 和 thumbnailKey）
+  for (const asset of oldAssetsToDelete) {
+    try {
+      // 删除原图
+      if (asset.storageKey) {
+        await deleteFile(asset.storageKey)
+        console.log(`[STORYBOARD-REGENERATE] 删除旧文件: ${asset.storageKey}`)
+      }
+      // 删除缩略图（如果存在）
+      const meta = (asset.metadata || {}) as any
+      if (meta.thumbnailKey) {
+        await deleteFile(meta.thumbnailKey)
+        console.log(`[STORYBOARD-REGENERATE] 删除旧缩略图: ${meta.thumbnailKey}`)
+      }
+    } catch (e: any) {
+      console.warn(`[STORYBOARD-REGENERATE] 删除旧文件失败:`, e?.message)
+    }
+  }
+
+  // 删除旧 Asset 数据库记录
+  for (const id of Array.from(oldAssetIdsToDelete)) {
+    try {
+      await prisma.asset.delete({ where: { id } })
+      console.log(`[STORYBOARD-REGENERATE] 删除旧 Asset: ${id}`)
+    } catch (e: any) {
+      console.warn(`[STORYBOARD-REGENERATE] 删除旧 Asset ${id} 失败:`, e?.message)
+    }
+  }
 
   const storageKey = `projects/${params.id}/storyboard/${targetActNumber}_${shotId}_${Date.now()}.png`
   const { thumbnailKey, thumbnailUrl, originalUrl } = await uploadThumbnail(storageKey, buffer, 'image/png')

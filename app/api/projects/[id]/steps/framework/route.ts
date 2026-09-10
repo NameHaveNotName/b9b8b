@@ -86,7 +86,8 @@ ${userInput}
 `
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -101,7 +102,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return access.response
   }
 
-  if (!await canExecuteStep(params.id, 'FRAMEWORK')) {
+  if (!(await canExecuteStep(params.id, 'FRAMEWORK'))) {
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
@@ -301,7 +302,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 }
 
 // 工作指令.txt（2026-05-24）：文本编辑 PATCH，保存用户编辑后的 framework 字段
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

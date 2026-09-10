@@ -1,13 +1,13 @@
 /**
- * 统一 AI 客户端入口（xiaomi-api 聚合平台）
+ * 统一 AI 客户端入口（OpenLux 聚合平台）
  *
- * 内部调用 lib/api-clients/xiaomi.ts 的 OpenAI 兼容接口，
+ * 内部调用 lib/api-clients/openlux.ts 的 OpenAI 兼容接口，
  * 对外保持原有 getTextClient / getImageClient / getVideoClient API，
  * 确保工作流路由无需修改即可运行。
  */
 
-import { generateText, generateImage, generateConceptSceneWithEdit, generateVisionText, uploadBufferToR2 } from './xiaomi'
-import type { GenerateVisionTextParams } from './xiaomi'
+import { generateText, generateImage, generateConceptSceneWithEdit, generateVisionText, uploadBufferToR2 } from './openlux'
+import type { GenerateVisionTextParams } from './openlux'
 import { IMAGE_MODELS, TEXT_MODELS } from '@/lib/models-config'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 
@@ -329,7 +329,7 @@ let _videoClient: import('./video').VideoClient | null = null
 
 export async function getVideoClient(): Promise<import('./video').VideoClient> {
   if (!_videoClient) {
-    // 视频仍用 mock-video 的本地 FFmpeg 合成（xiaomi-api 视频接口待验证）
+    // 视频编排仍由 mock-video 负责，并优先调用 OpenLux，失败时用本地 FFmpeg 兜底
     const { mockVideoClient } = await import('./mock-video')
     _videoClient = mockVideoClient
   }

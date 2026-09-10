@@ -7,10 +7,10 @@ import path from 'path'
 import { config } from 'dotenv'
 config({ path: path.join(process.cwd(), '.env.local') })
 
-const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
-const API_KEY = process.env.XIAOMI_API_KEY || ''
+const BASE_URL = process.env.OPENLUX_BASE_URL || 'https://api.openlux.ai'
+const API_KEY = process.env.OPENLUX_API_KEY || ''
 
-if (!API_KEY) { console.error('❌ XIAOMI_API_KEY'); process.exit(1) }
+if (!API_KEY) { console.error('❌ OPENLUX_API_KEY'); process.exit(1) }
 const _confirmed = process.argv.includes('--yes') || process.env.PROBE_CONFIRM === '1'
 if (!_confirmed) { console.error('⚠️ 加 --yes'); process.exit(0) }
 

@@ -18,7 +18,8 @@ import { GENERATION_COSTS } from '@/lib/points-config'
  * 从 STORYBOARD 步骤读取对应 shot 的 firstFrameUrl/description，
  * 调用尾帧生成，然后将 lastFrameUrl 写回 STORYBOARD.outputData.shots
  */
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

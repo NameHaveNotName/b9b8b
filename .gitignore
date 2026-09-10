@@ -10,11 +10,12 @@
 /coverage
 
 # next.js
-/.next/
+/.next*/
 /out/
 
 # production
 /build
+/output/
 
 # misc
 .DS_Store
@@ -27,6 +28,8 @@ yarn-error.log*
 
 # local env files
 .env*.local
+.env.vercel*
+!.env.vercel.example
 
 # vercel
 .vercel
@@ -37,10 +40,11 @@ next-env.d.ts
 
 # temp working directory
 .temp/
+.test-output/
 
 .vercel
 
-# mock storage (migrated to Supabase)
+# mock storage (production assets use Cloudflare R2)
 public/mock-storage/
 settings.local.json
 
@@ -49,3 +53,6 @@ settings.local.json
 
 # agent working files (migrated to .cursor/rules/project-knowledge.md)
 .kimi/
+.claude/
+.cursor/
+.opencode/

@@ -14,7 +14,8 @@ services:
       - R2_ENDPOINT=${R2_ENDPOINT}
       - UPSTASH_REDIS_URL=${UPSTASH_REDIS_URL}
       - AUTH_SECRET=${AUTH_SECRET}
-      - XIAOMI_API_KEY=${XIAOMI_API_KEY}
+      - OPENLUX_API_KEY=${OPENLUX_API_KEY}
+      - OPENLUX_BASE_URL=${OPENLUX_BASE_URL:-https://api.openlux.ai}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
       - TEMP_DIR=/app/.temp
       - FFMPEG_PATH=ffmpeg

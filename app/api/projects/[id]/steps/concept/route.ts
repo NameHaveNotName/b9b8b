@@ -83,7 +83,8 @@ async function generateConceptPrompts(
   return { prompts, totalScenes: prompts.length }
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -98,7 +99,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return access.response
   }
 
-  if (!await canExecuteStep(params.id, 'CONCEPT')) {
+  if (!(await canExecuteStep(params.id, 'CONCEPT'))) {
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
@@ -274,7 +275,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
                 llmPrompt: promptItem.englishPrompt,
                 prompt: promptItem.englishPrompt,
                 aspectRatio,
-                imageModel: imageModel || 'gpt-image-2',
+                imageModel: imageModel || 'gpt-image-1',
               },
             },
           })
@@ -302,7 +303,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         return NextResponse.json({ error: 'API_001', message: errMsg }, { status: 500 })
       }
 
-      await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || 'gpt-image-2', aspectRatio })
+      await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || 'gpt-image-1', aspectRatio })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[CONCEPT-IMAGE] 完成: 成功 ${scenes.length}/${resolvedPrompts.length} 条，失败: ${failedScenes.join(', ') || '无'}`)
       return NextResponse.json({ success: true, data: { scenes, totalScenes: scenes.length } })
@@ -381,7 +382,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       .filter(Boolean) as string[]
 
     // 工作指令.txt（Round 6 任务一）：收集所有角色图 URL，用于概念图多图参考。
-    // xiaomi.ts 内部会过滤非 http(s)（data: URL 不能传给豆包多图模型）。
+    // openlux.ts 内部会过滤非 http(s)（data: URL 不能传给豆包多图模型）。
     const characterImageUrls = characterAssets
       .map((a) => a.url)
       .filter((u) => typeof u === 'string' && u.length > 0) as string[]
@@ -497,7 +498,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 }
 
 // 工作指令.txt（2026-05-24）：文本编辑 PATCH，保存用户编辑后的 prompts
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

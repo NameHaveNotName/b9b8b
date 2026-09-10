@@ -4,7 +4,11 @@ import { checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { deleteFile } from '@/lib/r2'
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string; assetId: string } }) {
+export async function PATCH(
+  req: NextRequest,
+  props: { params: Promise<{ id: string; assetId: string }> }
+) {
+  const params = await props.params;
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -36,7 +40,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string; assetId: string } }) {
+export async function DELETE(
+  _req: NextRequest,
+  props: { params: Promise<{ id: string; assetId: string }> }
+) {
+  const params = await props.params;
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

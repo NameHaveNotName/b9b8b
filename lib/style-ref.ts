@@ -24,7 +24,7 @@ function resolveLocalFileToDataUrl(relativePath: string): string | null {
  *   3) `styleOptions[0]` 兜底（保证人物/概念/关键帧不会因为用户没点选就崩）
  *
  * 校验放宽：只要是非空字符串即可（http(s)、data:、签名 URL 都允许），不再强制 http 前缀。
- * 因为：浏览器能渲染 = URL 有效；豆包不接受 data: 时 xiaomi.ts 已降级为纯文生图（Round 4 修复 #3）。
+ * 因为：浏览器能渲染 = URL 有效；豆包不接受 data: 时 openlux.ts 已降级为纯文生图（Round 4 修复 #3）。
  */
 export interface StyleRef {
   styleRefUrl: string

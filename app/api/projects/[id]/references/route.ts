@@ -8,7 +8,8 @@ const MAX_REFERENCES = 10
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -29,7 +30,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

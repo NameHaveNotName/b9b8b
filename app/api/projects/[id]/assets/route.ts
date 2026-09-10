@@ -4,10 +4,8 @@ import { NextResponse } from 'next/server'
 import { checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 
-export async function GET(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const project = await prisma.project.findUnique({
     where: { id: params.id },
     select: { userId: true },

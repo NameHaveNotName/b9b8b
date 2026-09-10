@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# 注意：不使用 set -e，确保即使某个下载源失败也能继续
+# 下载源允许逐个失败，但最终二进制和数据库契约必须验证成功。
 
 # 尝试定位 ffmpeg-static 提供的二进制；若缺失则下载 johnvansickle 静态构建
 ensure_ffmpeg() {
@@ -83,16 +83,19 @@ download_ffmpeg_github() {
   return 1
 }
 
-ensure_ffmpeg
+ensure_ffmpeg || exit 1
 
 if [ "$VERCEL_ENV" = "production" ]; then
   if [ -z "$DIRECT_URL" ]; then
-    echo "Warning: DIRECT_URL not set, skipping prisma migrate deploy."
+    echo "Error: DIRECT_URL not set; refusing a production deploy without migrations."
+    exit 1
   elif ! echo "$DIRECT_URL" | grep -qE '^postgresql://'; then
-    echo "Warning: DIRECT_URL scheme is not postgresql://, skipping prisma migrate deploy."
+    echo "Error: DIRECT_URL scheme is not postgresql://."
+    exit 1
   else
     echo "Running prisma migrate deploy..."
-    timeout 180 npx prisma migrate deploy || echo "Warning: prisma migrate deploy failed, continuing build..."
+    timeout 180 npx prisma migrate deploy
+    node scripts/verify-database-schema.mjs
   fi
 fi
 

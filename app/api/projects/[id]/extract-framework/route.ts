@@ -5,6 +5,8 @@ import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 
 const EXTRACT_PROMPT = `角色：高端艺术电影 AI 编剧与结构顾问
 
@@ -95,6 +97,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     }, { status: 400 })
   }
 
+  // 点数检查
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK)
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
+  }
+
   let lastError: Error | null = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -150,6 +158,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         rawText: resultText.slice(0, 3000),
       }
 
+      // 成功后扣点
+      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, success: true })
+
       console.log('[EXTRACT-FRAMEWORK] 提取成功，attempt:', attempt + 1)
       return NextResponse.json({ success: true, data: result })
     } catch (e: any) {
@@ -164,6 +175,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       }
     }
   }
+
+  // 失败后扣点（记录错误）
+  await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, success: false, errorMessage: lastError?.message })
 
   console.error('[EXTRACT-FRAMEWORK] 所有重试均失败')
   return NextResponse.json({

@@ -1,7 +1,7 @@
 /* Shared types for workflow UI components */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export type InspectorView = 'task-queue' | 'generation-confirm' | 'result-feedback'
+export type InspectorView = 'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit'
 
 export interface WorkflowStep {
   id: string
@@ -72,4 +72,24 @@ export interface ResultFeedbackData {
   failedReason?: string
   preservedAssets?: string[]
   retryWillConsume前置?: boolean
+}
+
+export interface RetryEditReference {
+  url: string
+  label: string
+  type: 'character' | 'style' | 'previous-shot' | 'user-upload' | 'user-dragged'
+  removable: boolean
+}
+
+export interface RetryEditData {
+  stepType: string
+  targetId: string
+  actNumber?: number
+  targetLabel: string
+  basePrompt: string
+  baseRefs: RetryEditReference[]
+  originalImageUrl: string | null
+  currentModel: string
+  aspectRatio: string
+  pointCost: number
 }

@@ -5,6 +5,8 @@ import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
+import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { GENERATION_COSTS } from '@/lib/points-config'
 import { WorkflowStepType } from '@prisma/client'
 
 interface StoryboardShot {

@@ -23,11 +23,11 @@ import {
   pollHailuoTask,
   resolveImageToBase64,
   uploadBufferToR2,
-} from '@/lib/api-clients/xiaomi'
+} from '@/lib/api-clients/openlux'
 
 // ==================== 配置 ====================
-const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
-const API_KEY = process.env.XIAOMI_API_KEY || ''
+const BASE_URL = process.env.OPENLUX_BASE_URL || 'https://api.openlux.ai'
+const API_KEY = process.env.OPENLUX_API_KEY || ''
 
 const CONFIRMED = process.argv.includes('--yes') || process.env.VIDEO_TEST_CONFIRM === '1'
 
@@ -320,7 +320,7 @@ async function main() {
   } else {
     console.log('[VIDEO-TEST-V2] ✅ 已确认，开始真实测试')
     if (!API_KEY) {
-      console.error('[VIDEO-TEST-V2] ❌ XIAOMI_API_KEY 未配置')
+      console.error('[VIDEO-TEST-V2] ❌ OPENLUX_API_KEY 未配置')
       process.exit(1)
     }
   }

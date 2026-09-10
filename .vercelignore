@@ -1,4 +1,13 @@
 public/mock-storage
-.kimi/backup
+.kimi
 .temp
 node_modules
+.env*
+.claude
+.next*
+.test-output
+output
+supabase/.temp
+.local-runner
+source-code-copyright
+test-7-models

@@ -1,6 +1,6 @@
 import { prisma } from './prisma'
 import { completeStep, failStep, isStepCancelled } from './workflow-executor'
-import { generateImage } from './api-clients/xiaomi'
+import { generateImage } from './api-clients/openlux'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
 import { getProjectReferences } from './style-ref'

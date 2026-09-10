@@ -1,4 +1,4 @@
-import { generateImage } from '@/lib/api-clients/xiaomi'
+import { generateImage } from '@/lib/api-clients/openlux'
 import * as fs from 'fs'
 import * as path from 'path'
 

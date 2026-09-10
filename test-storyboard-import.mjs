@@ -2,13 +2,19 @@
  * Excel 分镜表导入功能测试脚本
  */
 
-const SUPABASE_URL = 'https://enlaopujtgvoqglvlnox.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVubGFvcHVqdGd2b3FnbHZsbm94Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NDI0ODksImV4cCI6MjA5NTUxODQ4OX0.dPPZujXT0mvMMX7JYw15m6AlN8j3AIxM7y1r9jOkyKE'
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL
+const TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD
 const BASE_URL = process.argv[2] || 'http://localhost:3000'
 
 import { readFileSync } from 'fs'
 
 async function main() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !TEST_USER_EMAIL || !TEST_USER_PASSWORD) {
+    throw new Error('Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, TEST_USER_EMAIL, and TEST_USER_PASSWORD before running this test')
+  }
+
   console.log('=== Excel 分镜表导入测试 ===')
   console.log('目标:', BASE_URL)
 
@@ -21,8 +27,8 @@ async function main() {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      email: '2627312372@qq.com',
-      password: 'kangk123456',
+      email: TEST_USER_EMAIL,
+      password: TEST_USER_PASSWORD,
     }),
   })
 

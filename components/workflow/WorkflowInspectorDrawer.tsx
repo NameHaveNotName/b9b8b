@@ -33,13 +33,14 @@ import {
    Types
    ============================================================ */
 
-export type InspectorView = 'task-queue' | 'generation-confirm' | 'result-feedback'
+export type InspectorView = 'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit'
 
 import type {
   WorkflowStep,
   InspectorTask,
   GenerationConfirmData,
   ResultFeedbackData,
+  RetryEditData,
 } from './types'
 
 // Re-export for consumers
@@ -64,6 +65,10 @@ interface WorkflowInspectorDrawerProps {
   onLocateTaskStep?: (stepType: string) => void
   onViewTaskParams?: (task: InspectorTask) => void
   onRetryTask?: (task: InspectorTask) => void
+  // Storyboard retry/edit
+  retryEditData?: RetryEditData | null
+  onRetryRegenerate?: (data: RetryEditData, options: { promptOverride: string; refs: string[] }) => void
+  onRetryEditOriginal?: (data: RetryEditData, options: { editInstruction: string; refs: string[] }) => void
 }
 
 /* ============================================================
@@ -659,6 +664,113 @@ function ResultFeedbackView({
 }
 
 /* ============================================================
+   RetryEditView
+   ============================================================ */
+
+function RetryEditView({
+  data,
+  onRegenerate,
+  onEditOriginal,
+  onClose,
+}: {
+  data: RetryEditData
+  onRegenerate: (data: RetryEditData, options: { promptOverride: string; refs: string[] }) => void
+  onEditOriginal: (data: RetryEditData, options: { editInstruction: string; refs: string[] }) => void
+  onClose: () => void
+}) {
+  const [promptOverride, setPromptOverride] = useState(data.basePrompt)
+  const [editInstruction, setEditInstruction] = useState('')
+  const [selectedRefs, setSelectedRefs] = useState(() => new Set(data.baseRefs.map((ref) => ref.url)))
+
+  const toggleRef = (url: string) => {
+    setSelectedRefs((current) => {
+      const next = new Set(current)
+      if (next.has(url)) next.delete(url)
+      else next.add(url)
+      return next
+    })
+  }
+
+  const refs = Array.from(selectedRefs)
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-sm font-semibold text-stone-800">{data.targetLabel}</p>
+        <p className="mt-1 text-xs text-stone-500">
+          {data.currentModel} · {data.aspectRatio} · {data.pointCost} 点
+        </p>
+      </div>
+
+      <label className="block">
+        <span className="text-xs font-medium text-stone-600">重新生成提示词</span>
+        <textarea
+          value={promptOverride}
+          onChange={(event) => setPromptOverride(event.target.value)}
+          rows={6}
+          className="mt-1.5 w-full rounded-lg border border-stone-200 p-2 text-xs text-stone-700 outline-none focus:border-amber-400"
+        />
+      </label>
+
+      {data.baseRefs.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-stone-600">参考图</p>
+          <div className="mt-2 space-y-2">
+            {data.baseRefs.map((ref) => (
+              <label key={`${ref.type}:${ref.url}`} className="flex items-center gap-2 rounded-lg border border-stone-100 p-2 text-xs text-stone-600">
+                <input
+                  type="checkbox"
+                  checked={selectedRefs.has(ref.url)}
+                  disabled={!ref.removable}
+                  onChange={() => toggleRef(ref.url)}
+                />
+                <span className="truncate">{ref.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {data.originalImageUrl && (
+        <label className="block">
+          <span className="text-xs font-medium text-stone-600">修改原图说明</span>
+          <textarea
+            value={editInstruction}
+            onChange={(event) => setEditInstruction(event.target.value)}
+            rows={3}
+            placeholder="例如：保留人物和构图，只把天空改成黄昏"
+            className="mt-1.5 w-full rounded-lg border border-stone-200 p-2 text-xs text-stone-700 outline-none focus:border-amber-400"
+          />
+        </label>
+      )}
+
+      <div className="flex flex-wrap justify-end gap-2 pt-2">
+        <button onClick={onClose} className="rounded-lg border border-stone-200 px-3 py-2 text-xs text-stone-600">
+          取消
+        </button>
+        {data.originalImageUrl && (
+          <button
+            disabled={!editInstruction.trim()}
+            onClick={() => onEditOriginal(data, { editInstruction: editInstruction.trim(), refs })}
+            className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-medium text-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            修改原图
+          </button>
+        )}
+        <button
+          disabled={!promptOverride.trim()}
+          onClick={() => onRegenerate(data, { promptOverride: promptOverride.trim(), refs })}
+          className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          重新生成
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
    Main Drawer Component
    ============================================================ */
 
@@ -677,6 +789,9 @@ export default function WorkflowInspectorDrawer({
   onLocateTaskStep,
   onViewTaskParams,
   onRetryTask,
+  retryEditData,
+  onRetryRegenerate,
+  onRetryEditOriginal,
 }: WorkflowInspectorDrawerProps) {
   const [localView, setLocalView] = useState<InspectorView>(activeView)
   const drawerRef = useRef<HTMLDivElement>(null)
@@ -710,6 +825,7 @@ export default function WorkflowInspectorDrawer({
     { id: 'task-queue', label: '任务队列' },
     { id: 'generation-confirm', label: '生成确认' },
     { id: 'result-feedback', label: '结果反馈' },
+    { id: 'retry-edit', label: '重试编辑' },
   ]
 
   if (!isOpen) return null
@@ -792,6 +908,22 @@ export default function WorkflowInspectorDrawer({
             <Info className="h-10 w-10 text-stone-300" />
             <p className="mt-3 text-sm text-stone-500">暂无生成结果反馈</p>
             <p className="mt-1 text-xs text-stone-400">点击任务面板的「详情」查看</p>
+          </div>
+        )}
+
+        {localView === 'retry-edit' && retryEditData && (
+          <RetryEditView
+            data={retryEditData}
+            onRegenerate={onRetryRegenerate || (() => {})}
+            onEditOriginal={onRetryEditOriginal || (() => {})}
+            onClose={onClose}
+          />
+        )}
+
+        {localView === 'retry-edit' && !retryEditData && (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <RotateCcw className="h-10 w-10 text-stone-300" />
+            <p className="mt-3 text-sm text-stone-500">暂无可重试的分镜</p>
           </div>
         )}
       </div>

@@ -21,6 +21,7 @@ export const projectCoreSelect = {
   rawIdea: true,
   status: true,
   selectedStyleId: true,
+  groupId: true,
   // 工作流步骤完成状态（条件解锁 DAG 状态机）
   stepIdeaDone: true,
   stepFrameworkDone: true,

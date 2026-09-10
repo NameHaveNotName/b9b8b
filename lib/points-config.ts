@@ -8,7 +8,7 @@
  *   - 0.1 元 = 10 点
  *   - 1 元 = 100 点
  *   - 1.5 元 = 150 点
- * 该换算与云雾 API / xiaomi-api 控制台中的「花费」列直接对应。
+ * 该换算需与 OpenLux 控制台中的实际花费定期校准。
  */
 export const POINTS_PER_YUAN = 100
 
@@ -28,8 +28,8 @@ export const GENERATION_COSTS = {
   ENDING_FRAME: 3,          // 结尾帧（文本 + 出图）
   TRAILER: 150,             // 预告片（文本 + 视频，约 1.5 元）
 
-  // 直出视频（wan2.5-i2v-preview 约 0.3/秒 * 5 秒 = 1.5 元）
-  VIDEO_DIRECT_SEGMENT: 150, // 每个视频片段
+  // 直出视频（OpenLux / Vidu 实际成本尚需按账户价格校准）
+  VIDEO_DIRECT_SEGMENT: 150, // 暂沿用原每片段点数，避免计费规则无提示变化
 
   // 配音
   VOICEOVER_SCRIPTS: 1,     // 生成配音文案（DeepSeek）
@@ -45,6 +45,18 @@ export const GENERATION_COSTS = {
 /** 保留向后兼容的旧常量名（实际代码应优先使用 GENERATION_COSTS） */
 export const DEFAULT_GENERATE_COST = GENERATION_COSTS.DEFAULT
 export const DEFAULT_REGENERATE_COST = GENERATION_COSTS.DEFAULT
+
+/**
+ * 返回指定图片模型的单张生成点数。
+ * OpenLux 尚未提供到账户级价格配置时使用调用方给出的业务步骤成本，
+ * 避免在未经确认的情况下改变现有扣费规则。
+ */
+export function getImageGenerationCost(
+  _modelId: string,
+  fallback: number = GENERATION_COSTS.DEFAULT,
+): number {
+  return fallback
+}
 
 /** 各工作流步骤的操作成本（与 OperationLog 的 pointsCost 对齐） */
 export const STEP_COSTS = {

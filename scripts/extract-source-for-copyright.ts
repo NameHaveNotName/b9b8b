@@ -23,7 +23,7 @@ const BACKEND_FILES: [string, number?][] = [
   ['app/api/projects/[id]/steps/keyframes/route.ts', 80],
   ['app/api/projects/[id]/steps/framework/route.ts', 80],
   ['app/api/projects/[id]/steps/ideation/route.ts', 50],
-  ['lib/api-clients/xiaomi.ts', 140],
+  ['lib/api-clients/openlux.ts', 140],
   ['lib/api-clients/mock-video.ts', 90],
   ['lib/workflow-executor.ts', undefined],
   ['lib/models-config.ts', 80],

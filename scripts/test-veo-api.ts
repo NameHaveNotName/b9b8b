@@ -16,11 +16,11 @@ import { config } from 'dotenv'
 
 config({ path: path.join(process.cwd(), '.env.local') })
 
-const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
-const API_KEY = process.env.XIAOMI_API_KEY || ''
+const BASE_URL = process.env.OPENLUX_BASE_URL || 'https://api.openlux.ai'
+const API_KEY = process.env.OPENLUX_API_KEY || ''
 
 if (!API_KEY) {
-  console.error('[TEST-VEO] ❌ XIAOMI_API_KEY 未配置,请检查 .env.local')
+  console.error('[TEST-VEO] ❌ OPENLUX_API_KEY 未配置,请检查 .env.local')
   process.exit(1)
 }
 

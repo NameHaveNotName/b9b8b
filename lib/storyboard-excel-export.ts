@@ -155,7 +155,7 @@ export async function exportStoryboardExcel(options: ExportStoryboardOptions): P
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, worksheet, '分镜表')
 
-  const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'arraybuffer' })
+  const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
   const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
 
   const url = URL.createObjectURL(blob)

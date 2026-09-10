@@ -10,7 +10,8 @@ import { projectCoreSelect } from '@/lib/db/project-select'
  *
  * 返回项目的所有 VideoSegment，用于前端轮询生成进度。
  */
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const project = await prisma.project.findUnique({
     where: { id: params.id },
     select: projectCoreSelect,

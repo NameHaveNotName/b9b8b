@@ -63,7 +63,7 @@ export default function HoverImageBadge({
   }, [propModel])
 
   // 悬停超时：鼠标离开子元素后 150ms 才关闭，防止误触
-  const leaveTimer = useRef<ReturnType<typeof setTimeout>>()
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const handleMouseEnter = useCallback(() => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
     setHovered(true)

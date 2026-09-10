@@ -6,6 +6,7 @@ process.env.TEMP_DIR = '/tmp'
 import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { startStep, completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
@@ -22,7 +23,7 @@ async function processTrailerInline(
 ) {
   console.log(`[TRAILER-JOB-START] inline=true, stepId=${stepId}, projectId=${projectId}, timestamp=${new Date().toISOString()}`)
   console.log(`[TRAILER-JOB-DATA] conceptImages count=${conceptImageKeys.length}`)
-  console.log(`[TRAILER-JOB-ENV] XIAOMI_API_KEY exists=${!!process.env.XIAOMI_API_KEY}, R2_ACCOUNT_ID configured=${!!process.env.R2_ACCOUNT_ID && !process.env.R2_ACCOUNT_ID.startsWith('your-')}, R2_ENDPOINT configured=${!!process.env.R2_ENDPOINT && !process.env.R2_ENDPOINT.includes('[account-id]')}`)
+  console.log(`[TRAILER-JOB-ENV] OPENLUX_API_KEY exists=${!!process.env.OPENLUX_API_KEY}, R2_ACCOUNT_ID configured=${!!process.env.R2_ACCOUNT_ID && !process.env.R2_ACCOUNT_ID.startsWith('your-')}, R2_ENDPOINT configured=${!!process.env.R2_ENDPOINT && !process.env.R2_ENDPOINT.includes('[account-id]')}`)
   try {
     const { mockVideoClient } = await import('@/lib/api-clients/mock-video')
     console.log(`[TRAILER-SUBMIT-CALL] 准备进入 generateTrailer 管线 projectId=${projectId}`)
@@ -101,7 +102,7 @@ async function backgroundGenerateSegment(
   try {
     console.log(`[SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
     const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
-    const resolvedAspectRatio = aspectRatio || await getProjectDefaultAspectRatio(projectId)
+    const resolvedAspectRatio = aspectRatio || (await getProjectDefaultAspectRatio(projectId))
     const result = await generateOneVideoSegment({
       segmentId,
       projectId,
@@ -163,7 +164,7 @@ async function backgroundComposeVideo(
 ) {
   try {
     console.log(`[COMPOSE-BG] 开始合成 projectId=${projectId}`)
-    const resolvedAspectRatio = aspectRatio || await getProjectDefaultAspectRatio(projectId)
+    const resolvedAspectRatio = aspectRatio || (await getProjectDefaultAspectRatio(projectId))
     const segments = await prisma.videoSegment.findMany({
       where: { projectId, stepName, status: 'completed' },
       orderBy: { sequence: 'asc' },
@@ -195,7 +196,8 @@ async function backgroundComposeVideo(
 // ============================================================
 // POST: 主入口（支持 action 分发）
 // ============================================================
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   console.log(`[TRAILER-POST] 收到请求 projectId=${params.id} t=${new Date().toISOString()}`)
 
   try {
@@ -216,7 +218,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       return access.response
     }
 
-    if (!await canExecuteStep(params.id, 'TRAILER')) {
+    if (!(await canExecuteStep(params.id, 'TRAILER'))) {
       console.warn(`[TRAILER-POST] 前置步骤未完成，拒绝执行`)
       return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
     }
@@ -400,7 +402,7 @@ async function handleGeneratePrompts(projectId: string, stepId: string, callerUs
       data: {
         status: 'PENDING' as any,
         outputData: {
-          ...(await prisma.workflowStep.findUnique({ where: { id: stepId } }))?.outputData as any || {},
+          ...((await prisma.workflowStep.findUnique({ where: { id: stepId } }))?.outputData as any || {}),
           segmentPromptsGenerated: true,
           segmentCount: segments.length,
         },
@@ -675,7 +677,11 @@ async function handleGenerateBgm(projectId: string, stepId: string, userId: stri
 // ============================================================
 // GET
 // ============================================================
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const access = await checkProjectPermission(params.id)
+  if (!access.allowed) return access.response
+
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'TRAILER' } }
   })

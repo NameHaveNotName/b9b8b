@@ -3,8 +3,12 @@
  * 测试流程：登录 → 创建项目 → 上传文件 → 提取框架 → 导入框架
  */
 
-const SUPABASE_URL = 'https://enlaopujtgvoqglvlnox.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVubGFvcHVqdGd2b3FnbHZsbm94Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NDI0ODksImV4cCI6MjA5NTUxODQ4OX0.dPPZujXT0mvMMX7JYw15m6AlN8j3AIxM7y1r9jOkyKE'
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL
+const TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD
+const OPENLUX_BASE_URL = (process.env.OPENLUX_BASE_URL || 'https://api.openlux.ai').replace(/\/+$/, '')
+const OPENLUX_API_KEY = process.env.OPENLUX_API_KEY
 
 const BASE_URL = process.argv[2] || 'http://localhost:3000'
 
@@ -21,6 +25,10 @@ const TEST_STORY = `在一个被遗忘的小镇上，住着一个名叫李明的
 李明在完成画作后不久就去世了，但他留给世界的不仅是那幅画，还有祖孙之间深厚的感情。`
 
 async function main() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !TEST_USER_EMAIL || !TEST_USER_PASSWORD) {
+    throw new Error('Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, TEST_USER_EMAIL, and TEST_USER_PASSWORD before running this test')
+  }
+
   console.log('=== 故事导入功能测试 ===')
   console.log('目标:', BASE_URL)
 
@@ -33,8 +41,8 @@ async function main() {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      email: '2627312372@qq.com',
-      password: 'kangk123456',
+      email: TEST_USER_EMAIL,
+      password: TEST_USER_PASSWORD,
     }),
   })
 
@@ -120,12 +128,16 @@ async function main() {
     // 如果是 API 错误，尝试手动调用 LLM
     if (extractData.error === 'API_001') {
       console.log('\n[4/5-bis] API 失败，尝试手动调用 LLM...')
+
+      if (!OPENLUX_API_KEY) {
+        throw new Error('Set OPENLUX_API_KEY before running the direct provider fallback')
+      }
       
       // 直接调用 OpenLux API
-      const llmRes = await fetch('https://yunwu.ai/v1/chat/completions', {
+      const llmRes = await fetch(`${OPENLUX_BASE_URL}/v1/chat/completions`, {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer sk-bxOgUgYJaRSNsaIp93w4NCSR4QgL5Ys80eag3zDMXiwEv4X1',
+          'Authorization': `Bearer ${OPENLUX_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

@@ -15,8 +15,8 @@ import { execSync } from 'child_process'
 config({ path: path.join(process.cwd(), '.env.local') })
 
 const DASHSCOPE_KEY = process.env.DASHSCOPE_API_KEY || ''
-const XIAOMI_BASE_URL = process.env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
-const XIAOMI_KEY = process.env.XIAOMI_API_KEY || ''
+const OPENLUX_BASE_URL = process.env.OPENLUX_BASE_URL || 'https://api.openlux.ai'
+const OPENLUX_KEY = process.env.OPENLUX_API_KEY || ''
 
 const confirmed = process.argv.includes('--yes') || process.env.MUSIC_TEST_CONFIRM === '1'
 if (!confirmed) {
@@ -92,7 +92,7 @@ async function testMinimax(name: string, prompt: string, duration?: number): Pro
     stream: false,
   }
 
-  // MiniMax 官方 API（与 xiaomi.ts 保持一致）
+  // MiniMax 官方 API（与 openlux.ts 保持一致）
   const minimaxBaseUrl = 'https://api.minimax.chat'
   const minimaxKey = process.env.MINIMAX_API_KEY || ''
   const res = await fetch(`${minimaxBaseUrl}/v1/music_generation`, {

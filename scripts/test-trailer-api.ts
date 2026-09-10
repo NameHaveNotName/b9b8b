@@ -9,8 +9,8 @@ import { config } from 'dotenv'
 
 config({ path: path.join(process.cwd(), '.env.local') })
 
-const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
-const API_KEY = process.env.XIAOMI_API_KEY || ''
+const BASE_URL = process.env.OPENLUX_BASE_URL || 'https://api.openlux.ai'
+const API_KEY = process.env.OPENLUX_API_KEY || ''
 
 // 找一张本地概念图做测试
 function findTestImage(): string {

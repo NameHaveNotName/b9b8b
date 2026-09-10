@@ -6,7 +6,7 @@
  */
 
 import path from 'path'
-import { generateMusicMinimax, decodeMinimaxHexToFile } from './api-clients/xiaomi'
+import { generateMusicMinimax, decodeMinimaxHexToFile } from './api-clients/openlux'
 import { generateMusicQwen } from './api-clients/dashscope'
 import { MUSIC_MODELS } from './models-config'
 import { generateSilentBgm, downloadUrlToTemp } from './video-utils'

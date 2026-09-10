@@ -8,10 +8,8 @@ import { prisma } from '@/lib/prisma'
  * PATCH /api/admin/recharges/:id
  * 审核充值订单：通过或拒绝
  */
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const admin = await getCurrentUser()
     if (!admin || !admin.isAdmin) {

@@ -6,7 +6,7 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
-import { generateImage } from '@/lib/api-clients/xiaomi'
+import { generateImage } from '@/lib/api-clients/openlux'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { uploadFile, uploadThumbnail, getSignedFileUrl, deleteFile } from '@/lib/r2'
@@ -18,7 +18,7 @@ import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 
-const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-2'
+const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 const STORYBOARD_MIN_TOTAL_SHOTS = 20
 const STORYBOARD_MAX_TOTAL_SHOTS = 40
 
@@ -143,7 +143,7 @@ function normalizeCharacterIds(value: any): string[] {
   return raw
     .flatMap((item) => String(item || '').split(/[、,，\s]+/))
     .map((id) => id.trim())
-    .filter(Boolean)
+    .filter(Boolean);
 }
 
 function assetCharacterId(asset: any): string {
@@ -190,7 +190,8 @@ function uniqueUrlList(...groups: string[][]): string[] {
   return result
 }
 
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -206,7 +207,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
 
-  if (!await canExecuteStep(params.id, 'STORYBOARD')) {
+  if (!(await canExecuteStep(params.id, 'STORYBOARD'))) {
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
@@ -223,7 +224,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   // === generate-prompts: 只生成分镜提示词，不生成草图 ===
   if (action === 'generate-prompts') {
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS, { projectId: params.id })
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -319,7 +320,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     let currentPrompts = prompts
     if (prompts.length === 0) {
       console.log('[STORYBOARD-IMAGE] No prompts found, auto-generating prompts first...')
-      const promptPointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS, { projectId: params.id })
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS)
       if (!promptPointsCheck.ok) {
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
@@ -372,7 +373,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       console.log(`[STORYBOARD-IMAGE] Auto-generated ${currentPrompts.length} prompts, proceeding to generate images...`)
     }
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_IMAGES, { projectId: params.id })
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_IMAGES)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -513,7 +514,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const imageModel = body?.imageModel
     console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，shotId: ${shotId || 'auto'}，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
 
-    const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE), { projectId: params.id })
+    const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE))
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -1036,7 +1037,7 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
   }
 
   const totalCost = GENERATION_COSTS.STORYBOARD_PROMPTS + GENERATION_COSTS.STORYBOARD_IMAGES
-  const pointsCheck = await checkPoints(totalCost, { projectId: params.id })
+  const pointsCheck = await checkPoints(totalCost)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -1154,7 +1155,11 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
   }
 }
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const access = await checkProjectPermission(params.id)
+  if (!access.allowed) return access.response
+
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } },
     include: { resultAssets: true }
@@ -1163,7 +1168,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   return NextResponse.json({ status: step.status, outputData: step.outputData, assets: step.resultAssets })
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

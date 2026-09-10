@@ -11,7 +11,8 @@ import { createStep, startStep, completeStep, failStep, canExecuteStep } from '@
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -26,7 +27,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return access.response
   }
 
-  if (!await canExecuteStep(params.id, 'IDEATION')) {
+  if (!(await canExecuteStep(params.id, 'IDEATION'))) {
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
@@ -197,7 +198,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 }
 
 // 工作指令.txt（2026-05-24）：文本编辑 PATCH，保存用户编辑后的 directions
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

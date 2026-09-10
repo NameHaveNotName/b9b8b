@@ -4,6 +4,7 @@ export const maxDuration = 300 // Vercel max 300s, 给 after() 后台任务足�
 import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
@@ -125,7 +126,8 @@ async function generateStylePrompts(
   return { prompts, styleOptions }
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -140,7 +142,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return access.response
   }
 
-  if (!await canExecuteStep(params.id, 'STYLE')) {
+  if (!(await canExecuteStep(params.id, 'STYLE'))) {
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
@@ -550,7 +552,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 }
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const access = await checkProjectPermission(params.id)
+  if (!access.allowed) return access.response
+
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'STYLE' } },
     include: { resultAssets: true },
@@ -582,7 +588,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   })
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })

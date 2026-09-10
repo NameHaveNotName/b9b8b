@@ -7,7 +7,7 @@
  *
  * 修正说明：
  * - 不复用错误的 /v1/videos/generations 同步路由
- * - 复用 lib/api-clients/xiaomi.ts 中已有的异步任务协议函数
+ * - 复用 lib/api-clients/openlux.ts 中已有的异步任务协议函数
  * - Hailuo 优先测试（供应商日志确认有消费记录）
  * - Veo 503 渠道未开通，暂时跳过
  * - 模型名使用供应商端真实名（如 MiniMax-Hailuo-02）
@@ -27,11 +27,11 @@ import {
   submitJimengVideo,
   pollJimengTask,
   resolveImageToBase64,
-} from '@/lib/api-clients/xiaomi'
+} from '@/lib/api-clients/openlux'
 
 // ==================== 配置 ====================
-const BASE_URL = process.env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
-const API_KEY = process.env.XIAOMI_API_KEY || ''
+const BASE_URL = process.env.OPENLUX_BASE_URL || 'https://api.openlux.ai'
+const API_KEY = process.env.OPENLUX_API_KEY || ''
 
 // 测试确认守卫
 const CONFIRMED = process.argv.includes('--yes') || process.env.VIDEO_TEST_CONFIRM === '1'
@@ -218,7 +218,7 @@ ${firstOnly.length > 0 ? firstOnly.map((r) => `- \`${r.model}\` — 仅支持首
 async function main() {
   console.log('[VIDEO-ROUTE-FIX] ==========================================')
   console.log('[VIDEO-ROUTE-FIX] 视频模型首尾帧能力测试（修正版）')
-  console.log('[VIDEO-ROUTE-FIX] 复用 lib/api-clients/xiaomi.ts 异步协议函数')
+  console.log('[VIDEO-ROUTE-FIX] 复用 lib/api-clients/openlux.ts 异步协议函数')
   console.log('[VIDEO-ROUTE-FIX] ==========================================')
 
   if (!CONFIRMED) {
@@ -228,7 +228,7 @@ async function main() {
   } else {
     console.log('[VIDEO-ROUTE-FIX] ✅ 已确认，开始真实测试')
     if (!API_KEY) {
-      console.error('[VIDEO-ROUTE-FIX] ❌ XIAOMI_API_KEY 未配置')
+      console.error('[VIDEO-ROUTE-FIX] ❌ OPENLUX_API_KEY 未配置')
       process.exit(1)
     }
   }

@@ -1,4 +1,4 @@
-// 直接测试 xiaomi-api 图像生成（用以诊断真实请求是否能通）
+// 直接测试 OpenLux 图像生成（用以诊断真实请求是否能通）
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -15,10 +15,10 @@ for (const line of envContent.split('\n')) {
   if (m) env[m[1]] = m[2]
 }
 
-const API_KEY = env.XIAOMI_API_KEY
-const BASE_URL = env.XIAOMI_BASE_URL || 'https://vip.123everything.com'
+const API_KEY = env.OPENLUX_API_KEY
+const BASE_URL = env.OPENLUX_BASE_URL || 'https://api.openlux.ai'
 
-console.log('API_KEY prefix:', API_KEY?.slice(0, 12) + '...')
+console.log('API_KEY configured:', Boolean(API_KEY))
 console.log('BASE_URL:', BASE_URL)
 
 async function test(label, payload) {

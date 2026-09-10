@@ -7,7 +7,7 @@
  * 输出保存在 test-7-models/ 目录下，每个模型一个文件。
  */
 
-import { generateImage } from '@/lib/api-clients/xiaomi'
+import { generateImage } from '@/lib/api-clients/openlux'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import * as fs from 'fs'
 import * as path from 'path'

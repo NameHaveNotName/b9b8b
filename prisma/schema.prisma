@@ -13,20 +13,36 @@ enum ProjectStatus {
   DELETED
 }
 
+enum GroupRole {
+  ADMIN
+  MEMBER
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INVITED
+  PENDING
+}
+
+enum GroupCostMode {
+  MEMBER_PAY
+  GROUP_POOL
+}
+
 // 12步工作流类型
 enum WorkflowStepType {
-  IDEATION       // 创意扩散
-  FRAMEWORK      // 框架搭建
-  STYLE          // 风格统一
-  CHARACTER      // 人物设计
-  CONCEPT        // 概念图生成
-  TRAILER        // 30s宣传片
-  STORYBOARD     // 分镜设计
-  KEYFRAMES      // 首尾帧
-  VIDEO_DIRECT   // 直生视频
-  VIDEO_RENDER   // AI渲染
-  CAMERA         // 电脑运镜
-  REVIEW         // 一致性检测/评测
+  IDEATION // 创意扩散
+  FRAMEWORK // 框架搭建
+  STYLE // 风格统一
+  CHARACTER // 人物设计
+  CONCEPT // 概念图生成
+  TRAILER // 30s宣传片
+  STORYBOARD // 分镜设计
+  KEYFRAMES // 首尾帧
+  VIDEO_DIRECT // 直生视频
+  VIDEO_RENDER // AI渲染
+  CAMERA // 电脑运镜
+  REVIEW // 一致性检测/评测
 }
 
 // 步骤执行状态
@@ -47,12 +63,23 @@ enum AssetType {
   REFERENCE
 }
 
+enum UserAssetKind {
+  CHARACTER
+  ENVIRONMENT
+  REFERENCE
+}
+
+enum UserAssetSource {
+  UPLOAD
+  GENERATED
+}
+
 // 评测维度
 enum EvaluationDimension {
-  CONSISTENCY    // 时序一致性
-  FIDELITY       // 语义保真度
-  AESTHETICS     // 视觉美学
-  SPEED          // 生成时效
+  CONSISTENCY // 时序一致性
+  FIDELITY // 语义保真度
+  AESTHETICS // 视觉美学
+  SPEED // 生成时效
 }
 
 // NextAuth.js v5 所需的 Account 模型
@@ -93,40 +120,70 @@ model VerificationToken {
 }
 
 model User {
-  id            String         @id @default(cuid())
-  email         String         @unique
-  name          String?
-  image         String?
-  emailVerified DateTime?
-  points        Int            @default(0)
-  isAdmin       Boolean        @default(false)
-  adminNote     String?
-  accounts         Account[]
-  sessions         Session[]
-  projects         Project[]
-  auditLogs        AuditLog[]
-  operationLogs    OperationLog[]
-  rechargeOrders   RechargeOrder[]
+  id                 String               @id @default(cuid())
+  email              String               @unique
+  name               String?
+  image              String?
+  emailVerified      DateTime?
+  points             Int                  @default(0)
+  isAdmin            Boolean              @default(false)
+  adminNote          String?
+  accounts           Account[]
+  sessions           Session[]
+  projects           Project[]
+  userAssets         UserAsset[]
+  auditLogs          AuditLog[]
+  operationLogs      OperationLog[]
+  rechargeOrders     RechargeOrder[]
   creativeIterations CreativeIteration[]
-  createdAt        DateTime       @default(now())
+  groupMemberships   GroupMembership[]
+  createdGroups      Group[]              @relation("CreatedGroups")
+  invitedMemberships GroupMembership[]    @relation("InvitedBy")
+  pointTransfersOut  GroupPointTransfer[] @relation("TransferFromUser")
+  createdAt          DateTime             @default(now())
+}
+
+model UserAsset {
+  id          String          @id @default(cuid())
+  userId      String          @map("user_id")
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        UserAssetKind
+  source      UserAssetSource
+  title       String?
+  description String?         @db.Text
+  prompt      String?         @db.Text
+  templateId  String?         @map("template_id")
+  mimeType    String          @map("mime_type")
+  storageKey  String          @map("storage_key")
+  url         String
+  metadata    Json?
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  @@index([userId, kind, createdAt])
+  @@map("user_assets")
 }
 
 model Project {
-  id                String         @id @default(cuid())
+  id                String        @id @default(cuid())
   userId            String
-  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title             String         @default("未命名项目")
-  rawIdea           String         @db.Text
-  selectedDirection Json?          // 选定的创意扩散方向
-  framework         Json?          // 框架搭建结果（背景/风格/角色/梗概/幕结构）
-  selectedStyleId   String?        // 关联 Asset.id
-  status            ProjectStatus  @default(ACTIVE)
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title             String        @default("未命名项目")
+  rawIdea           String        @db.Text
+  selectedDirection Json? // 选定的创意扩散方向
+  framework         Json? // 框架搭建结果（背景/风格/角色/梗概/幕结构）
+  selectedStyleId   String? // 关联 Asset.id
+  status            ProjectStatus @default(ACTIVE)
 
   // 框架导入相关字段
-  frameworkSource   String?        @default("generated") @map("framework_source") // 'generated' | 'imported' | 'mixed'
-  importedFileUrl   String?        @map("imported_file_url")
-  importedFileName  String?        @map("imported_file_name")
-  importedRawText   String?        @db.Text @map("imported_raw_text")
+  frameworkSource  String? @default("generated") @map("framework_source") // 'generated' | 'imported' | 'mixed'
+  importedFileUrl  String? @map("imported_file_url")
+  importedFileName String? @map("imported_file_name")
+  importedRawText  String? @map("imported_raw_text") @db.Text
+
+  // 小组关联
+  groupId String? @map("group_id")
+  group   Group?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   // 9步工作流完成状态（条件解锁 DAG 状态机）
   stepIdeaDone                 Boolean @default(false) @map("step_idea_done")
@@ -137,39 +194,91 @@ model Project {
   stepStoryboardDone           Boolean @default(false) @map("step_storyboard_done")
   stepStoryboardFirstframeDone Boolean @default(false) @map("step_storyboard_firstframe_done")
   stepTrailerDone              Boolean @default(false) @map("step_trailer_done")
-  stepEndingDone               Boolean @default(false) @map("step_ending_done")     // KEYFRAMES
-  stepDirectDone               Boolean @default(false) @map("step_direct_done")     // VIDEO_DIRECT
+  stepEndingDone               Boolean @default(false) @map("step_ending_done") // KEYFRAMES
+  stepDirectDone               Boolean @default(false) @map("step_direct_done") // VIDEO_DIRECT
 
-  steps             WorkflowStep[]
-  assets            Asset[]
-  comparisons       Comparison[]
+  steps              WorkflowStep[]
+  assets             Asset[]
+  comparisons        Comparison[]
   creativeIterations CreativeIteration[]
-  videoSegments     VideoSegment[]
-  voiceoverSegments VoiceoverSegment[]
+  videoSegments      VideoSegment[]
+  voiceoverSegments  VoiceoverSegment[]
 
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId, status])
+  @@index([groupId])
 }
 
 // 充值订单
 model RechargeOrder {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amountYuan      Int      @map("amount_yuan") // 人民币金额（分）
-  points          Int      // 对应点数
-  paymentMethod   String   @default("bank_transfer") @map("payment_method") // bank_transfer | alipay | wechat
-  proofImageUrl   String?  @map("proof_image_url") // 转账凭证图片URL
-  status          String   @default("pending") // pending | approved | rejected
-  adminNote       String?  @map("admin_note") // 管理员审核备注
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountYuan    Int      @map("amount_yuan") // 人民币金额（分）
+  points        Int // 对应点数
+  paymentMethod String   @default("bank_transfer") @map("payment_method") // bank_transfer | alipay | wechat
+  proofImageUrl String?  @map("proof_image_url") // 转账凭证图片URL
+  status        String   @default("pending") // pending | approved | rejected
+  adminNote     String?  @map("admin_note") // 管理员审核备注
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@index([userId, status])
   @@index([status, createdAt])
   @@map("recharge_orders")
+}
+
+model Group {
+  id             String               @id @default(cuid())
+  name           String
+  description    String?              @db.Text
+  createdById    String               @map("created_by_id")
+  createdBy      User                 @relation("CreatedGroups", fields: [createdById], references: [id], onDelete: Cascade)
+  points         Int                  @default(0)
+  costMode       GroupCostMode        @default(MEMBER_PAY) @map("cost_mode")
+  members        GroupMembership[]
+  projects       Project[]
+  pointTransfers GroupPointTransfer[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([createdById])
+}
+
+model GroupMembership {
+  id          String           @id @default(cuid())
+  groupId     String           @map("group_id")
+  group       Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId      String           @map("user_id")
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        GroupRole        @default(MEMBER)
+  status      MembershipStatus @default(ACTIVE)
+  invitedById String?          @map("invited_by_id")
+  invitedBy   User?            @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  joinedAt    DateTime         @default(now()) @map("joined_at")
+  createdAt   DateTime         @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId, status])
+  @@map("group_memberships")
+}
+
+model GroupPointTransfer {
+  id         String   @id @default(cuid())
+  groupId    String   @map("group_id")
+  group      Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId     String   @map("user_id")
+  user       User     @relation("TransferFromUser", fields: [userId], references: [id], onDelete: Cascade)
+  amount     Int
+  userAfter  Int      @map("user_after")
+  groupAfter Int      @map("group_after")
+  createdAt  DateTime @default(now())
+
+  @@index([groupId])
+  @@index([userId])
+  @@map("group_point_transfers")
 }
 
 model WorkflowStep {
@@ -178,14 +287,14 @@ model WorkflowStep {
   project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   stepType     WorkflowStepType
   status       StepStatus       @default(PENDING)
-  inputData    Json?            // 该步输入参数
-  outputData   Json?            // 该步输出结果
+  inputData    Json? // 该步输入参数
+  outputData   Json? // 该步输出结果
   errorMessage String?          @db.Text
-  order        Int              // 步骤顺序（0-11）
+  order        Int // 步骤顺序（0-11）
   retryCount   Int              @default(0)
   startedAt    DateTime?
   completedAt  DateTime?
-  resultAssets Asset[]          // 关联生成的资源
+  resultAssets Asset[] // 关联生成的资源
   createdAt    DateTime         @default(now())
 
   @@unique([projectId, stepType]) // 一个项目同一步骤只能有一条记录
@@ -200,9 +309,9 @@ model Asset {
   step       WorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
   type       AssetType
   mimeType   String
-  storageKey String        // R2 上的唯一 key
-  url        String        // 预签名 URL（短期）
-  metadata   Json?         // { seed, modelUsed, prompt, duration, size, styleRef, characterRef }
+  storageKey String // R2 上的唯一 key
+  url        String // 预签名 URL（短期）
+  metadata   Json? // { seed, modelUsed, prompt, duration, size, styleRef, characterRef }
   createdAt  DateTime      @default(now())
 
   @@index([projectId, type])
@@ -210,14 +319,14 @@ model Asset {
 }
 
 model Evaluation {
-  id           String                @id @default(cuid())
+  id           String              @id @default(cuid())
   assetId      String
   comparisonId String?
   dimension    EvaluationDimension
-  aiScore      Float?                // 自动评测 1-10
-  humanScore   Float?                // 人工评分 1-10
-  details      Json?                 // 帧级标记、差异说明等
-  createdAt    DateTime              @default(now())
+  aiScore      Float? // 自动评测 1-10
+  humanScore   Float? // 人工评分 1-10
+  details      Json? // 帧级标记、差异说明等
+  createdAt    DateTime            @default(now())
 
   @@index([assetId, dimension])
 }
@@ -226,9 +335,9 @@ model Comparison {
   id             String   @id @default(cuid())
   projectId      String
   project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  scriptSnapshot Json     // 评测时的分镜脚本快照
-  modelResults   Json     // { modelName: { taskId, assetId, status, url, cost } }
-  overallScores  Json?    // 各模型总分
+  scriptSnapshot Json // 评测时的分镜脚本快照
+  modelResults   Json // { modelName: { taskId, assetId, status, url, cost } }
+  overallScores  Json? // 各模型总分
   status         String   @default("PENDING") // PENDING, PROCESSING, COMPLETED
   createdAt      DateTime @default(now())
 
@@ -239,8 +348,8 @@ model AuditLog {
   id        String   @id @default(cuid())
   userId    String?
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  action    String   // GENERATE_IMAGE, GENERATE_VIDEO, LOGIN, EXPORT 等
-  inputHash String?  // 输入提示词的 SHA256
+  action    String // GENERATE_IMAGE, GENERATE_VIDEO, LOGIN, EXPORT 等
+  inputHash String? // 输入提示词的 SHA256
   outputUrl String?
   modelUsed String?
   ipAddress String?
@@ -256,7 +365,7 @@ model OperationLog {
   id             String   @id @default(uuid())
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type           String   // generate, regenerate, error
+  type           String // generate, regenerate, error
   projectId      String?
   workflowStepId String?
   assetId        String?
@@ -275,8 +384,9 @@ model VideoSegment {
   projectId    String   @map("project_id")
   project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   shotId       String   @map("shot_id") // 对应分镜 shot_001 / 概念图 asset id
+  actNumber    Int?     @map("act_number") // VIDEO_DIRECT 中区分不同幕的同名 shotId
   stepName     String   @map("step_name") // 'TRAILER' | 'VIDEO_DIRECT' | 'VIDEO_RENDER'
-  prompt       String   // 英文视频生成提示词
+  prompt       String // 英文视频生成提示词
   caption      String?  @map("caption") // 中文画面描述（前端展示用）
   videoUrl     String?  @map("video_url") // 生成后的视频 URL（R2 签名 URL）
   storageKey   String?  @map("storage_key") // R2 存储 key
@@ -291,6 +401,7 @@ model VideoSegment {
   @@index([projectId, status])
   @@index([projectId, stepName])
   @@index([projectId, sequence])
+  @@index([projectId, stepName, actNumber, shotId])
   @@map("VideoSegment")
 }
 
@@ -301,14 +412,14 @@ model CreativeIteration {
   userId              String   @map("user_id")
   user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   versionNumber       Int      @map("version_number")
-  originalInput       String   @db.Text @map("original_input")
-  creativeContent     String   @db.Text @map("creative_content")
-  retentionScore      Int?     @map("retention_score")      // 原内容保留度 0-100
-  qualityScore        Int?     @map("quality_score")        // 优秀程度 0-100
-  concerns            String?  @db.Text                     // AI 指出的核心顾虑
-  improvementOptions  Json?    @map("improvement_options")  // 改进选项数组
+  originalInput       String   @map("original_input") @db.Text
+  creativeContent     String   @map("creative_content") @db.Text
+  retentionScore      Int?     @map("retention_score") // 原内容保留度 0-100
+  qualityScore        Int?     @map("quality_score") // 优秀程度 0-100
+  concerns            String?  @db.Text // AI 指出的核心顾虑
+  improvementOptions  Json?    @map("improvement_options") // 改进选项数组
   selectedImprovement String?  @map("selected_improvement") // 用户选中的选项
-  customFeedback      String?  @db.Text @map("custom_feedback")
+  customFeedback      String?  @map("custom_feedback") @db.Text
   isCurrent           Boolean  @default(false) @map("is_current")
   createdAt           DateTime @default(now()) @map("created_at")
 
@@ -323,9 +434,9 @@ model VoiceoverSegment {
   project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   shotId       String   @map("shot_id") // 对应分镜 shotId
   stepName     String   @map("step_name") // 'VIDEO_DIRECT' | 'TRAILER'
-  text         String   @db.Text         // 配音文案/旁白
-  speaker      String?  // 说话人/角色名（如"旁白"）
-  voiceId      String?  @map("voice_id")  // MiniMax 音色 ID（AI 按角色人设自动分配）
+  text         String   @db.Text // 配音文案/旁白
+  speaker      String? // 说话人/角色名（如"旁白"）
+  voiceId      String?  @map("voice_id") // MiniMax 音色 ID（AI 按角色人设自动分配）
   audioUrl     String?  @map("audio_url") // 生成后的音频 URL（R2 签名 URL）
   storageKey   String?  @map("storage_key") // R2 存储 key
   status       String   @default("pending") @map("status") // pending | generating | completed | failed

@@ -16,7 +16,7 @@ const worker = new Worker('video-generation', async (job) => {
   // 工作指令.txt 第二阶段：Worker 入口诊断三件套
   console.log(`[TRAILER-JOB-START] job.id=${job.id}, name=${job.name}, projectId=${projectId}, stepId=${stepId}, timestamp=${new Date().toISOString()}`)
   console.log(`[TRAILER-JOB-DATA] type=${type}, conceptImages count=${(conceptImageKeys || []).length}, shotId=${shotId || ''}, segmentId=${segmentId || ''}`)
-  console.log(`[TRAILER-JOB-ENV] XIAOMI_API_KEY exists=${!!process.env.XIAOMI_API_KEY}, REDIS_URL exists=${!!process.env.UPSTASH_REDIS_URL}, R2_ACCOUNT_ID exists=${!!process.env.R2_ACCOUNT_ID && !process.env.R2_ACCOUNT_ID!.startsWith('your-')}`)
+  console.log(`[TRAILER-JOB-ENV] OPENLUX_API_KEY exists=${!!process.env.OPENLUX_API_KEY}, REDIS_URL exists=${!!process.env.UPSTASH_REDIS_URL}, R2_ACCOUNT_ID exists=${!!process.env.R2_ACCOUNT_ID && !process.env.R2_ACCOUNT_ID!.startsWith('your-')}`)
   const videoClient = await getVideoClient()
 
   try {

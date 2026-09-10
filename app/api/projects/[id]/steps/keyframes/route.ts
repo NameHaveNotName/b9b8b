@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
@@ -12,7 +13,8 @@ import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -27,7 +29,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return access.response
   }
 
-  if (!await canExecuteStep(params.id, 'KEYFRAMES')) {
+  if (!(await canExecuteStep(params.id, 'KEYFRAMES'))) {
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
@@ -251,7 +253,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
         })
       }
 
-      await completeStep(step.id, { results, keyframes: results, count: results.length, aspectRatio, imageModel: imageModel || 'gpt-image-2' })
+      await completeStep(step.id, { results, keyframes: results, count: results.length, aspectRatio, imageModel: imageModel || 'gpt-image-1' })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       console.log(`[KEYFRAMES-IMAGE] 用户确认，开始生图，共 ${prompts.length} 条，比例 ${aspectRatio}，模型 ${imageModel || '默认'}`)
       return NextResponse.json({ success: true, data: { results, count: results.length } })
@@ -358,7 +360,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -405,7 +408,11 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   return NextResponse.json({ success: true })
 }
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const access = await checkProjectPermission(params.id)
+  if (!access.allowed) return access.response
+
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'KEYFRAMES' } },
     include: { resultAssets: true }

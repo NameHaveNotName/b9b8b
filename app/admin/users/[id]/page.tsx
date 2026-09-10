@@ -18,10 +18,11 @@ import {
 } from 'lucide-react'
 
 interface PageProps {
-  params: { id: string }
+  params: Promise<{ id: string }>
 }
 
-export default async function AdminUserDetailPage({ params }: PageProps) {
+export default async function AdminUserDetailPage(props: PageProps) {
+  const params = await props.params;
   const admin = await getCurrentUser()
   if (!admin || !admin.isAdmin) {
     redirect('/login')
