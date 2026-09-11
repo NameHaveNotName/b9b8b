@@ -11,10 +11,16 @@ import RechargeModal from '@/components/recharge/RechargeModal'
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': '仪表盘',
   '/project/new': '新建项目',
+  '/assets': '全局资产库',
+  '/groups': '小组项目',
+  '/groups/new': '创建小组',
+  '/invitations': '小组邀请',
 }
 
 function getPageTitle(pathname: string): string {
   if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname]
+  if (pathname.match(/^\/groups\/[^/]+\/projects\/new$/)) return '新建小组项目'
+  if (pathname.match(/^\/groups\/[^/]+$/)) return '小组详情'
   if (pathname.startsWith('/project/') && pathname.endsWith('/workflow')) return '工作流看板'
   if (pathname.startsWith('/project/') && pathname.endsWith('/storyboard')) return '分镜编辑器'
   if (pathname.startsWith('/project/') && pathname.endsWith('/assets')) return '资产库'

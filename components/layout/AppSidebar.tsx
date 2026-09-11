@@ -16,6 +16,9 @@ import {
   Users,
   Shield,
   CreditCard,
+  Images,
+  UsersRound,
+  Mail,
 } from 'lucide-react'
 
 interface Project {
@@ -47,6 +50,9 @@ export default function AppSidebar({
   const navItems = [
     { href: '/dashboard', label: '仪表盘', icon: LayoutDashboard },
     { href: '/project/new', label: '新建项目', icon: PlusCircle },
+    { href: '/assets', label: '全局资产库', icon: Images },
+    { href: '/groups', label: '小组项目', icon: UsersRound },
+    { href: '/invitations', label: '小组邀请', icon: Mail },
   ]
 
   return (
@@ -65,7 +71,9 @@ export default function AppSidebar({
       {/* 导航 */}
       <nav className="flex-1 space-y-1 px-3">
         {navItems.map((item) => {
-          const isActive = pathname === item.href
+          const isActive =
+            pathname === item.href ||
+            (item.href !== '/dashboard' && item.href !== '/project/new' && pathname?.startsWith(`${item.href}/`))
           const Icon = item.icon
           return (
             <Link

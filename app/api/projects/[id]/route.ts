@@ -145,6 +145,14 @@ export async function DELETE(req: Request, props: { params: Promise<{ id: string
     if (!access.allowed) return access.response
     const { user, isOwner } = access
 
+    // 小组成员可以协作编辑，但不能删除他人创建的项目。
+    if (!isOwner && !user.isAdmin) {
+      return NextResponse.json(
+        { error: 'AUTH_002', message: '只有项目所有者可以删除项目' },
+        { status: 403 }
+      )
+    }
+
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       select: {

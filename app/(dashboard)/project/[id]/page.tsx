@@ -26,6 +26,7 @@ import IdeaAnchor from '@/components/workflow/IdeaAnchor'
 import StepBadge from '@/components/workflow/StepBadge'
 import EditableTitle from './_components/EditableTitle'
 import AssetPreview from './_components/AssetPreview'
+import MoveToGroupButton from './_components/MoveToGroupButton'
 
 const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   IDEATION: Lightbulb,
@@ -82,10 +83,24 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
       notFound()
     }
 
-    // 非项目所有者且非管理员 → 重定向到 dashboard
-    if (project.userId !== user.id && !user.isAdmin) {
-      redirect('/dashboard')
-    }
+    const isOwner = project.userId === user.id || user.isAdmin
+    const membership = !isOwner && project.groupId
+      ? await prisma.groupMembership.findUnique({
+          where: { groupId_userId: { groupId: project.groupId, userId: user.id } },
+          select: { status: true },
+        })
+      : null
+
+    // 小组项目对 ACTIVE 成员开放；个人项目仍仅限所有者和系统管理员。
+    if (!isOwner && membership?.status !== 'ACTIVE') redirect('/dashboard')
+
+    const availableGroups = isOwner && !project.groupId
+      ? await prisma.groupMembership.findMany({
+          where: { userId: user.id, status: 'ACTIVE' },
+          select: { group: { select: { id: true, name: true } } },
+          orderBy: { joinedAt: 'desc' },
+        })
+      : []
 
     const completedCount = project.steps.filter((s) => s.status === 'COMPLETED').length
     const currentStep =
@@ -149,6 +164,15 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
                   查看资产
                 </Link>
               </div>
+
+              {availableGroups.length > 0 && (
+                <div className="mt-5 border-t border-stone-100 pt-4">
+                  <MoveToGroupButton
+                    projectId={project.id}
+                    groups={availableGroups.map((item) => item.group)}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
