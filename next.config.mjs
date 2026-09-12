@@ -12,6 +12,7 @@ const nextConfig = {
     'sharp',
     '@img/sharp-libvips-linux-x64',
     'xlsx',
+    'exceljs',
     '@aws-sdk/client-s3',
     '@aws-sdk/s3-request-presigner',
     'docx',
