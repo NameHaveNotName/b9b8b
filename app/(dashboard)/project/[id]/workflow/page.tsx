@@ -1504,6 +1504,7 @@ function IdeationPanel({
   const [contentType, setContentType] = useState<'story' | 'storyboard'>('story')
   const [storyboardShots, setStoryboardShots] = useState<any[] | null>(null)
   const [showStoryboardChoice, setShowStoryboardChoice] = useState(false)
+  const [xlsxImageFiles, setXlsxImageFiles] = useState<File[]>([])
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
@@ -1619,7 +1620,7 @@ function IdeationPanel({
       'application/pdf',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ]
-    if (!allowedTypes.includes(file.type)) {
+    if (!allowedTypes.includes(file.type) && !file.name.endsWith('.xlsx')) {
       setUploadError('不支持的文件格式，请上传 txt、docx、pdf 或 xlsx 文件')
       return
     }
@@ -1627,8 +1628,197 @@ function IdeationPanel({
     setUploading(true)
     setUploadError('')
     setUploadedFileName(file.name)
+    setXlsxImageFiles([])
 
     try {
+      // xlsx 文件：前端解析，避免 413（xlsx 含图片可能很大）
+      if (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || file.name.endsWith('.xlsx')) {
+        const XLSX = await import('xlsx')
+        const buffer = await file.arrayBuffer()
+        const workbook = XLSX.read(buffer, { type: 'array' })
+        const sheetName = workbook.SheetNames[0]
+        const sheet = workbook.Sheets[sheetName]
+        const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][]
+
+        // 自动检测表头行
+        const STORYBOARD_KEYWORDS = ['镜号', '镜头号', '编号', 'shot', 'shot_id', 'id', '序号', '分镜号']
+        let headerRow = -1
+        for (let i = 0; i < Math.min(30, data.length); i++) {
+          const row = data[i]
+          if (!row) continue
+          const found = row.some((cell: any) => {
+            const v = String(cell || '').toLowerCase().trim()
+            return STORYBOARD_KEYWORDS.some(k => v.includes(k))
+          })
+          if (found) { headerRow = i; break }
+        }
+        if (headerRow < 0) headerRow = 2 // 默认第3行
+
+        // 检测 shotId 列
+        const headerRowData = data[headerRow] || []
+        let shotIdCol = -1
+        for (let c = 0; c < headerRowData.length; c++) {
+          const v = String(headerRowData[c] || '').toLowerCase().trim()
+          if (STORYBOARD_KEYWORDS.some(k => v.includes(k))) { shotIdCol = c; break }
+        }
+        // 模式检测：如果关键词没找到，找第一列大多是数字编号的列
+        if (shotIdCol < 0) {
+          for (let c = 0; c < Math.min(10, (data[headerRow + 1] || []).length); c++) {
+            let nums = 0
+            for (let r = headerRow + 1; r < Math.min(headerRow + 11, data.length); r++) {
+              if (/^\d{1,4}$/.test(String((data[r] || [])[c] || '').trim())) nums++
+            }
+            if (nums >= 2) { shotIdCol = c; break }
+          }
+        }
+
+        // 检测其他列
+        const COL_KEYWORDS: Record<string, string[]> = {
+          timecode: ['起止时间', '时间码', '时间', 'timecode'],
+          duration: ['时长', 'duration', '秒'],
+          narration: ['旁白', '台词', '台词/旁白', 'narration', 'dialogue', '对应歌词', '对应音效'],
+          cameraMove: ['运镜', '镜头运动', 'camera', '景别', '机位'],
+          description: ['画面描述', '描述', '画面', 'description', '镜头画面', '镜头画面描述'],
+          visualDetail: ['视觉细节', '细节', '备注', 'visual', 'detail', 'note', 'AI镜头画面'],
+          transition: ['剪辑点', '转场', 'transition', 'cut', '章节'],
+        }
+        const colMap: Record<string, number> = {}
+        for (let c = 0; c < headerRowData.length; c++) {
+          const v = String(headerRowData[c] || '').toLowerCase().trim()
+          for (const [field, keywords] of Object.entries(COL_KEYWORDS)) {
+            if (!(field in colMap) && keywords.some(k => v.includes(k))) colMap[field] = c
+          }
+        }
+
+        // 时间码解析
+        function parseTc(tc: string): number {
+          if (!tc) return 5
+          const m = tc.match(/(\d+):(\d+(?:\.\d+)?)[^\d]*(\d+):(\d+(?:\.\d+)?)/)
+          if (m) return (parseInt(m[3]) * 60 + parseFloat(m[4])) - (parseInt(m[1]) * 60 + parseFloat(m[2]))
+          const n = parseFloat(tc)
+          return isNaN(n) ? 5 : n
+        }
+
+        // 确定数据范围
+        const dataStart = headerRow + 1
+        let dataEnd = dataStart
+        let emptyCount = 0
+        for (let r = dataStart; r < data.length; r++) {
+          const row = data[r]
+          const shotVal = shotIdCol >= 0 ? String((row || [])[shotIdCol] || '').trim() : ''
+          const hasContent = shotVal ? /^\d{1,4}$/.test(shotVal) : (row || []).some((c: any) => c != null && String(c).trim() !== '')
+          if (hasContent) { dataEnd = r; emptyCount = 0 } else { emptyCount++; if (emptyCount >= 3) break }
+        }
+
+        // 解析分镜数据
+        const shots: any[] = []
+        for (let r = dataStart; r <= dataEnd; r++) {
+          const row = data[r] || []
+          let shotId = shotIdCol >= 0 ? String(row[shotIdCol] || '').trim() : ''
+          if (shotIdCol >= 0 && (!shotId || shotId.length > 10 || shotId.includes('分镜') || shotId.includes('表'))) continue
+          if (shotIdCol < 0) shotId = String(shots.length + 1).padStart(3, '0')
+
+          const description = colMap.description != null ? String(row[colMap.description] || '').trim() : ''
+          const cameraMove = colMap.cameraMove != null ? String(row[colMap.cameraMove] || '').trim() : ''
+          const narration = colMap.narration != null ? String(row[colMap.narration] || '').trim() : ''
+          const timecode = colMap.timecode != null ? String(row[colMap.timecode] || '').trim() : ''
+          const duration = colMap.duration != null ? parseTc(String(row[colMap.duration] || '')) : 5
+          const visualDetail = colMap.visualDetail != null ? String(row[colMap.visualDetail] || '').trim() : ''
+          const transition = colMap.transition != null ? String(row[colMap.transition] || '').trim() : ''
+
+          if (description || cameraMove || narration) {
+            shots.push({ shotId, timecode, duration, narration, cameraMove, description: description || cameraMove || narration, visualDetail, transition })
+          }
+        }
+
+        if (shots.length === 0) {
+          setUploadError('未在 xlsx 中检测到分镜数据')
+          return
+        }
+
+        setContentType('storyboard')
+        setStoryboardShots(shots)
+
+        // SheetJS 免费版不支持读取嵌入图片，需要用 exceljs（服务端库）
+        // 通过动态 import exceljs 来解析图片
+        // exceljs 在 browser 中通过 webpack 打包可用
+        try {
+          const ExcelJS = await import('exceljs')
+          const ewb = new ExcelJS.Workbook()
+          await ewb.xlsx.load(buffer as any)
+          const ews = ewb.worksheets[0]
+          if (ews) {
+            const imageMetas = ews.getImages() as any[]
+            const imageFiles: File[] = []
+            // 构建 shotId 到行号的映射
+            const shotIdToRow = new Map<string, number>()
+            for (let r = dataStart; r <= dataEnd; r++) {
+              const v = shotIdCol >= 0 ? String((data[r] || [])[shotIdCol] || '').trim() : ''
+              if (v && /^\d{1,4}$/.test(v)) shotIdToRow.set(v, r)
+            }
+
+            for (const meta of imageMetas) {
+              try {
+                const row = meta.range?.tl?.nativeRow != null ? meta.range.tl.nativeRow + 1 : -1
+                if (row < 0) continue
+
+                // 跳过表头行之前的图片（logo等装饰图）
+                if (row < dataStart) continue
+
+                // 匹配 shotId
+                let matchedShotId: string | null = null
+                if (shotIdCol >= 0) {
+                  const cellVal = String((data[row - 1] || [])[shotIdCol] || '').trim()
+                  if (cellVal && /^\d{1,4}$/.test(cellVal)) matchedShotId = cellVal
+                  if (!matchedShotId) {
+                    for (let up = 1; up <= 5; up++) {
+                      const checkRow = row - up
+                      if (checkRow < dataStart) break
+                      const upVal = String((data[checkRow - 1] || [])[shotIdCol] || '').trim()
+                      if (upVal && /^\d{1,4}$/.test(upVal)) { matchedShotId = upVal; break }
+                    }
+                  }
+                } else {
+                  const idx = row - dataStart
+                  if (idx >= 0 && idx < shots.length) matchedShotId = shots[idx].shotId
+                }
+
+                if (!matchedShotId) continue
+
+                const imgResult = ews.workbook.getImage(meta.imageId) as any
+                const imgBuffer: ArrayBuffer | null = imgResult?.buffer || imgResult
+                if (!imgBuffer) continue
+
+                // 检测 MIME
+                const u8 = new Uint8Array(imgBuffer.slice(0, 4))
+                let mime = 'image/png', ext = 'png'
+                if (u8[0] === 0xFF && u8[1] === 0xD8) { mime = 'image/jpeg'; ext = 'jpg' }
+                else if (u8[0] === 0x89 && u8[1] === 0x50) { mime = 'image/png'; ext = 'png' }
+                else if (u8[0] === 0x47 && u8[1] === 0x49) { mime = 'image/gif'; ext = 'gif' }
+
+                // 计算该 shot 已有图片数
+                const existingCount = imageFiles.filter(f => f.name.startsWith(`${matchedShotId}_`)).length
+                const fileName = `${matchedShotId}_${existingCount}.${ext}`
+                imageFiles.push(new File([imgBuffer], fileName, { type: mime }))
+              } catch (e: any) {
+                console.warn('[XLSX-PARSE] 跳过图片:', e?.message)
+              }
+            }
+
+            setXlsxImageFiles(imageFiles)
+            console.log(`[XLSX-PARSE] 解析完成: ${shots.length} 个分镜, ${imageFiles.length} 张图片`)
+          }
+        } catch (e: any) {
+          console.warn('[XLSX-PARSE] exceljs 图片解析失败（SheetJS 兜底）:', e?.message)
+          // exceljs 在浏览器中可能不可用，降级为纯文本导入（无图片）
+        }
+
+        setShowStoryboardChoice(true)
+        await mutate()
+        return
+      }
+
+      // 非 xlsx 文件：走原有服务端解析流程
       const formData = new FormData()
       formData.append('file', file)
 
@@ -1715,22 +1905,41 @@ function IdeationPanel({
 
     setImporting(true)
     try {
-      const res = await fetch(`/api/projects/${projectId}/import-storyboard`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          shots: storyboardShots,
-          mode,
-        }),
-      })
-      const data = await res.json()
+      if (xlsxImageFiles.length > 0) {
+        // 有图片：使用新 API，发送 shots JSON + 图片文件
+        const formData = new FormData()
+        formData.append('shots', JSON.stringify(storyboardShots))
+        formData.append('mode', mode)
+        for (const imgFile of xlsxImageFiles) {
+          formData.append('images', imgFile)
+        }
 
-      if (!res.ok || data.error) {
-        throw new Error(data.message || '导入失败')
+        const res = await fetch(`/api/projects/${projectId}/import-storyboard-with-images`, {
+          method: 'POST',
+          body: formData,
+        })
+        const data = await res.json()
+
+        if (!res.ok || data.error) {
+          throw new Error(data.message || '导入失败')
+        }
+      } else {
+        // 无图片：使用原有 API
+        const res = await fetch(`/api/projects/${projectId}/import-storyboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shots: storyboardShots, mode }),
+        })
+        const data = await res.json()
+
+        if (!res.ok || data.error) {
+          throw new Error(data.message || '导入失败')
+        }
       }
 
       setShowStoryboardChoice(false)
       setShowUploadPanel(false)
+      setXlsxImageFiles([])
       await mutate()
     } catch (e: any) {
       setUploadError(e.message || '导入失败')
