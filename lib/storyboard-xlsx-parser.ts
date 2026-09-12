@@ -50,7 +50,8 @@ export interface ParseResult {
 }
 
 const SHOT_ID_KEYWORDS = ['镜号', '镜头号', '编号', 'shot', 'shot_id', 'shot id', 'id', '序号', '镜头编号', '分镜号', '镜头序号', '分镜序号']
-const IMAGE_KEYWORDS = ['分镜图片', '图片', 'image', 'pic', '参考图', '示意图', '画面', '分镜图', '截图', '缩略图']
+// 按优先级排序：越具体的关键词越靠前
+const IMAGE_KEYWORDS = ['分镜图片', '分镜图', '参考图', '示意图', '截图', '缩略图', 'image', 'pic', '图片', '画面']
 
 export async function parseXlsxWithImages(buffer: Buffer): Promise<ParseResult> {
   const workbook = new ExcelJS.Workbook()
@@ -185,22 +186,16 @@ function detectHeaderRow(worksheet: ExcelJS.Worksheet): number {
 
 // === 方法A：通过列头关键词检测 shotId 列 ===
 function detectShotIdByKeyword(worksheet: ExcelJS.Worksheet, headerRow: number): { col: number | null; label: string } {
-  const row = worksheet.getRow(headerRow)
-  let bestCol: number | null = null
-  let bestLabel = ''
-
-  row.eachCell((cell, colNumber) => {
-    const val = String(cell.value || '').toLowerCase().trim()
-    for (const keyword of SHOT_ID_KEYWORDS) {
+  for (const keyword of SHOT_ID_KEYWORDS) {
+    for (let c = 1; c <= worksheet.columnCount; c++) {
+      const cell = worksheet.getCell(headerRow, c)
+      const val = String(cell.value || '').toLowerCase().trim()
       if (val.includes(keyword)) {
-        bestCol = colNumber
-        bestLabel = String(cell.value || '')
-        return
+        return { col: c, label: String(cell.value || '') }
       }
     }
-  })
-
-  return { col: bestCol, label: bestLabel }
+  }
+  return { col: null, label: '' }
 }
 
 // === 方法B：通过数据模式检测 shotId 列 ===
@@ -238,22 +233,33 @@ function detectShotIdByPattern(worksheet: ExcelJS.Worksheet, headerRow: number):
 
 // === 方法A：通过列头关键词检测图片列 ===
 function detectImageColByKeyword(worksheet: ExcelJS.Worksheet, headerRow: number): { col: number | null; label: string } {
-  const row = worksheet.getRow(headerRow)
-  let bestCol: number | null = null
-  let bestLabel = ''
-
-  row.eachCell((cell, colNumber) => {
-    const val = String(cell.value || '').toLowerCase().trim()
-    for (const keyword of IMAGE_KEYWORDS) {
+  // 按关键词优先级遍历，先匹配到的更准确
+  for (const keyword of IMAGE_KEYWORDS) {
+    let found = false
+    const row = worksheet.getRow(headerRow)
+    row.eachCell((cell, colNumber) => {
+      if (found) return
+      const val = String(cell.value || '').toLowerCase().trim()
       if (val.includes(keyword)) {
-        bestCol = colNumber
-        bestLabel = String(cell.value || '')
-        return
+        found = true
+        return { col: colNumber, label: String(cell.value || '') }
+      }
+    })
+    // eachCell 的 return 不会返回值，需要改用其他方式
+  }
+
+  // 备选方案：手动迭代
+  for (const keyword of IMAGE_KEYWORDS) {
+    for (let c = 1; c <= worksheet.columnCount; c++) {
+      const cell = worksheet.getCell(headerRow, c)
+      const val = String(cell.value || '').toLowerCase().trim()
+      if (val.includes(keyword)) {
+        return { col: c, label: String(cell.value || '') }
       }
     }
-  })
+  }
 
-  return { col: bestCol, label: bestLabel }
+  return { col: null, label: '' }
 }
 
 // === 方法B：通过图片数量统计检测图片列 ===
@@ -297,8 +303,8 @@ function extractImages(worksheet: ExcelJS.Worksheet): Array<{ row: number; col: 
       const col = meta.range.tl.nativeCol + 1
 
       // 通过 workbook.getImage 获取图片 buffer
-      // @ts-ignore
-      const imgBuffer = worksheet.workbook.getImage(meta.imageId) as Buffer
+      const imgResult = worksheet.workbook.getImage(meta.imageId) as any
+      const imgBuffer: Buffer | null = imgResult?.buffer || imgResult
       if (!imgBuffer || imgBuffer.length === 0) continue
 
       // 检测 MIME 类型
