@@ -1,13 +1,35 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentUserId } from '@/lib/auth-helpers'
-import { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST } from '@/lib/points-config'
+import { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST, GENERATION_COSTS, COST_CATEGORY_MAP, COST_ACTION_KEY_MAP } from '@/lib/points-config'
 import { logOperation } from '@/lib/operations'
 import { selectBillingTarget, type BillingSource } from '@/lib/billing-policy'
 import {
   attachOperationResults,
   beginSupplierOperation,
+  finalizeCurrentSupplierOperation,
   getCurrentOperationId,
+  type OperationCategory,
 } from '@/lib/supplier-observability'
+
+/**
+ * 根据成本常量获取操作类别
+ */
+export function getCategoryFromCost(cost: number): OperationCategory {
+  for (const [key, value] of Object.entries(GENERATION_COSTS)) {
+    if (value === cost) return COST_CATEGORY_MAP[key as keyof typeof COST_CATEGORY_MAP] || 'OTHER'
+  }
+  return 'OTHER'
+}
+
+/**
+ * 根据成本常量获取 actionKey
+ */
+export function getActionKeyFromCost(cost: number): string {
+  for (const [key, value] of Object.entries(GENERATION_COSTS)) {
+    if (value === cost) return COST_ACTION_KEY_MAP[key as keyof typeof COST_ACTION_KEY_MAP] || 'generation.unknown'
+  }
+  return 'generation.unknown'
+}
 
 // 重新导出常量，保持 API 路由的 backward compatibility
 export { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST }
@@ -71,6 +93,8 @@ async function resolveBillingTarget(
 export async function checkPoints(
   cost: number = DEFAULT_GENERATE_COST,
   projectId?: string,
+  actionKey?: string,
+  category?: OperationCategory,
 ): Promise<PointsCheckResult> {
   const userId = await getCurrentUserId()
   if (!userId) {
@@ -105,6 +129,8 @@ export async function checkPoints(
         billingSource: target.source,
         billingGroupId: target.groupId,
         projectId,
+        actionKey,
+        category,
       })
     } catch (error: any) {
       // Observability is fail-open: an unavailable ledger must not block generation.
@@ -251,6 +277,13 @@ export async function refundPointsAndLog(
   },
 ) {
   if (cost <= 0) return
+
+  await finalizeCurrentSupplierOperation({
+    status: 'FAILED',
+    projectId: meta.projectId,
+    workflowStepId: meta.workflowStepId,
+    errorMessage: meta.errorMessage || '任务失败，点数已退回',
+  })
 
   await prisma.$transaction(async (tx) => {
     let balanceAfter: number
