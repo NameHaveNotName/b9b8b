@@ -1780,11 +1780,12 @@ function IdeationPanel({
               const drawingRelsPath = drawingPath.replace(/drawing(\d+)\.xml$/, '_rels/drawing$1.xml.rels')
               const drawingRels = zipData[drawingRelsPath] ? strFromU8(zipData[drawingRelsPath]) : ''
               const ridToMedia = new Map<string, string>()
-              const ridRegex = /Id="([^"]+)"[^>]*Target="([^"]+)"/g
+              // 支持 Id 在 Target 前后两种顺序
+              const ridRegex = /(?:Id="([^"]+)"[^>]*Target="([^"]+)"|Target="([^"]+)"[^>]*Id="([^"]+)")/g
               let ridMatch
               while ((ridMatch = ridRegex.exec(drawingRels)) !== null) {
-                const rid = ridMatch[1]
-                let target = ridMatch[2]
+                const rid = ridMatch[1] || ridMatch[4]
+                let target = ridMatch[2] || ridMatch[3]
                 // 处理绝对路径（/xl/media/image.jpg）和相对路径（../media/image1.png）
                 if (target.startsWith('/')) {
                   target = target.substring(1) // 去掉开头的 /
