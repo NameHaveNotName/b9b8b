@@ -462,11 +462,6 @@ async function handleComposeDirectVideo(projectId: string, stepId: string) {
 
 /** 生成直生视频背景音乐（复用 bgm-generator） */
 async function handleGenerateDirectBgm(projectId: string, stepId: string, userId: string) {
-  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM, projectId, 'generation.bgm', 'MUSIC')
-  if (!pointsCheck.ok) {
-    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
-  }
-
   const segments = await prisma.videoSegment.findMany({
     where: { projectId, stepName: 'VIDEO_DIRECT', status: 'completed' },
     orderBy: { sequence: 'asc' },
@@ -474,6 +469,11 @@ async function handleGenerateDirectBgm(projectId: string, stepId: string, userId
 
   if (segments.length === 0) {
     return NextResponse.json({ error: 'NO_SEGMENTS', message: '先生成至少一个视频片段后再生成背景音乐' }, { status: 400 })
+  }
+
+  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM, projectId, 'generation.bgm', 'MUSIC')
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
   const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
@@ -519,7 +519,7 @@ async function handleGenerateDirectBgm(projectId: string, stepId: string, userId
       data: { outputData: updatedOutput },
     })
 
-    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+    await deductPointsAndLog(userId, bgmIsMock ? 0 : pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
 
     return NextResponse.json({
       success: true,

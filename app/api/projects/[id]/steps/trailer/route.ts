@@ -626,11 +626,6 @@ async function handleComposeVideo(projectId: string, stepId: string, body?: any)
 
 /** 生成背景音乐 */
 async function handleGenerateBgm(projectId: string, stepId: string, userId: string) {
-  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM, projectId, 'generation.bgm', 'MUSIC')
-  if (!pointsCheck.ok) {
-    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
-  }
-
   // 计算总时长（所有已完成片段之和）
   const segments = await prisma.videoSegment.findMany({
     where: { projectId, stepName: 'TRAILER', status: 'completed' },
@@ -639,6 +634,11 @@ async function handleGenerateBgm(projectId: string, stepId: string, userId: stri
 
   if (segments.length === 0) {
     return NextResponse.json({ error: 'NO_SEGMENTS', message: '先生成至少一个视频片段后再生成背景音乐' }, { status: 400 })
+  }
+
+  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM, projectId, 'generation.bgm', 'MUSIC')
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
   const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
@@ -688,7 +688,9 @@ async function handleGenerateBgm(projectId: string, stepId: string, userId: stri
       data: { outputData: updatedOutput },
     })
 
-    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+    // A silent local fallback is useful for composition, but it is not a paid
+    // supplier result and therefore must not consume generation points.
+    await deductPointsAndLog(userId, bgmIsMock ? 0 : pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
 
     return NextResponse.json({
       success: true,

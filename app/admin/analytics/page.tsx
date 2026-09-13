@@ -313,6 +313,7 @@ export default function AdminAnalyticsPage() {
               {operations.map((operation) => {
                 const first = operation.providerAttempts[0];
                 const netPoints = operation.pointsCost - operation.pointsRefunded;
+                const isLocalTask = operation.actionKey === "generation.storyboard_images";
                 return (
                   <tr key={operation.id} className="hover:bg-stone-50">
                     <td className="whitespace-nowrap px-4 py-3 text-xs text-stone-500">{new Date(operation.createdAt).toLocaleString("zh-CN")}</td>
@@ -326,7 +327,7 @@ export default function AdminAnalyticsPage() {
                       <div className="text-xs text-stone-400">{operation.category}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <div>{first?.provider || (operation.providerAttempts.length ? "未知供应商" : "无调用明细")}</div>
+                      <div>{first?.provider || (isLocalTask ? "平台本地任务" : operation.providerAttempts.length ? "未知供应商" : "无调用明细")}</div>
                       <div className="max-w-44 truncate text-xs text-stone-400">
                         {first?.model || "—"} · {operation.providerAttempts.length} 次调用
                       </div>
