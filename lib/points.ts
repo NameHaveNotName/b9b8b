@@ -220,6 +220,7 @@ export async function deductPointsAndLog(
     }
 
     const completedAt = new Date()
+    // actionKey/category: 有 operationId 时不覆盖已有的值（由 beginSupplierOperation 设置）
     const operationData = {
         userId,
         type,
@@ -228,6 +229,7 @@ export async function deductPointsAndLog(
           : operationId
             ? {}
             : { actionKey: `generation.${type}` }),
+        ...(operationId ? {} : { category: 'OTHER' }),
         status: 'SUCCEEDED',
         projectId: meta.projectId,
         workflowStepId: meta.workflowStepId,
