@@ -99,7 +99,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   const body = await req.json().catch(() => ({}))
-  const { shots, mode } = body // mode: 'ai_complete' | 'skip_framework'
+  const { shots, mode, firstFrameMap } = body // mode: 'ai_complete' | 'skip_framework'
 
   if (!shots || !Array.isArray(shots) || shots.length === 0) {
     return NextResponse.json({ error: 'VALID_001', message: '缺少分镜数据' }, { status: 400 })
@@ -119,18 +119,23 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   try {
     // 1. 转换分镜表格式
-    const convertedShots = shots.map((shot: StoryboardShot, index: number) => ({
-      shotId: shot.shotId || `shot_${String(index + 1).padStart(3, '0')}`,
-      actNumber: 1,
-      description: shot.description,
-      cameraMove: shot.cameraMove || '固定',
-      duration: shot.duration || 5,
-      narration: shot.narration || '',
-      characters: [],
+    const convertedShots = shots.map((shot: StoryboardShot, index: number) => {
+      const shotId = shot.shotId || `shot_${String(index + 1).padStart(3, '0')}`
+      const firstFrame = firstFrameMap?.[shotId]
+      return {
+        shotId,
+        actNumber: 1,
+        description: shot.description,
+        cameraMove: shot.cameraMove || '固定',
+        duration: shot.duration || 5,
+        narration: shot.narration || '',
+        characters: [],
       sceneName: '',
       visualDetail: shot.visualDetail || '',
       transition: shot.transition || '',
-    }))
+      ...(firstFrame ? { firstFrameUrl: firstFrame.url, firstFrameAssetId: firstFrame.assetId } : {}),
+    }
+    })
 
     // 2. 创建提示词（基础版本，后续可由 AI 优化）
     const prompts = convertedShots.map((shot: any, i: number) => ({

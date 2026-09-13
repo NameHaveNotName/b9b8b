@@ -1967,36 +1967,50 @@ function IdeationPanel({
 
     setImporting(true)
     try {
+      // 先上传图片（逐张），收集 asset 引用
+      let firstFrameMap: Record<string, { url: string; assetId: string }> = {}
       if (xlsxImageFiles.length > 0) {
-        // 有图片：使用新 API，发送 shots JSON + 图片文件
-        const formData = new FormData()
-        formData.append('shots', JSON.stringify(storyboardShots))
-        formData.append('mode', mode)
-        for (const imgFile of xlsxImageFiles) {
-          formData.append('images', imgFile)
-        }
+        console.log(`[IMPORT] 开始上传 ${xlsxImageFiles.length} 张图片`)
+        for (let i = 0; i < xlsxImageFiles.length; i++) {
+          const imgFile = xlsxImageFiles[i]
+          const fd = new FormData()
+          fd.append('file', imgFile)
+          // 文件名格式: shotId_index.ext
+          const nameMatch = imgFile.name.match(/^(.+?)_(\d+)\.\w+$/)
+          const shotId = nameMatch ? nameMatch[1] : imgFile.name
+          const imageIndex = nameMatch ? nameMatch[2] : '0'
+          fd.append('shotId', shotId)
+          fd.append('imageIndex', imageIndex)
 
-        const res = await fetch(`/api/projects/${projectId}/import-storyboard-with-images`, {
-          method: 'POST',
-          body: formData,
-        })
-        const data = await res.json()
-
-        if (!res.ok || data.error) {
-          throw new Error(data.message || '导入失败')
+          const imgRes = await fetch(`/api/projects/${projectId}/upload-storyboard-image`, {
+            method: 'POST',
+            body: fd,
+          })
+          if (imgRes.ok) {
+            const imgData = await imgRes.json()
+            if (imgData.url && imgData.shotId && !firstFrameMap[imgData.shotId]) {
+              firstFrameMap[imgData.shotId] = { url: imgData.url, assetId: imgData.assetId }
+            }
+          }
+          console.log(`[IMPORT] 图片 ${i + 1}/${xlsxImageFiles.length} 上传${imgRes.ok ? '成功' : '失败'}`)
         }
-      } else {
-        // 无图片：使用原有 API
-        const res = await fetch(`/api/projects/${projectId}/import-storyboard`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shots: storyboardShots, mode }),
-        })
-        const data = await res.json()
+        console.log(`[IMPORT] 图片上传完成，${Object.keys(firstFrameMap).length} 个分镜有首帧`)
+      }
 
-        if (!res.ok || data.error) {
-          throw new Error(data.message || '导入失败')
-        }
+      // 调用原 import-storyboard API（带 firstFrameMap）
+      const res = await fetch(`/api/projects/${projectId}/import-storyboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shots: storyboardShots,
+          mode,
+          firstFrameMap: Object.keys(firstFrameMap).length > 0 ? firstFrameMap : undefined,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok || data.error) {
+        throw new Error(data.message || '导入失败')
       }
 
       setShowStoryboardChoice(false)
