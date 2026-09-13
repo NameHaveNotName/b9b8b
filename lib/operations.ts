@@ -12,6 +12,9 @@ export interface LogOperationInput {
   actionType: OperationActionType
   cost?: number
   status: OperationStatus
+  billingSource?: 'USER' | 'GROUP'
+  billingGroupId?: string | null
+  balanceAfter?: number
   metadata?: Record<string, any>
 }
 
@@ -30,6 +33,9 @@ export async function logOperation(input: LogOperationInput) {
         assetId: input.assetId,
         pointsCost: input.cost ?? 0,
         success: input.status === 'success',
+        billingSource: input.billingSource || 'USER',
+        billingGroupId: input.billingGroupId,
+        balanceAfter: input.balanceAfter,
         errorMessage:
           input.status === 'failed' && input.metadata?.error
             ? String(input.metadata.error).slice(0, 500)

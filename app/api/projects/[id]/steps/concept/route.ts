@@ -124,7 +124,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   // === generate-prompts: 只生成提示词，不生图 ===
   if (action === 'generate-prompts') {
-    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT)
+    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
     if (!promptPointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -164,7 +164,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     let autoPromptCost = 0
     if (resolvedPrompts.length === 0) {
       console.warn('[CONCEPT-IMAGE] No prompts found, auto-triggering prompt generation')
-      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT)
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
       if (!promptPointsCheck.ok) {
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
@@ -187,7 +187,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     }
 
     const imageCost = calculateBatchCost(GENERATION_COSTS.CONCEPT_ART, resolvedPrompts.length)
-    const pointsCheck = await checkPoints(imageCost)
+    const pointsCheck = await checkPoints(imageCost, params.id)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -345,7 +345,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return sum + Math.max(1, Math.min(keyScenes.length || 1, 3))
   }, 0)
   const totalCost = GENERATION_COSTS.DEFAULT + calculateBatchCost(GENERATION_COSTS.CONCEPT_ART, estimatedImageCount)
-  const pointsCheck = await checkPoints(totalCost)
+  const pointsCheck = await checkPoints(totalCost, params.id)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

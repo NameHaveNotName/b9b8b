@@ -222,7 +222,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
 /** 生成 Segment Prompts */
 async function handleGenerateDirectPrompts(projectId: string, stepId: string, userId: string) {
-  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION, projectId)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -287,7 +287,7 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
     return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segment.projectId)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -349,7 +349,7 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
   }
 
   const batchCost = calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, pendingSegments.length)
-  const pointsCheck = await checkPoints(batchCost)
+  const pointsCheck = await checkPoints(batchCost, projectId)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -433,7 +433,7 @@ async function handleComposeDirectVideo(projectId: string, stepId: string) {
 
 /** 生成直生视频背景音乐（复用 bgm-generator） */
 async function handleGenerateDirectBgm(projectId: string, stepId: string, userId: string) {
-  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM, projectId)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

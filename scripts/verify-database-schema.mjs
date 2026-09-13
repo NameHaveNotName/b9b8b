@@ -16,6 +16,9 @@ try {
     prisma.group.findFirst({ select: { id: true, costMode: true } }),
     prisma.groupMembership.findFirst({ select: { id: true, status: true } }),
     prisma.groupPointTransfer.findFirst({ select: { id: true, groupId: true } }),
+    prisma.operationLog.findFirst({
+      select: { id: true, billingSource: true, billingGroupId: true, balanceAfter: true },
+    }),
   ])
   console.log('database schema contract verified')
 } finally {

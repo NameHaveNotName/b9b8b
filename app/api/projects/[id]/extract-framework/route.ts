@@ -98,7 +98,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   // 点数检查
-  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK, params.id)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

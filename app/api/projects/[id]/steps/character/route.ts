@@ -3,7 +3,8 @@ export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS } from '@/lib/models-config'
@@ -97,7 +98,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectAccess(project.userId)
+  const access = await checkProjectPermission(params.id)
   if (!access.allowed) {
     return access.response
   }
@@ -126,7 +127,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   // === generate-prompts: 只生成提示词，不生图 ===
   if (action === 'generate-prompts') {
-    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT)
+    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
     if (!promptPointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -165,7 +166,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     let resolvedPrompts = prompts
     if (resolvedPrompts.length === 0) {
       console.warn('[CHARACTER-IMAGE] No prompts found, auto-triggering prompt generation')
-      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT)
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
       if (!promptPointsCheck.ok) {
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
@@ -186,7 +187,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       }
     }
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN, params.id)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -226,7 +227,6 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       })()
     )
 
-    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({
       success: true,
       status: 'PROCESSING',
@@ -258,7 +258,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   }
 
   const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.CHARACTER_DESIGN
-  const pointsCheck = await checkPoints(totalCost)
+  const pointsCheck = await checkPoints(totalCost, params.id)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -331,7 +331,6 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     })()
   )
 
-  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
   return NextResponse.json({
     success: true,
     status: 'PROCESSING',
@@ -459,7 +458,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectAccess(project.userId)
+  const access = await checkProjectPermission(params.id)
   if (!access.allowed) {
     return access.response
   }

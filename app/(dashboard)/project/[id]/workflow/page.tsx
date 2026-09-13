@@ -1641,7 +1641,7 @@ function IdeationPanel({
         const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][]
 
         // 自动检测表头行
-        const STORYBOARD_KEYWORDS = ['镜号', '镜头号', '编号', 'shot', 'shot_id', 'id', '序号', '分镜号']
+        const STORYBOARD_KEYWORDS = ['镜号', '镜头号', '镜头', '编号', 'shot', 'shot_id', 'id', '序号', '分镜号']
         let headerRow = -1
         for (let i = 0; i < Math.min(30, data.length); i++) {
           const row = data[i]
@@ -1772,7 +1772,11 @@ function IdeationPanel({
               console.log('[XLSX-PARSE] 未找到 drawing 文件')
             } else {
               // 3. 解析 drawing rels，建立 rId → 图片文件路径的映射
-              const drawingRelsPath = drawingPath.replace('drawing', '_rels/drawing') + '.rels'
+              // xl/drawings/drawing1.xml → xl/drawings/_rels/drawing1.xml.rels
+              const lastSlash = drawingPath.lastIndexOf('/')
+              const drawingDir = drawingPath.substring(0, lastSlash)
+              const drawingFile = drawingPath.substring(lastSlash + 1)
+              const drawingRelsPath = `${drawingDir}/_rels/${drawingFile}.rels`
               const drawingRels = zipData[drawingRelsPath] ? strFromU8(zipData[drawingRelsPath]) : ''
               const ridToMedia = new Map<string, string>()
               const ridRegex = /Id="([^"]+)"[^>]*Target="([^"]+)"/g
@@ -1786,7 +1790,7 @@ function IdeationPanel({
               // 4. 解析 drawing XML，提取每个图片的位置和关联的 rId
               const drawingXml = strFromU8(zipData[drawingPath])
               // 匹配 <xdr:twoCellAnchor> 块，每个块包含一个图片的位置和引用
-              const anchorRegex = /<xdr:twoCellAnchor[^>]*>([\s\S]*?)<\/xdr:twoCellAnchor>/g
+              const anchorRegex = /<xdr:(?:one|two)CellAnchor[^>]*>([\s\S]*?)<\/xdr:(?:one|two)CellAnchor>/g
               const imagePositions: Array<{ row: number; col: number; mediaPath: string }> = []
               let anchorMatch
               while ((anchorMatch = anchorRegex.exec(drawingXml)) !== null) {

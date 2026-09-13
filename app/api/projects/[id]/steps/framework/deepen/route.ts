@@ -52,7 +52,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const ideationOutput = (ideationStep?.outputData as any) || {}
   const projectTag = ideationOutput?.projectTag || ''
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK, params.id)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足' }, { status: 403 })
   }

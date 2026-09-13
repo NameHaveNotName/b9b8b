@@ -137,7 +137,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 }
 
 async function handleGenerateScripts(projectId: string, stepName: string, userId: string) {
-  const pointsCheck = await checkPoints(GENERATION_COSTS.VOICEOVER_SCRIPTS)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VOICEOVER_SCRIPTS, projectId)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -179,7 +179,7 @@ async function handleGenerateAudio(body: any, userId: string) {
     return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.VOICEOVER_AUDIO_SEGMENT)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VOICEOVER_AUDIO_SEGMENT, segment.projectId)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -212,7 +212,7 @@ async function handleGenerateAllAudio(projectId: string, stepName: string, body:
   }
 
   const batchCost = calculateBatchCost(GENERATION_COSTS.VOICEOVER_AUDIO_SEGMENT, pendingSegments.length)
-  const pointsCheck = await checkPoints(batchCost)
+  const pointsCheck = await checkPoints(batchCost, projectId)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

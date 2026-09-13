@@ -224,7 +224,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   // === generate-prompts: 只生成分镜提示词，不生成草图 ===
   if (action === 'generate-prompts') {
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS, params.id)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -320,7 +320,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     let currentPrompts = prompts
     if (prompts.length === 0) {
       console.log('[STORYBOARD-IMAGE] No prompts found, auto-generating prompts first...')
-      const promptPointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS)
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_PROMPTS, params.id)
       if (!promptPointsCheck.ok) {
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
@@ -373,7 +373,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       console.log(`[STORYBOARD-IMAGE] Auto-generated ${currentPrompts.length} prompts, proceeding to generate images...`)
     }
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_IMAGES)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STORYBOARD_IMAGES, params.id)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -514,7 +514,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const imageModel = body?.imageModel
     console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，shotId: ${shotId || 'auto'}，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
 
-    const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE))
+    const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE), params.id)
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -1037,7 +1037,7 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
   }
 
   const totalCost = GENERATION_COSTS.STORYBOARD_PROMPTS + GENERATION_COSTS.STORYBOARD_IMAGES
-  const pointsCheck = await checkPoints(totalCost)
+  const pointsCheck = await checkPoints(totalCost, params.id)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

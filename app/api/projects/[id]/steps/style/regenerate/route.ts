@@ -52,7 +52,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const targetStyle = styleOptions[targetIndex]
   console.log(`[STYLE-REGENERATE] 重新生成风格: styleId=${styleId}, name=${targetStyle.styleName}`)
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.STYLE_UNIFY)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.STYLE_UNIFY, params.id)
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

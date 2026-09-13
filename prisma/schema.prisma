@@ -362,20 +362,97 @@ model AuditLog {
 }
 
 model OperationLog {
-  id             String   @id @default(uuid())
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type           String // generate, regenerate, error
-  projectId      String?
-  workflowStepId String?
-  assetId        String?
-  pointsCost     Int      @default(0)
-  success        Boolean  @default(true)
-  errorMessage   String?
-  createdAt      DateTime @default(now())
+  id               String                @id @default(uuid())
+  userId           String
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type             String // legacy: generate, regenerate, error
+  actionKey        String                @default("generation.unknown")
+  category         String                @default("OTHER")
+  status           String                @default("SUBMITTED")
+  projectId        String?
+  workflowStepId   String?
+  stepName         String?
+  assetId          String? // legacy polymorphic result id
+  pointsCost       Int                   @default(0)
+  success          Boolean               @default(true)
+  errorCode        String?
+  errorMessage     String?
+  billingSource    String                @default("USER")
+  billingGroupId   String?
+  balanceAfter     Int?
+  providerCost     Decimal?              @db.Decimal(18, 8)
+  currency         String?
+  costSource       String                @default("UNKNOWN")
+  idempotencyKey   String?               @unique
+  inputSummary     Json?
+  metadata         Json?
+  startedAt        DateTime              @default(now())
+  completedAt      DateTime?
+  durationMs       Int?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  providerAttempts ProviderCallAttempt[]
+  results          OperationResult[]
 
   @@index([userId, createdAt])
+  @@index([billingGroupId, createdAt])
   @@index([type, createdAt])
+  @@index([status, createdAt])
+  @@index([projectId, createdAt])
+  @@index([category, createdAt])
+}
+
+model ProviderCallAttempt {
+  id             String       @id @default(uuid())
+  operationId    String
+  operation      OperationLog @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  provider       String
+  model          String?
+  endpoint       String
+  method         String       @default("POST")
+  attemptNo      Int          @default(1)
+  status         String       @default("RUNNING")
+  externalTaskId String?
+  requestId      String?
+  httpStatus     Int?
+  pollCount      Int          @default(0)
+  providerCost   Decimal?     @db.Decimal(18, 8)
+  currency       String?
+  costSource     String       @default("UNKNOWN")
+  errorCode      String?
+  errorMessage   String?
+  metadata       Json?
+  startedAt      DateTime     @default(now())
+  completedAt    DateTime?
+  durationMs     Int?
+
+  @@index([operationId, startedAt])
+  @@index([provider, model, startedAt])
+  @@index([externalTaskId])
+}
+
+model OperationResult {
+  id                 String       @id @default(uuid())
+  operationId        String
+  operation          OperationLog @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  kind               String
+  title              String?
+  assetId            String?
+  userAssetId        String?
+  videoSegmentId     String?
+  voiceoverSegmentId String?
+  storageKey         String?
+  mimeType           String?
+  externalUrl        String?
+  isMock             Boolean      @default(false)
+  metadata           Json?
+  createdAt          DateTime     @default(now())
+
+  @@unique([operationId, assetId])
+  @@unique([operationId, userAssetId])
+  @@unique([operationId, videoSegmentId])
+  @@unique([operationId, voiceoverSegmentId])
+  @@index([operationId, createdAt])
 }
 
 // 创意扩散深化迭代历史版本
