@@ -1642,17 +1642,21 @@ function IdeationPanel({
         const sheet = workbook.Sheets[sheetName]
         const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][]
 
-        // 自动检测表头行
+        // 自动检测表头行：找包含最多关键词的行（评分法）
         const STORYBOARD_KEYWORDS = ['镜号', '镜头号', '镜头', '编号', 'shot', 'shot_id', 'id', '序号', '分镜号']
+        const HEADER_BONUS_KW = ['时长', 'duration', '描述', 'description', '景别', '运镜', 'camera', '旁白', 'narration', '画面', '镜头画面', '章节']
         let headerRow = -1
+        let bestHeaderScore = 0
         for (let i = 0; i < Math.min(30, data.length); i++) {
           const row = data[i]
           if (!row) continue
-          const found = row.some((cell: any) => {
+          let score = 0
+          for (const cell of row) {
             const v = String(cell || '').toLowerCase().trim()
-            return STORYBOARD_KEYWORDS.some(k => v.includes(k))
-          })
-          if (found) { headerRow = i; break }
+            if (STORYBOARD_KEYWORDS.some(k => v.includes(k))) score += 3
+            if (HEADER_BONUS_KW.some(k => v.includes(k))) score += 1
+          }
+          if (score > bestHeaderScore) { bestHeaderScore = score; headerRow = i }
         }
         if (headerRow < 0) headerRow = 2 // 默认第3行
 
@@ -1780,8 +1784,14 @@ function IdeationPanel({
               let ridMatch
               while ((ridMatch = ridRegex.exec(drawingRels)) !== null) {
                 const rid = ridMatch[1]
-                const target = ridMatch[2].replace(/^\.\.\//, '')
-                ridToMedia.set(rid, 'xl/' + target)
+                let target = ridMatch[2]
+                // 处理绝对路径（/xl/media/image.jpg）和相对路径（../media/image1.png）
+                if (target.startsWith('/')) {
+                  target = target.substring(1) // 去掉开头的 /
+                } else {
+                  target = 'xl/' + target.replace(/^\.\.\//, '')
+                }
+                ridToMedia.set(rid, target)
               }
               console.log('[XLSX-PARSE] ridToMedia 条目数:', ridToMedia.size)
 
