@@ -517,11 +517,17 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     console.log(`  [${i}] shotId=${s.shotId} actNumber=${s.actNumber} firstFrameUrl前40=${(s.firstFrameUrl || '').slice(0, 40)} ${matches ? '← MATCH' : ''}`)
   })
 
-  const newShots = shots.map((s: any) =>
-    s.shotId === shotId && sameActNumber(s.actNumber, targetActNumber)
-      ? { ...s, firstFrameUrl: originalUrl }
-      : s
-  )
+  // 如果生成结果是 mock 且该 shot 已有真实首帧，不覆盖
+  const newShots = shots.map((s: any) => {
+    if (s.shotId === shotId && sameActNumber(s.actNumber, targetActNumber)) {
+      if (isMock && s.firstFrameUrl) {
+        console.log(`[STORYBOARD-REGENERATE] shot ${s.shotId} 生成返回 mock，保留原有首帧`)
+        return s
+      }
+      return { ...s, firstFrameUrl: originalUrl }
+    }
+    return s
+  })
 
   console.log(`[STORYBOARD-REGENERATE] 更新 shots[].firstFrameUrl: shotId=${shotId}, actNo=${actNo}, 找到匹配数=${newShots.filter((s: any) => s.shotId === shotId && sameActNumber(s.actNumber, targetActNumber)).length}, 新URL前80=${originalUrl.slice(0, 80)}`)
   console.log(`[STORYBOARD-REGENERATE] 更新 shotAssets: 新增 ${newShotAssets.length} 条（原本 ${shotAssets.length} 条）`)

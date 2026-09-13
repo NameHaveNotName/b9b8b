@@ -460,7 +460,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           }
         })
         shotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url: originalUrl, actNumber: promptItem.actNumber, thumbnailUrl })
-        shotsWithFirstFrame.push({ ...shot, firstFrameUrl: originalUrl, thumbnailUrl })
+      shotsWithFirstFrame.push({ ...shot, firstFrameUrl: shot.firstFrameUrl || originalUrl, thumbnailUrl: shot.thumbnailUrl || thumbnailUrl })
       }
 
       // 从 project.framework 读取 acts 用于动态 actsSummary
@@ -941,9 +941,17 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
         ...cleanedShotAssets.filter((s: any) => !(s.shotId === shotPrompt.shotId && s.actNumber === actNumber)),
         newShotAsset,
       ]
-      const mergedShots = allShots.map((s: any) =>
-        s.shotId === shotPrompt.shotId && s.actNumber === actNumber ? { ...s, firstFrameUrl: originalUrl, thumbnailUrl } : s
-      )
+      // 如果生成结果是 mock 且该 shot 已有真实首帧（如从 xlsx 导入），不覆盖
+      const mergedShots = allShots.map((s: any) => {
+        if (s.shotId === shotPrompt.shotId && s.actNumber === actNumber) {
+          if (isMock && s.firstFrameUrl) {
+            console.log(`[STORYBOARD] shot ${s.shotId} 生成返回 mock，保留原有首帧`)
+            return s
+          }
+          return { ...s, firstFrameUrl: originalUrl, thumbnailUrl }
+        }
+        return s
+      })
 
       const processedCount = mergedShotAssets.filter((s: any) => s.actNumber === actNumber && actShotIds.has(s.shotId)).length
       const remainingCount = actPrompts.length - processedCount
@@ -1124,7 +1132,7 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
         }
       })
       shotAssets.push({ shotId: shot.shotId, assetId: asset.id, url: originalUrl, actNumber: shot.actNumber, thumbnailUrl })
-      shotsWithFirstFrame.push({ ...shot, firstFrameUrl: originalUrl, thumbnailUrl })
+      shotsWithFirstFrame.push({ ...shot, firstFrameUrl: shot.firstFrameUrl || originalUrl, thumbnailUrl: shot.thumbnailUrl || thumbnailUrl })
     }
 
     const outputData = {
