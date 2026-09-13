@@ -181,3 +181,56 @@ export async function deductPointsAndLog(
     })
   })
 }
+
+/**
+ * 退回已预扣的点数。调用方必须传入预扣时确定的付款主体，避免任务执行期间
+ * 小组切换扣费模式后把退款退到错误账户。
+ */
+export async function refundPointsAndLog(
+  userId: string,
+  cost: number,
+  meta: {
+    projectId?: string
+    workflowStepId?: string
+    billingSource: BillingSource
+    billingGroupId: string | null
+    errorMessage?: string
+  },
+) {
+  if (cost <= 0) return
+
+  await prisma.$transaction(async (tx) => {
+    let balanceAfter: number
+
+    if (meta.billingSource === 'GROUP' && meta.billingGroupId) {
+      const group = await tx.group.update({
+        where: { id: meta.billingGroupId },
+        data: { points: { increment: cost } },
+        select: { points: true },
+      })
+      balanceAfter = group.points
+    } else {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { points: { increment: cost } },
+        select: { points: true },
+      })
+      balanceAfter = user.points
+    }
+
+    await tx.operationLog.create({
+      data: {
+        userId,
+        type: 'refund',
+        projectId: meta.projectId,
+        workflowStepId: meta.workflowStepId,
+        pointsCost: -cost,
+        success: true,
+        errorMessage: meta.errorMessage?.slice(0, 500),
+        billingSource: meta.billingSource,
+        billingGroupId: meta.billingGroupId,
+        balanceAfter,
+      },
+    })
+  })
+}

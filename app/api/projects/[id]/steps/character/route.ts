@@ -12,7 +12,7 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
-import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
 /**
@@ -206,6 +206,12 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       })
     }
 
+    // 异步任务先原子预扣一次；后台全部失败时退回同一付款账户。
+    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', {
+      projectId: params.id,
+      workflowStepId: step.id,
+      success: true,
+    })
     await startStep(step.id)
 
     // 异步后台生成：HTTP 立即返回，避免前端因生图耗时而超时
@@ -219,7 +225,9 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
             aspectRatio,
             imageModel,
             pointsCheck.cost,
-            userId
+            userId,
+            pointsCheck.billingSource,
+            pointsCheck.billingGroupId,
           )
         } catch (e: any) {
           console.error('[CHARACTER-IMAGE] 后台生成异常:', e?.message)
@@ -264,6 +272,12 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   }
 
   const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
+  // 默认兼容流程同样只预扣一次，避免请求返回和后台完成各扣一次。
+  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', {
+    projectId: params.id,
+    workflowStepId: step.id,
+    success: true,
+  })
   await startStep(step.id)
 
   // 异步后台生成：先生成 prompts，再串行生图
@@ -321,12 +335,20 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           defaultAspectRatio,
           undefined,
           pointsCheck.cost,
-          userId
+          userId,
+          pointsCheck.billingSource,
+          pointsCheck.billingGroupId,
         )
       } catch (e: any) {
         console.error('[CHARACTER] 后台生成异常:', e?.message)
         await failStep(step.id, e.message)
-        await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
+        await refundPointsAndLog(userId, pointsCheck.cost, {
+          projectId: params.id,
+          workflowStepId: step.id,
+          billingSource: pointsCheck.billingSource,
+          billingGroupId: pointsCheck.billingGroupId,
+          errorMessage: e.message,
+        })
       }
     })()
   )
@@ -349,7 +371,9 @@ async function generateCharacterImagesBackground(
   aspectRatio: string,
   imageModel: string | undefined,
   cost: number,
-  userId: string
+  userId: string,
+  billingSource: 'USER' | 'GROUP',
+  billingGroupId: string | null,
 ) {
   try {
     const styleStep = await prisma.workflowStep.findFirst({
@@ -431,18 +455,29 @@ async function generateCharacterImagesBackground(
     if (portraits.length === 0) {
       const errMsg = `所有角色生图均失败${failedCharacters.length > 0 ? '（' + failedCharacters.join(', ') + '）' : ''}`
       await failStep(stepId, errMsg)
-      await deductPointsAndLog(userId, cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: errMsg })
+      await refundPointsAndLog(userId, cost, {
+        projectId,
+        workflowStepId: stepId,
+        billingSource,
+        billingGroupId,
+        errorMessage: errMsg,
+      })
       return
     }
 
     await completeStep(stepId, { portraits, characterCount: portraits.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
-    await deductPointsAndLog(userId, cost, 'generate', { projectId, workflowStepId: stepId, success: true })
     const dbAssetCount = await prisma.asset.count({ where: { stepId } })
     console.log(`[CHARACTER-BG] 完成: 成功 ${portraits.length}/${resolvedPrompts.length} 条，数据库 Asset 数: ${dbAssetCount}`)
   } catch (e: any) {
     console.error('[CHARACTER-BG] 异常:', e?.message)
     await failStep(stepId, e.message)
-    await deductPointsAndLog(userId, cost, 'error', { projectId, workflowStepId: stepId, success: false, errorMessage: e.message })
+    await refundPointsAndLog(userId, cost, {
+      projectId,
+      workflowStepId: stepId,
+      billingSource,
+      billingGroupId,
+      errorMessage: e.message,
+    })
   }
 }
 
