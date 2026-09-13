@@ -51,6 +51,7 @@ import SuggestionBar from '@/components/workflow/SuggestionBar'
 import { exportStoryboardExcel } from '@/lib/storyboard-excel-export'
 import { proxiedMediaUrl } from '@/lib/media-url'
 import { ApiError } from '@/lib/api-client'
+import { shouldRedirectToLogin } from '@/lib/auth-response-policy'
 
 const fetcher = (url: string) =>
   fetch(url).then((r) => {
@@ -189,20 +190,15 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
   // 提升到 WorkflowPage 级别，供 executeStep 和 StepContent 共享
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
 
-  // 全局拦截：任何 fetch 返回 401/403 时自动跳转登录页
+  // 全局拦截：只有会话失效（401）才跳转登录页。
+  // 403 是已认证用户的业务拒绝（如点数不足），必须留在当前页展示错误。
   useEffect(() => {
     const originalFetch = window.fetch
     window.fetch = async (...args) => {
       const res = await originalFetch(...args)
-      if (res.status === 401 || (res.status === 403 && !res.url.includes('/api/admin'))) {
-        try {
-          const clone = res.clone()
-          const body = await clone.json().catch(() => null)
-          if (body?.error === 'AUTH_001' || body?.error === 'AUTH_002') {
-            const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-            window.location.href = `/login?redirect=${redirect}`
-          }
-        } catch { /* ignore */ }
+      if (shouldRedirectToLogin(res.status)) {
+        const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+        window.location.href = `/login?redirect=${redirect}`
       }
       return res
     }
@@ -312,8 +308,8 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         // 调试日志：响应状态
         console.log(`[executeStep] ${stepType} response status:`, res.status)
 
-        // 认证失败：跳转登录页
-        if (res.status === 401 || res.status === 403) {
+        // 只有会话失效才跳转；403 由下方的业务错误分支处理。
+        if (shouldRedirectToLogin(res.status)) {
           if (typeof window !== 'undefined') {
             const redirect = encodeURIComponent(window.location.pathname + window.location.search)
             window.location.href = `/login?redirect=${redirect}`
