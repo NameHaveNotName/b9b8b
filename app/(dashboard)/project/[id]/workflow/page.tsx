@@ -5612,7 +5612,7 @@ function StoryboardPanel({
               {/* 分镜行卡片列表（左侧信息 + 右侧图片） */}
               <div className="divide-y divide-stone-100">
                 {actShots.map((shot: any) => {
-                  const asset = actAssetsMap.get(shot.shotId)
+                  const asset = actAssetsMap.get(shot.shotId) || (shot.firstFrameUrl ? { url: shot.firstFrameUrl, metadata: { shotId: shot.shotId, actNumber } } : null)
                   const isRegenerating = regeneratingId === shot.shotId
                   const generationKey = `${actNumber}_${shot.shotId}`
                   const generationState = generatingShots[generationKey]
