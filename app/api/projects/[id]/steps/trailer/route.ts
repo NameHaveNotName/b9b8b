@@ -5,7 +5,7 @@ process.env.TEMP_DIR = '/tmp'
 
 import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { startStep, completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled } from '@/lib/workflow-executor'
@@ -207,16 +207,11 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
     }
 
-    const project = await prisma.project.findUnique({ where: { id: params.id } })
-    if (!project) {
-      console.warn(`[TRAILER-POST] 项目不存在`)
-      return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
+    const permission = await checkProjectPermission(params.id)
+    if (!permission.allowed) {
+      return permission.response
     }
-    const access = await checkProjectAccess(project.userId)
-    if (!access.allowed) {
-      console.warn(`[TRAILER-POST] 鉴权失败`)
-      return access.response
-    }
+    const project = permission.project
 
     if (!(await canExecuteStep(params.id, 'TRAILER'))) {
       console.warn(`[TRAILER-POST] 前置步骤未完成，拒绝执行`)

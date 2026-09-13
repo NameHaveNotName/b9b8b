@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 
@@ -16,9 +17,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
+  const permission = await checkProjectPermission(project.id)
+  if (!permission.allowed) {
+    return permission.response
   }
 
   try {
@@ -38,7 +39,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const storageKey = `projects/${params.id}/storyboard-imported/${shotId}_${idx}.${ext}`
 
     await uploadFile(storageKey, buffer, mimeType)
-    const url = await getSignedFileUrl(storageKey, 3600 * 24 * 365)
+    const url = await getSignedFileUrl(storageKey, 3600 * 24 * 7) // 7天（R2最大有效期）
 
     const asset = await prisma.asset.create({
       data: {
