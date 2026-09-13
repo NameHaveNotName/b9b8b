@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
-import { checkProjectAccess } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { uploadFile, getSignedFileUrl, deleteFile } from '@/lib/r2'
 
@@ -13,16 +13,11 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    const project = await prisma.project.findUnique({ where: { id: params.id } })
-    if (!project) {
-      console.error(`[REFERENCES-GET] Project not found: ${params.id}, userId: ${userId}`)
-      return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
+    const permission = await checkProjectPermission(params.id)
+    if (!permission.allowed) {
+      return permission.response
     }
-    const access = await checkProjectAccess(project.userId)
-    if (!access.allowed) {
-      console.error(`[REFERENCES-GET] Access denied: project.userId=${project.userId}, currentUserId=${userId}`)
-      return access.response
-    }
+    const project = permission.project
 
     const refs = await prisma.asset.findMany({
       where: { projectId: params.id, type: 'REFERENCE', stepId: null },
@@ -41,16 +36,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    const project = await prisma.project.findUnique({ where: { id: params.id } })
-    if (!project) {
-      console.error(`[REFERENCES-POST] Project not found: ${params.id}, userId: ${userId}`)
-      return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
+    const permission = await checkProjectPermission(params.id)
+    if (!permission.allowed) {
+      return permission.response
     }
-    const access = await checkProjectAccess(project.userId)
-    if (!access.allowed) {
-      console.error(`[REFERENCES-POST] Access denied: project.userId=${project.userId}, currentUserId=${userId}`)
-      return access.response
-    }
+    const project = permission.project
 
     const existingCount = await prisma.asset.count({
       where: { projectId: params.id, type: 'REFERENCE', stepId: null },

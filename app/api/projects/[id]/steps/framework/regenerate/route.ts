@@ -2,7 +2,8 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
@@ -95,9 +96,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
+  const permission = await checkProjectPermission(project.id)
+  if (!permission.allowed) {
+    return permission.response
   }
 
   const step = await prisma.workflowStep.findUnique({

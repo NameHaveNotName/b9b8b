@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
@@ -22,9 +23,9 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
+  const permission = await checkProjectPermission(project.id)
+  if (!permission.allowed) {
+    return permission.response
   }
 
   if (!(await canExecuteStep(params.id, 'IDEATION'))) {
@@ -209,9 +210,9 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
+  const permission = await checkProjectPermission(project.id)
+  if (!permission.allowed) {
+    return permission.response
   }
 
   const body = await req.json().catch(() => ({}))

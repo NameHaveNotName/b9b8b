@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { projectCoreSelect } from '@/lib/db/project-select'
 import {
@@ -35,9 +36,9 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
   }
 
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
+  const permission = await checkProjectPermission(project.id)
+  if (!permission.allowed) {
+    return permission.response
   }
 
   const { searchParams } = new URL(req.url)
@@ -102,9 +103,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 })
   }
 
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
+  const permission = await checkProjectPermission(project.id)
+  if (!permission.allowed) {
+    return permission.response
   }
 
   const body = await req.json().catch(() => ({}))

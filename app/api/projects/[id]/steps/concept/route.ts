@@ -2,7 +2,8 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
@@ -90,13 +91,15 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
+  const permission = await checkProjectPermission(params.id)
+  if (!permission.allowed) {
+    return permission.response
+  }
+  
+  // 获取完整的项目对象（包含 framework 等字段）
   const project = await prisma.project.findUnique({ where: { id: params.id } })
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
-  }
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
   }
 
   if (!(await canExecuteStep(params.id, 'CONCEPT'))) {
@@ -509,9 +512,9 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    return access.response
+  const permission = await checkProjectPermission(project.id)
+  if (!permission.allowed) {
+    return permission.response
   }
 
   const body = await req.json().catch(() => ({}))

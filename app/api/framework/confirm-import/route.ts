@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { completeStep } from '@/lib/workflow-executor'
 
@@ -22,10 +23,8 @@ export async function POST(req: Request) {
       )
     }
 
-    const project = await prisma.project.findUnique({ where: { id: projectId } })
-    if (!project || project.userId !== userId) {
-      return NextResponse.json({ error: 'AUTH_002' }, { status: 403 })
-    }
+    const permission = await checkProjectPermission(projectId)
+    if (!permission.allowed) return permission.response
 
     // 更新 Project 表
     await prisma.project.update({

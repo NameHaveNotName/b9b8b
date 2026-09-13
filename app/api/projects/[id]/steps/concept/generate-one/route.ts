@@ -2,7 +2,8 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl } from '@/lib/style-ref'
@@ -24,10 +25,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const userId = await getCurrentUserId()
   if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
 
-  const project = await prisma.project.findUnique({ where: { id: params.id } })
-  if (!project) return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) return access.response
+  const permission = await checkProjectPermission(params.id)
+  if (!permission.allowed) return permission.response
+  const project = permission.project
 
   const body = await req.json().catch(() => ({}))
   const actNumber = Number(body.actNumber)

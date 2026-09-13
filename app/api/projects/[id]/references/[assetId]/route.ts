@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
-import { checkProjectAccess } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { deleteFile } from '@/lib/r2'
 
@@ -12,10 +12,8 @@ export async function PATCH(
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    const project = await prisma.project.findUnique({ where: { id: params.id } })
-    if (!project) return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
-    const access = await checkProjectAccess(project.userId)
-    if (!access.allowed) return access.response
+    const permission = await checkProjectPermission(params.id)
+    if (!permission.allowed) return permission.response
 
     const asset = await prisma.asset.findUnique({ where: { id: params.assetId } })
     if (!asset || asset.projectId !== params.id) {
@@ -48,10 +46,8 @@ export async function DELETE(
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    const project = await prisma.project.findUnique({ where: { id: params.id } })
-    if (!project) return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
-    const access = await checkProjectAccess(project.userId)
-    if (!access.allowed) return access.response
+    const permission = await checkProjectPermission(params.id)
+    if (!permission.allowed) return permission.response
 
     const asset = await prisma.asset.findUnique({ where: { id: params.assetId } })
     if (!asset || asset.projectId !== params.id) {

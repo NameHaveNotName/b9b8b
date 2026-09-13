@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { getCurrentUserId, checkProjectAccess } from '@/lib/auth-helpers'
+import { getCurrentUserId } from '@/lib/auth-helpers'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { WorkflowStepType } from '@prisma/client'
 import { importStoryboardShots } from '@/lib/storyboard-import'
@@ -14,16 +15,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
-  const project = await prisma.project.findUnique({ where: { id: params.id } })
-  if (!project) {
-    console.error(`[IMPORT-STORYBOARD-WITH-IMAGES] Project not found: ${params.id}, userId: ${userId}`)
-    return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
+  const permission = await checkProjectPermission(params.id)
+  if (!permission.allowed) {
+    return permission.response
   }
-  const access = await checkProjectAccess(project.userId)
-  if (!access.allowed) {
-    console.error(`[IMPORT-STORYBOARD-WITH-IMAGES] Access denied: project.userId=${project.userId}, currentUserId=${userId}`)
-    return access.response
-  }
+  const project = permission.project
 
   try {
     const formData = await req.formData()
