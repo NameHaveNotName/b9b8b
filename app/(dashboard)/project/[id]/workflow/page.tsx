@@ -1505,6 +1505,8 @@ function IdeationPanel({
   const [storyboardShots, setStoryboardShots] = useState<any[] | null>(null)
   const [showStoryboardChoice, setShowStoryboardChoice] = useState(false)
   const [xlsxImageFiles, setXlsxImageFiles] = useState<File[]>([])
+  const [xlsxImageCount, setXlsxImageCount] = useState(0)
+  const [xlsxMatchedImageCount, setXlsxMatchedImageCount] = useState(0)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
@@ -1738,45 +1740,40 @@ function IdeationPanel({
 
         setContentType('storyboard')
         setStoryboardShots(shots)
+        setXlsxImageCount(0)
+        setXlsxMatchedImageCount(0)
 
         // 用 fflate 解压 xlsx（本质是 zip），提取嵌入图片
         try {
+          const fileSizeMB = buffer.byteLength / (1024 * 1024)
+          console.log(`[XLSX-PARSE] 开始解压 xlsx，文件大小: ${fileSizeMB.toFixed(1)}MB`)
           const { unzipSync, strFromU8 } = await import('fflate')
           const zipData = unzipSync(new Uint8Array(buffer))
+          console.log('[XLSX-PARSE] 解压完成，条目数:', Object.keys(zipData).length)
 
           // 1. 找到所有媒体文件（xl/media/image1.png 等）
           const mediaFiles = new Map<string, Uint8Array>()
-          for (const [path, data] of Object.entries(zipData)) {
+          for (const [path, d] of Object.entries(zipData)) {
             if (path.startsWith('xl/media/image')) {
-              mediaFiles.set(path, data)
+              mediaFiles.set(path, d)
             }
           }
+          console.log('[XLSX-PARSE] 媒体文件数:', mediaFiles.size)
+          setXlsxImageCount(mediaFiles.size)
 
           if (mediaFiles.size === 0) {
-            console.log('[XLSX-PARSE] xlsx 中没有嵌入图片')
+            console.log('[XLSX-PARSE] xlsx 中没有嵌入图片，跳过图片提取')
           } else {
-            // 2. 找到 drawing 文件和 rels
-            // xl/worksheets/_rels/sheet1.xml.rels → 关联 drawing
-            // xl/drawings/_rels/drawing1.xml.rels → 关联图片 rId → xl/media/image*.png
-            // xl/drawings/drawing1.xml → 图片位置（from row/col）
+            // 2. 找到 drawing 文件（直接在 zip 中搜索，避免相对路径解析问题）
+            const drawingFiles = Object.keys(zipData).filter(k => /^xl\/drawings\/drawing\d+\.xml$/.test(k))
+            console.log('[XLSX-PARSE] drawing 文件:', drawingFiles)
+            const drawingPath = drawingFiles[0] || null
 
-            // 解析 sheet1 的 rels，找到对应的 drawing
-            const sheetRelsPath = 'xl/worksheets/_rels/sheet1.xml.rels'
-            const sheetRels = zipData[sheetRelsPath] ? strFromU8(zipData[sheetRelsPath]) : ''
-            const drawingRefMatch = sheetRels.match(/Target="([^"]*drawing[^"]*)"/i)
-            const drawingPath = drawingRefMatch
-              ? 'xl/drawings/' + drawingRefMatch[1].replace(/^\.\.\//, '')
-              : null
-
-            if (!drawingPath || !zipData[drawingPath]) {
-              console.log('[XLSX-PARSE] 未找到 drawing 文件')
+            if (!drawingPath) {
+              console.warn('[XLSX-PARSE] 未找到 drawing 文件，可用文件:', Object.keys(zipData).filter(k => k.includes('drawing') || k.includes('sheet')))
             } else {
               // 3. 解析 drawing rels，建立 rId → 图片文件路径的映射
-              // xl/drawings/drawing1.xml → xl/drawings/_rels/drawing1.xml.rels
-              const lastSlash = drawingPath.lastIndexOf('/')
-              const drawingDir = drawingPath.substring(0, lastSlash)
-              const drawingFile = drawingPath.substring(lastSlash + 1)
-              const drawingRelsPath = `${drawingDir}/_rels/${drawingFile}.rels`
+              const drawingRelsPath = drawingPath.replace(/drawing(\d+)\.xml$/, '_rels/drawing$1.xml.rels')
               const drawingRels = zipData[drawingRelsPath] ? strFromU8(zipData[drawingRelsPath]) : ''
               const ridToMedia = new Map<string, string>()
               const ridRegex = /Id="([^"]+)"[^>]*Target="([^"]+)"/g
@@ -1786,24 +1783,39 @@ function IdeationPanel({
                 const target = ridMatch[2].replace(/^\.\.\//, '')
                 ridToMedia.set(rid, 'xl/' + target)
               }
+              console.log('[XLSX-PARSE] ridToMedia 条目数:', ridToMedia.size)
 
               // 4. 解析 drawing XML，提取每个图片的位置和关联的 rId
               const drawingXml = strFromU8(zipData[drawingPath])
-              // 匹配 <xdr:twoCellAnchor> 块，每个块包含一个图片的位置和引用
-              const anchorRegex = /<xdr:(?:one|two)CellAnchor[^>]*>([\s\S]*?)<\/xdr:(?:one|two)CellAnchor>/g
+              // 支持三种 anchor 类型：oneCellAnchor, twoCellAnchor, absoluteAnchor
+              const anchorRegex = /<xdr:(?:one|two|absolute)CellAnchor[^>]*>([\s\S]*?)<\/xdr:(?:one|two|absolute)CellAnchor>/g
               const imagePositions: Array<{ row: number; col: number; mediaPath: string }> = []
               let anchorMatch
               while ((anchorMatch = anchorRegex.exec(drawingXml)) !== null) {
                 const anchor = anchorMatch[1]
-                // 提取 from row/col
+
+                // 提取 from row/col（oneCellAnchor 和 twoCellAnchor 有 <xdr:from>）
                 const fromMatch = anchor.match(/<xdr:from>([\s\S]*?)<\/xdr:from>/)
-                if (!fromMatch) continue
-                const fromXml = fromMatch[1]
-                const colMatch = fromXml.match(/<xdr:col>(\d+)<\/xdr:col>/)
-                const rowMatch = fromXml.match(/<xdr:row>(\d+)<\/xdr:row>/)
-                if (!colMatch || !rowMatch) continue
-                const col = parseInt(colMatch[1])
-                const row = parseInt(rowMatch[1])
+                let col = -1, row = -1
+                if (fromMatch) {
+                  const fromXml = fromMatch[1]
+                  const colMatch = fromXml.match(/<xdr:col>(\d+)<\/xdr:col>/)
+                  const rowMatch = fromXml.match(/<xdr:row>(\d+)<\/xdr:row>/)
+                  if (colMatch) col = parseInt(colMatch[1])
+                  if (rowMatch) row = parseInt(rowMatch[1])
+                }
+                // absoluteAnchor 用 <xdr:pos> 但没有 row/col，需要从 <xdr:ext> 推算
+                // 对于 absoluteAnchor，尝试从 pic 的 nvPicPr 中提取 name 推断
+                if (row < 0 || col < 0) {
+                  // 尝试从 <xdr:pos x="..." y="..."> 推算（EMU 单位，约 914400 EMU = 1 inch）
+                  const posMatch = anchor.match(/<xdr:pos[^>]*x="(\d+)"[^>]*y="(\d+)"/)
+                  if (posMatch) {
+                    // 粗略推算：假设行高约 15pt = 190500 EMU，列宽约 64pt = 576000 EMU
+                    col = Math.floor(parseInt(posMatch[1]) / 576000)
+                    row = Math.floor(parseInt(posMatch[2]) / 190500)
+                  }
+                }
+                if (row < 0 || col < 0) continue
 
                 // 提取 rId（在 <a:blip r:embed="rIdX"/> 中）
                 const blipMatch = anchor.match(/<a:blip[^>]*r:embed="([^"]+)"/)
@@ -1811,23 +1823,16 @@ function IdeationPanel({
                 const rid = blipMatch[1]
                 const mediaPath = ridToMedia.get(rid)
                 if (!mediaPath || !mediaFiles.has(mediaPath)) continue
-
                 imagePositions.push({ row, col, mediaPath })
               }
+              console.log('[XLSX-PARSE] imagePositions:', imagePositions.length)
 
               // 5. 匹配图片到分镜
               const imageFiles: File[] = []
-              const shotIdToRow = new Map<string, number>()
-              for (let r = dataStart; r <= dataEnd; r++) {
-                const v = shotIdCol >= 0 ? String((data[r] || [])[shotIdCol] || '').trim() : ''
-                if (v && /^\d{1,4}$/.test(v)) shotIdToRow.set(v, r)
-              }
-
               for (const pos of imagePositions) {
-                const imgRow = pos.row + 1 // drawing 中是 0-indexed
-                if (imgRow < dataStart) continue // 跳过表头之前的装饰图
+                const imgRow = pos.row + 1
+                if (imgRow < dataStart) continue
 
-                // 匹配 shotId
                 let matchedShotId: string | null = null
                 if (shotIdCol >= 0) {
                   const cellVal = String((data[imgRow - 1] || [])[shotIdCol] || '').trim()
@@ -1849,7 +1854,6 @@ function IdeationPanel({
                 const imgData = mediaFiles.get(pos.mediaPath)
                 if (!imgData) continue
 
-                // 检测 MIME
                 let mime = 'image/png', ext = 'png'
                 if (imgData[0] === 0xFF && imgData[1] === 0xD8) { mime = 'image/jpeg'; ext = 'jpg' }
                 else if (imgData[0] === 0x89 && imgData[1] === 0x50) { mime = 'image/png'; ext = 'png' }
@@ -1861,11 +1865,14 @@ function IdeationPanel({
               }
 
               setXlsxImageFiles(imageFiles)
-              console.log(`[XLSX-PARSE] fflate 解析完成: ${shots.length} 个分镜, ${imageFiles.length} 张图片`)
+              setXlsxMatchedImageCount(imageFiles.length)
+              console.log(`[XLSX-PARSE] 最终结果: ${shots.length} 个分镜, ${mediaFiles.size} 张原始图片, ${imageFiles.length} 张匹配图片`)
             }
           }
         } catch (e: any) {
-          console.warn('[XLSX-PARSE] fflate 图片解析失败:', e?.message)
+          console.error('[XLSX-PARSE] fflate 图片解析异常:', e?.message, e?.stack)
+          setXlsxImageCount(0)
+          setXlsxMatchedImageCount(0)
         }
 
         setShowStoryboardChoice(true)
@@ -1995,6 +2002,8 @@ function IdeationPanel({
       setShowStoryboardChoice(false)
       setShowUploadPanel(false)
       setXlsxImageFiles([])
+      setXlsxImageCount(0)
+      setXlsxMatchedImageCount(0)
       await mutate()
     } catch (e: any) {
       setUploadError(e.message || '导入失败')
@@ -2156,7 +2165,7 @@ function IdeationPanel({
             </p>
           </div>
           <button
-            onClick={() => setShowStoryboardChoice(false)}
+            onClick={() => { setShowStoryboardChoice(false); setXlsxImageCount(0); setXlsxMatchedImageCount(0) }}
             className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-600"
           >
             <X className="h-5 w-5" />
@@ -2164,6 +2173,22 @@ function IdeationPanel({
         </div>
 
         <div className="space-y-6 p-6">
+          {/* 图片检测状态 */}
+          {xlsxImageCount > 0 ? (
+            <div className={`rounded-lg border px-4 py-3 ${xlsxMatchedImageCount > 0 ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+              <p className={`text-sm ${xlsxMatchedImageCount > 0 ? 'text-green-700' : 'text-amber-700'}`}>
+                {xlsxMatchedImageCount > 0
+                  ? `检测到 ${xlsxImageCount} 张嵌入图片，已匹配到 ${xlsxMatchedImageCount} 个分镜作为首帧`
+                  : `检测到 ${xlsxImageCount} 张嵌入图片，但未能匹配到分镜（图片可能不在数据行中）`
+                }
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-3">
+              <p className="text-sm text-stone-500">未检测到嵌入图片，将只导入文本分镜数据</p>
+            </div>
+          )}
+
           {/* 分镜预览 */}
           <div className="rounded-lg border border-stone-200 p-4">
             <h3 className="mb-3 text-sm font-semibold text-stone-700">分镜预览</h3>
