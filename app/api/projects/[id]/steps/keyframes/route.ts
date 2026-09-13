@@ -68,7 +68,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   // === generate-prompts: 只生成尾帧提示词，不生图 ===
   if (action === 'generate-prompts') {
-    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
+    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id, 'generation.keyframe_prompts', 'TEXT')
     if (!promptPointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -153,7 +153,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   // === generate-images: 读取已保存提示词，执行生图 ===
   if (action === 'generate-images') {
-    const pointsCheck = await checkPoints(GENERATION_COSTS.KEYFRAME, params.id)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.KEYFRAME, params.id, 'generation.keyframe', 'IMAGE')
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -266,7 +266,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   // === 默认兼容：无 action 时走原有完整流程 ===
   const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.KEYFRAME
-  const pointsCheck = await checkPoints(totalCost, params.id)
+  const pointsCheck = await checkPoints(totalCost, params.id, 'generation.keyframe', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

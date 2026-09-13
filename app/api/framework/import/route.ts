@@ -104,7 +104,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK, undefined, 'generation.framework', 'TEXT')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

@@ -111,7 +111,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   const pointsCheck = mode === 'ai_complete'
-    ? await checkPoints(GENERATION_COSTS.FRAMEWORK, params.id)
+    ? await checkPoints(GENERATION_COSTS.FRAMEWORK, params.id, 'generation.framework', 'TEXT')
     : null
   if (pointsCheck && !pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', required: pointsCheck.cost, current: pointsCheck.currentPoints }, { status: 402 })

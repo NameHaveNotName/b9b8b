@@ -147,7 +147,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].framework
     : ''
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK + GENERATION_COSTS.FRAMEWORK_DEEPEN_ALL, params.id)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK + GENERATION_COSTS.FRAMEWORK_DEEPEN_ALL, params.id, 'generation.framework', 'TEXT')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

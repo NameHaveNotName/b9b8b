@@ -315,7 +315,7 @@ async function handleLegacyTrailer(
     return NextResponse.json({ success: true, message: '宣传片生成任务已在进行中', status: 'PROCESSING' })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.TRAILER, projectId)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.TRAILER, projectId, 'generation.trailer', 'VIDEO')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -375,7 +375,7 @@ async function handleGeneratePrompts(projectId: string, stepId: string, callerUs
   // 防御性保存：避免某些 minifier/运行时对 catch 块中参数引用的异常行为
   const userId = callerUserId
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION, projectId)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION, projectId, 'generation.trailer_prompts', 'TEXT')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -446,7 +446,7 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
     return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segment.projectId)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segment.projectId, 'generation.trailer_segment', 'VIDEO')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -507,7 +507,7 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
   }
 
   const batchCost = calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, pendingSegments.length)
-  const pointsCheck = await checkPoints(batchCost, projectId)
+  const pointsCheck = await checkPoints(batchCost, projectId, 'generation.trailer_segment', 'VIDEO')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -592,7 +592,7 @@ async function handleComposeVideo(projectId: string, stepId: string, body?: any)
 
 /** 生成背景音乐 */
 async function handleGenerateBgm(projectId: string, stepId: string, userId: string) {
-  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM, projectId)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.BGM, projectId, 'generation.bgm', 'MUSIC')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

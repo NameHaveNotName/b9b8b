@@ -166,7 +166,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   // === generate-prompts: 只生成提示词，不生图 ===
   if (action === 'generate-prompts') {
-    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
+    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id, 'generation.style_prompts', 'TEXT')
     if (!promptPointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -212,7 +212,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     let resolvedStyleOptions = existingOutput.styleOptions || []
     if (resolvedPrompts.length === 0) {
       console.warn('[STYLE-IMAGE] No prompts found, auto-triggering prompt generation')
-      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id, 'generation.style_prompts', 'TEXT')
       if (!promptPointsCheck.ok) {
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
@@ -234,7 +234,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       }
     }
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STYLE_UNIFY, params.id)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.STYLE_UNIFY, params.id, 'generation.style_unify', 'IMAGE')
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -383,7 +383,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.STYLE_UNIFY
-  const pointsCheck = await checkPoints(totalCost, params.id)
+  const pointsCheck = await checkPoints(totalCost, params.id, 'generation.style_unify', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

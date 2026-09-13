@@ -58,7 +58,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   console.log(`[CONCEPT-REGENERATE] 重新生成概念图: assetId=${assetId}, act=${actNumber}, scene=${sceneIndex}`)
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.CONCEPT_ART, params.id)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.CONCEPT_ART, params.id, 'generation.concept_art', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

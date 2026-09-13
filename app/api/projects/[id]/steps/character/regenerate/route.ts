@@ -65,7 +65,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   console.log(`[CHARACTER-REGENERATE] 重新生成角色: assetId=${assetId}, char=${character?.name}, 使用提示词来源=${latestPrompt ? 'prompts.englishPrompt' : 'character.description'}`)
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN, params.id)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN, params.id, 'generation.character_design', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

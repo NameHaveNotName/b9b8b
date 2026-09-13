@@ -62,7 +62,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     return NextResponse.json({ success: true, data: step!.outputData, cached: true })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION, params.id)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION, params.id, 'generation.idea_diffusion', 'TEXT')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

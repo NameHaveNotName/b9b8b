@@ -51,7 +51,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   const actPrompts = prompts.filter((p: any) => p.actNumber === actNumber)
   const batchCost = calculateBatchCost(GENERATION_COSTS.CONCEPT_ART, actPrompts.length)
-  const pointsCheck = await checkPoints(batchCost, params.id)
+  const pointsCheck = await checkPoints(batchCost, params.id, 'generation.concept_art', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

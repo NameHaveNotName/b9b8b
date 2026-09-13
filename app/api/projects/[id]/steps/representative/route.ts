@@ -47,7 +47,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   const shots = (storyboardStep.outputData as any)?.shots || []
   const batchCost = calculateBatchCost(GENERATION_COSTS.KEYFRAME, shots.length)
-  const pointsCheck = await checkPoints(batchCost, params.id)
+  const pointsCheck = await checkPoints(batchCost, params.id, 'generation.representative', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

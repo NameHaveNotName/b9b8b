@@ -91,6 +91,51 @@ export function calculateBatchCost(costPerItem: number, count: number): number {
   return Math.max(0, costPerItem * Math.max(0, count))
 }
 
+/** 操作类别映射 */
+export type OperationCategory = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'MUSIC' | 'OTHER'
+
+/** 成本常量到操作类别的映射 */
+export const COST_CATEGORY_MAP: Record<string, OperationCategory> = {
+  IDEA_DIFFUSION: 'TEXT',
+  FRAMEWORK: 'TEXT',
+  FRAMEWORK_DEEPEN_ALL: 'TEXT',
+  STYLE_UNIFY: 'TEXT',
+  CHARACTER_DESIGN: 'IMAGE',
+  CONCEPT_ART: 'IMAGE',
+  STORYBOARD_PROMPTS: 'TEXT',
+  STORYBOARD_IMAGES: 'IMAGE',
+  STORYBOARD_ACT_IMAGE: 'IMAGE',
+  KEYFRAME: 'IMAGE',
+  ENDING_FRAME: 'IMAGE',
+  TRAILER: 'VIDEO',
+  VIDEO_DIRECT_SEGMENT: 'VIDEO',
+  VOICEOVER_SCRIPTS: 'TEXT',
+  VOICEOVER_AUDIO_SEGMENT: 'AUDIO',
+  BGM: 'MUSIC',
+  DEFAULT: 'OTHER',
+}
+
+/** 成本常量到 actionKey 的映射 */
+export const COST_ACTION_KEY_MAP: Record<string, string> = {
+  IDEA_DIFFUSION: 'generation.idea_diffusion',
+  FRAMEWORK: 'generation.framework',
+  FRAMEWORK_DEEPEN_ALL: 'generation.framework_deepen',
+  STYLE_UNIFY: 'generation.style_unify',
+  CHARACTER_DESIGN: 'generation.character_design',
+  CONCEPT_ART: 'generation.concept_art',
+  STORYBOARD_PROMPTS: 'generation.storyboard_prompts',
+  STORYBOARD_IMAGES: 'generation.storyboard_images',
+  STORYBOARD_ACT_IMAGE: 'generation.storyboard_act_image',
+  KEYFRAME: 'generation.keyframe',
+  ENDING_FRAME: 'generation.ending_frame',
+  TRAILER: 'generation.trailer',
+  VIDEO_DIRECT_SEGMENT: 'generation.video_direct_segment',
+  VOICEOVER_SCRIPTS: 'generation.voiceover_scripts',
+  VOICEOVER_AUDIO_SEGMENT: 'generation.voiceover_audio_segment',
+  BGM: 'generation.bgm',
+  DEFAULT: 'generation.unknown',
+}
+
 /**
  * 将人民币金额（元）转换为点数。
  */

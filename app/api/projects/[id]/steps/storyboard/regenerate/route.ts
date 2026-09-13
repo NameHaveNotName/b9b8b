@@ -188,7 +188,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     .filter((r: any) => typeof r?.url === 'string' && /^https?:\/\//i.test(r.url))
     .map((r: any) => r.url)
 
-  const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE), params.id)
+  const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE), params.id, 'generation.storyboard_act_image', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001' }, { status: 403 })
   }

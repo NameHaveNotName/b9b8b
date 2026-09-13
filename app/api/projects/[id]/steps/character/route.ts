@@ -127,7 +127,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   // === generate-prompts: 只生成提示词，不生图 ===
   if (action === 'generate-prompts') {
-    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
+    const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id, 'generation.character_prompts', 'TEXT')
     if (!promptPointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -166,7 +166,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     let resolvedPrompts = prompts
     if (resolvedPrompts.length === 0) {
       console.warn('[CHARACTER-IMAGE] No prompts found, auto-triggering prompt generation')
-      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id)
+      const promptPointsCheck = await checkPoints(GENERATION_COSTS.DEFAULT, params.id, 'generation.character_prompts', 'TEXT')
       if (!promptPointsCheck.ok) {
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
@@ -187,7 +187,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       }
     }
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN, params.id)
+    const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN, params.id, 'generation.character_design', 'IMAGE')
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -266,7 +266,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   }
 
   const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.CHARACTER_DESIGN
-  const pointsCheck = await checkPoints(totalCost, params.id)
+  const pointsCheck = await checkPoints(totalCost, params.id, 'generation.character_design', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }

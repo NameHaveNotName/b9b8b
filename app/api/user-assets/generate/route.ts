@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   const template = getAssetTemplate(templateId, kind)
   if (!template) return NextResponse.json({ error: 'VALIDATION_002', message: '模板不存在' }, { status: 400 })
 
-  const points = await checkPoints(getImageGenerationCost(imageModel))
+  const points = await checkPoints(getImageGenerationCost(imageModel), undefined, 'generation.user_asset', 'IMAGE')
   if (!points.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: `点数不足，需要 ${points.cost} 点` }, { status: 402 })
   }

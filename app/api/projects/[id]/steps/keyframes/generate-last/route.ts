@@ -77,7 +77,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   console.log('[KEYFRAMES-GENERATE-LAST] shotId:', shot.shotId, 'description:', shot.description?.slice(0, 60))
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.KEYFRAME, params.id)
+  const pointsCheck = await checkPoints(GENERATION_COSTS.KEYFRAME, params.id, 'generation.keyframe', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
