@@ -1739,78 +1739,129 @@ function IdeationPanel({
         setContentType('storyboard')
         setStoryboardShots(shots)
 
-        // SheetJS 免费版不支持读取嵌入图片，需要用 exceljs（服务端库）
-        // 通过动态 import exceljs 来解析图片
-        // exceljs 在 browser 中通过 webpack 打包可用
+        // 用 fflate 解压 xlsx（本质是 zip），提取嵌入图片
         try {
-          const ExcelJS = await import('exceljs')
-          const ewb = new ExcelJS.Workbook()
-          await ewb.xlsx.load(buffer as any)
-          const ews = ewb.worksheets[0]
-          if (ews) {
-            const imageMetas = ews.getImages() as any[]
-            const imageFiles: File[] = []
-            // 构建 shotId 到行号的映射
-            const shotIdToRow = new Map<string, number>()
-            for (let r = dataStart; r <= dataEnd; r++) {
-              const v = shotIdCol >= 0 ? String((data[r] || [])[shotIdCol] || '').trim() : ''
-              if (v && /^\d{1,4}$/.test(v)) shotIdToRow.set(v, r)
+          const { unzipSync, strFromU8 } = await import('fflate')
+          const zipData = unzipSync(new Uint8Array(buffer))
+
+          // 1. 找到所有媒体文件（xl/media/image1.png 等）
+          const mediaFiles = new Map<string, Uint8Array>()
+          for (const [path, data] of Object.entries(zipData)) {
+            if (path.startsWith('xl/media/image')) {
+              mediaFiles.set(path, data)
             }
+          }
 
-            for (const meta of imageMetas) {
-              try {
-                const row = meta.range?.tl?.nativeRow != null ? meta.range.tl.nativeRow + 1 : -1
-                if (row < 0) continue
+          if (mediaFiles.size === 0) {
+            console.log('[XLSX-PARSE] xlsx 中没有嵌入图片')
+          } else {
+            // 2. 找到 drawing 文件和 rels
+            // xl/worksheets/_rels/sheet1.xml.rels → 关联 drawing
+            // xl/drawings/_rels/drawing1.xml.rels → 关联图片 rId → xl/media/image*.png
+            // xl/drawings/drawing1.xml → 图片位置（from row/col）
 
-                // 跳过表头行之前的图片（logo等装饰图）
-                if (row < dataStart) continue
+            // 解析 sheet1 的 rels，找到对应的 drawing
+            const sheetRelsPath = 'xl/worksheets/_rels/sheet1.xml.rels'
+            const sheetRels = zipData[sheetRelsPath] ? strFromU8(zipData[sheetRelsPath]) : ''
+            const drawingRefMatch = sheetRels.match(/Target="([^"]*drawing[^"]*)"/i)
+            const drawingPath = drawingRefMatch
+              ? 'xl/drawings/' + drawingRefMatch[1].replace(/^\.\.\//, '')
+              : null
+
+            if (!drawingPath || !zipData[drawingPath]) {
+              console.log('[XLSX-PARSE] 未找到 drawing 文件')
+            } else {
+              // 3. 解析 drawing rels，建立 rId → 图片文件路径的映射
+              const drawingRelsPath = drawingPath.replace('drawing', '_rels/drawing') + '.rels'
+              const drawingRels = zipData[drawingRelsPath] ? strFromU8(zipData[drawingRelsPath]) : ''
+              const ridToMedia = new Map<string, string>()
+              const ridRegex = /Id="([^"]+)"[^>]*Target="([^"]+)"/g
+              let ridMatch
+              while ((ridMatch = ridRegex.exec(drawingRels)) !== null) {
+                const rid = ridMatch[1]
+                const target = ridMatch[2].replace(/^\.\.\//, '')
+                ridToMedia.set(rid, 'xl/' + target)
+              }
+
+              // 4. 解析 drawing XML，提取每个图片的位置和关联的 rId
+              const drawingXml = strFromU8(zipData[drawingPath])
+              // 匹配 <xdr:twoCellAnchor> 块，每个块包含一个图片的位置和引用
+              const anchorRegex = /<xdr:twoCellAnchor[^>]*>([\s\S]*?)<\/xdr:twoCellAnchor>/g
+              const imagePositions: Array<{ row: number; col: number; mediaPath: string }> = []
+              let anchorMatch
+              while ((anchorMatch = anchorRegex.exec(drawingXml)) !== null) {
+                const anchor = anchorMatch[1]
+                // 提取 from row/col
+                const fromMatch = anchor.match(/<xdr:from>([\s\S]*?)<\/xdr:from>/)
+                if (!fromMatch) continue
+                const fromXml = fromMatch[1]
+                const colMatch = fromXml.match(/<xdr:col>(\d+)<\/xdr:col>/)
+                const rowMatch = fromXml.match(/<xdr:row>(\d+)<\/xdr:row>/)
+                if (!colMatch || !rowMatch) continue
+                const col = parseInt(colMatch[1])
+                const row = parseInt(rowMatch[1])
+
+                // 提取 rId（在 <a:blip r:embed="rIdX"/> 中）
+                const blipMatch = anchor.match(/<a:blip[^>]*r:embed="([^"]+)"/)
+                if (!blipMatch) continue
+                const rid = blipMatch[1]
+                const mediaPath = ridToMedia.get(rid)
+                if (!mediaPath || !mediaFiles.has(mediaPath)) continue
+
+                imagePositions.push({ row, col, mediaPath })
+              }
+
+              // 5. 匹配图片到分镜
+              const imageFiles: File[] = []
+              const shotIdToRow = new Map<string, number>()
+              for (let r = dataStart; r <= dataEnd; r++) {
+                const v = shotIdCol >= 0 ? String((data[r] || [])[shotIdCol] || '').trim() : ''
+                if (v && /^\d{1,4}$/.test(v)) shotIdToRow.set(v, r)
+              }
+
+              for (const pos of imagePositions) {
+                const imgRow = pos.row + 1 // drawing 中是 0-indexed
+                if (imgRow < dataStart) continue // 跳过表头之前的装饰图
 
                 // 匹配 shotId
                 let matchedShotId: string | null = null
                 if (shotIdCol >= 0) {
-                  const cellVal = String((data[row - 1] || [])[shotIdCol] || '').trim()
+                  const cellVal = String((data[imgRow - 1] || [])[shotIdCol] || '').trim()
                   if (cellVal && /^\d{1,4}$/.test(cellVal)) matchedShotId = cellVal
                   if (!matchedShotId) {
                     for (let up = 1; up <= 5; up++) {
-                      const checkRow = row - up
+                      const checkRow = imgRow - up
                       if (checkRow < dataStart) break
                       const upVal = String((data[checkRow - 1] || [])[shotIdCol] || '').trim()
                       if (upVal && /^\d{1,4}$/.test(upVal)) { matchedShotId = upVal; break }
                     }
                   }
                 } else {
-                  const idx = row - dataStart
+                  const idx = imgRow - dataStart
                   if (idx >= 0 && idx < shots.length) matchedShotId = shots[idx].shotId
                 }
-
                 if (!matchedShotId) continue
 
-                const imgResult = ews.workbook.getImage(meta.imageId) as any
-                const imgBuffer: ArrayBuffer | null = imgResult?.buffer || imgResult
-                if (!imgBuffer) continue
+                const imgData = mediaFiles.get(pos.mediaPath)
+                if (!imgData) continue
 
                 // 检测 MIME
-                const u8 = new Uint8Array(imgBuffer.slice(0, 4))
                 let mime = 'image/png', ext = 'png'
-                if (u8[0] === 0xFF && u8[1] === 0xD8) { mime = 'image/jpeg'; ext = 'jpg' }
-                else if (u8[0] === 0x89 && u8[1] === 0x50) { mime = 'image/png'; ext = 'png' }
-                else if (u8[0] === 0x47 && u8[1] === 0x49) { mime = 'image/gif'; ext = 'gif' }
+                if (imgData[0] === 0xFF && imgData[1] === 0xD8) { mime = 'image/jpeg'; ext = 'jpg' }
+                else if (imgData[0] === 0x89 && imgData[1] === 0x50) { mime = 'image/png'; ext = 'png' }
+                else if (imgData[0] === 0x47 && imgData[1] === 0x49) { mime = 'image/gif'; ext = 'gif' }
 
-                // 计算该 shot 已有图片数
                 const existingCount = imageFiles.filter(f => f.name.startsWith(`${matchedShotId}_`)).length
-                const fileName = `${matchedShotId}_${existingCount}.${ext}`
-                imageFiles.push(new File([imgBuffer], fileName, { type: mime }))
-              } catch (e: any) {
-                console.warn('[XLSX-PARSE] 跳过图片:', e?.message)
+                const imgBlob = new Blob([imgData as unknown as BlobPart], { type: mime })
+                imageFiles.push(new File([imgBlob], `${matchedShotId}_${existingCount}.${ext}`, { type: mime }))
               }
-            }
 
-            setXlsxImageFiles(imageFiles)
-            console.log(`[XLSX-PARSE] 解析完成: ${shots.length} 个分镜, ${imageFiles.length} 张图片`)
+              setXlsxImageFiles(imageFiles)
+              console.log(`[XLSX-PARSE] fflate 解析完成: ${shots.length} 个分镜, ${imageFiles.length} 张图片`)
+            }
           }
         } catch (e: any) {
-          console.warn('[XLSX-PARSE] exceljs 图片解析失败（SheetJS 兜底）:', e?.message)
-          // exceljs 在浏览器中可能不可用，降级为纯文本导入（无图片）
+          console.warn('[XLSX-PARSE] fflate 图片解析失败:', e?.message)
         }
 
         setShowStoryboardChoice(true)

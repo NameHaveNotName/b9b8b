@@ -16,10 +16,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   const project = await prisma.project.findUnique({ where: { id: params.id } })
   if (!project) {
+    console.error(`[IMPORT-STORYBOARD-WITH-IMAGES] Project not found: ${params.id}, userId: ${userId}`)
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
   const access = await checkProjectAccess(project.userId)
   if (!access.allowed) {
+    console.error(`[IMPORT-STORYBOARD-WITH-IMAGES] Access denied: project.userId=${project.userId}, currentUserId=${userId}`)
     return access.response
   }
 
