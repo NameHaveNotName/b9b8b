@@ -55,7 +55,7 @@ import { shouldRedirectToLogin } from '@/lib/auth-response-policy'
 
 const fetcher = (url: string) =>
   fetch(url).then((r) => {
-    if (r.status === 401 && typeof window !== 'undefined') {
+    if (shouldRedirectToLogin(r.status, 'page-load') && typeof window !== 'undefined') {
       const redirect = encodeURIComponent(window.location.pathname + window.location.search)
       window.location.href = `/login?redirect=${redirect}`
       throw new ApiError('未登录或会话已过期', 401)
@@ -190,21 +190,6 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
   // 提升到 WorkflowPage 级别，供 executeStep 和 StepContent 共享
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
 
-  // 全局拦截：只有会话失效（401）才跳转登录页。
-  // 403 是已认证用户的业务拒绝（如点数不足），必须留在当前页展示错误。
-  useEffect(() => {
-    const originalFetch = window.fetch
-    window.fetch = async (...args) => {
-      const res = await originalFetch(...args)
-      if (shouldRedirectToLogin(res.status)) {
-        const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-        window.location.href = `/login?redirect=${redirect}`
-      }
-      return res
-    }
-    return () => { window.fetch = originalFetch }
-  }, [])
-
   const project = data?.project
   const steps = project?.steps || []
 
@@ -308,12 +293,10 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         // 调试日志：响应状态
         console.log(`[executeStep] ${stepType} response status:`, res.status)
 
-        // 只有会话失效才跳转；403 由下方的业务错误分支处理。
-        if (shouldRedirectToLogin(res.status)) {
-          if (typeof window !== 'undefined') {
-            const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-            window.location.href = `/login?redirect=${redirect}`
-          }
+        // 生成是长请求，期间的并发会话刷新可能瞬时返回 401。
+        // 不在 mutation 中导航，避免已登录用户被登录页送回仪表盘。
+        if (res.status === 401) {
+          setLastError('会话校验暂时失败，请留在当前页刷新后重试')
           return
         }
 
