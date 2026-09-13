@@ -50,8 +50,22 @@ import WorkflowInspectorDrawer from '@/components/workflow/WorkflowInspectorDraw
 import SuggestionBar from '@/components/workflow/SuggestionBar'
 import { exportStoryboardExcel } from '@/lib/storyboard-excel-export'
 import { proxiedMediaUrl } from '@/lib/media-url'
+import { ApiError } from '@/lib/api-client'
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+const fetcher = (url: string) =>
+  fetch(url).then((r) => {
+    if (r.status === 401 && typeof window !== 'undefined') {
+      const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.href = `/login?redirect=${redirect}`
+      throw new ApiError('未登录或会话已过期', 401)
+    }
+    if (!r.ok) {
+      return r.text().then((text) => {
+        try { return JSON.parse(text) } catch { return { error: `HTTP_${r.status}`, message: text } }
+      })
+    }
+    return r.json()
+  })
 
 const STEP_LABELS: Record<string, string> = {
   IDEATION: '创意扩散',
@@ -175,6 +189,26 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
   // 提升到 WorkflowPage 级别，供 executeStep 和 StepContent 共享
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
 
+  // 全局拦截：任何 fetch 返回 401/403 时自动跳转登录页
+  useEffect(() => {
+    const originalFetch = window.fetch
+    window.fetch = async (...args) => {
+      const res = await originalFetch(...args)
+      if (res.status === 401 || (res.status === 403 && !res.url.includes('/api/admin'))) {
+        try {
+          const clone = res.clone()
+          const body = await clone.json().catch(() => null)
+          if (body?.error === 'AUTH_001' || body?.error === 'AUTH_002') {
+            const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+            window.location.href = `/login?redirect=${redirect}`
+          }
+        } catch { /* ignore */ }
+      }
+      return res
+    }
+    return () => { window.fetch = originalFetch }
+  }, [])
+
   const project = data?.project
   const steps = project?.steps || []
 
@@ -277,6 +311,15 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
 
         // 调试日志：响应状态
         console.log(`[executeStep] ${stepType} response status:`, res.status)
+
+        // 认证失败：跳转登录页
+        if (res.status === 401 || res.status === 403) {
+          if (typeof window !== 'undefined') {
+            const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+            window.location.href = `/login?redirect=${redirect}`
+          }
+          return
+        }
 
         // 防御：超时或服务器崩溃可能导致响应为空/非 JSON
         let result: any
@@ -479,7 +522,13 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
 
   if (isLoading) return <LoadingBlock />
   if (error) return <ErrorBlock message={error.message} />
-  if (!project) return <ErrorBlock message="项目未找到，请从仪表盘重新进入" />
+  if (!project) {
+    const apiError = data?.error
+    if (apiError === 'AUTH_001' || apiError === 'AUTH_002') {
+      return <ErrorBlock message="会话已过期或无权访问此项目，正在跳转…" />
+    }
+    return <ErrorBlock message={data?.message || '项目未找到，请从仪表盘重新进入'} />
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
