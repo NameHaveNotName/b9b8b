@@ -70,7 +70,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         outputData: { ...outputData, actProgress },
       },
     })
-    .catch((e) => console.error('[CONCEPT-GEN] PROCESSING update failed:', e?.message))
+    .catch((e: any) => console.error('[CONCEPT-GEN] PROCESSING update failed:', e?.message))
   console.log('[CONCEPT-GEN] PROCESSING update done, starting _generateAct')
 
   // 同步执行：串行生成该 act 的所有场景（每幕 1-2 张，CPU ~10-20s）
@@ -154,7 +154,7 @@ async function _generateOne(
   // 去重检查（已有则跳过）
   try {
     const all = await prisma.asset.findMany({ where: { projectId: paramsId, stepId } })
-    if (all.find((a) => (a.metadata as any)?.sceneIndex === sceneIndex)) {
+    if (all.find((a: any) => (a.metadata as any)?.sceneIndex === sceneIndex)) {
       console.log(`[CONCEPT-BG] sceneIndex=${sceneIndex} 已存在，跳过`)
       return
     }
@@ -175,7 +175,7 @@ async function _generateOne(
   let characterImageUrls: string[] = []
   try {
     const chars = await prisma.asset.findMany({ where: { projectId: paramsId, step: { stepType: 'CHARACTER' } } })
-    characterImageUrls = chars.map((a) => a.url).filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u))
+    characterImageUrls = chars.map((a: any) => a.url).filter((u: any) => typeof u === 'string' && /^https?:\/\//i.test(u))
   } catch (e: any) {}
 
   // 生成

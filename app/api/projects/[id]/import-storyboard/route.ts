@@ -8,7 +8,6 @@ import { getTextClient } from '@/lib/api-clients'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
-import { WorkflowStepType } from '@prisma/client'
 
 interface StoryboardShot {
   shotId: string
@@ -328,13 +327,13 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     } else {
       // skip_framework 模式：跳过中间步骤
       // 标记 IDEATION、FRAMEWORK、STYLE、CHARACTER、CONCEPT、TRAILER 为 SKIPPED
-      const stepsToSkip: WorkflowStepType[] = ['IDEATION', 'FRAMEWORK', 'STYLE', 'CHARACTER', 'CONCEPT', 'TRAILER']
+      const stepsToSkip: string[] = ['IDEATION', 'FRAMEWORK', 'STYLE', 'CHARACTER', 'CONCEPT', 'TRAILER']
       for (const stepType of stepsToSkip) {
         await prisma.workflowStep.upsert({
-          where: { projectId_stepType: { projectId: params.id, stepType } },
+          where: { projectId_stepType: { projectId: params.id, stepType: stepType as any } },
           create: {
             projectId: params.id,
-            stepType,
+            stepType: stepType as any,
             status: 'SKIPPED',
             order: getStepOrder(stepType),
             outputData: { skipped: true, reason: '用户导入分镜表并选择跳过框架' },
@@ -421,7 +420,7 @@ async function createDefaultFramework(projectId: string, shots: StoryboardShot[]
   })
 }
 
-function getStepOrder(stepType: WorkflowStepType): number {
+function getStepOrder(stepType: string): number {
   const orderMap: Record<string, number> = {
     'IDEATION': 0,
     'FRAMEWORK': 1,

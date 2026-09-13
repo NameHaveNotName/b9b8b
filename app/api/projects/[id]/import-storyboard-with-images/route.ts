@@ -4,7 +4,6 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { WorkflowStepType } from '@prisma/client'
 import { importStoryboardShots } from '@/lib/storyboard-import'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 

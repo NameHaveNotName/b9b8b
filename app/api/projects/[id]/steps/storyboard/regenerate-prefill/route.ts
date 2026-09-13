@@ -78,7 +78,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
     orderBy: { createdAt: 'asc' },
   })
-  characterAssets.forEach((a, i) => {
+  characterAssets.forEach((a: any, i: number) => {
     if (a.url) refs.push({ url: a.url, label: `角色${i + 1}`, type: 'character' })
   })
 
@@ -125,7 +125,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     orderBy: { createdAt: 'desc' },
     take: 10,
   })
-  userRefAssets.forEach((a, i) => {
+  userRefAssets.forEach((a: any, i: number) => {
     if (a.url) refs.push({ url: a.url, label: `用户参考${i + 1}`, type: 'user-upload' })
   })
 

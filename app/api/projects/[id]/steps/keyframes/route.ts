@@ -208,8 +208,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
       })
       const characterImageUrls = characterAssets
-        .map((a) => a.url)
-        .filter((u): u is string => typeof u === 'string' && u.length > 0)
+        .map((a: any) => a.url)
+        .filter((u: any): u is string => typeof u === 'string' && u.length > 0)
       const refs = await getProjectReferences(params.id).catch(() => [])
       const userRefUrls = refs.filter(r => r.url).map(r => r.url)
       const results = []
@@ -299,10 +299,10 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
     })
     const characterImageUrls = characterAssets
-      .map((a) => a.url)
-      .filter((u): u is string => typeof u === 'string' && u.length > 0)
+      .map((a: any) => a.url)
+      .filter((u: any): u is string => typeof u === 'string' && u.length > 0)
     const refs = await getProjectReferences(params.id).catch(() => [])
-    const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+    const userRefUrls = refs.filter((r: any) => r.url).map((r: any) => r.url)
     const defaultRefLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
     const defaultRefHint = refs.length > 0
       ? `\n【参考图】${refs.length} 张用户参考图${defaultRefLabels.length > 0 ? `（标签：${defaultRefLabels.join('、')}）` : ''}。生成 imagePrompt 时可以直接引用参考图中的人物。`

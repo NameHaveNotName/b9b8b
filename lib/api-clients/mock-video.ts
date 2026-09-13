@@ -241,11 +241,11 @@ async function loadConceptsAndFramework(
   const conceptAssets = await prisma.asset.findMany({
     where: { projectId, storageKey: { in: validKeys }, type: 'IMAGE' },
   })
-  const byKey = new Map(conceptAssets.map((a) => [a.storageKey, a]))
+  const byKey = new Map(conceptAssets.map((a: any) => [a.storageKey, a]))
 
   const concepts: ConceptMeta[] = []
   for (const key of validKeys) {
-    const asset = byKey.get(key)
+    const asset: any = byKey.get(key)
     const meta = (asset?.metadata as any) || {}
     // 优先用已有的 url（如 data: URL 兜底场景）；否则签新 URL
     const url =

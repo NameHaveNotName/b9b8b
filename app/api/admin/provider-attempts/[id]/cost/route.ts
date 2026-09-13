@@ -30,11 +30,11 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     where: { operationId: attempt.operationId, providerCost: { not: null } },
     select: { providerCost: true, currency: true, costSource: true },
   })
-  const currencies = [...new Set(attempts.map((item) => item.currency).filter(Boolean))]
+  const currencies = [...new Set(attempts.map((item: any) => item.currency).filter(Boolean))]
   const allAttempts = await prisma.providerCallAttempt.count({ where: { operationId: attempt.operationId } })
   const complete = attempts.length === allAttempts && currencies.length === 1
   const total = currencies.length === 1
-    ? attempts.reduce((sum, item) => sum + Number(item.providerCost), 0)
+    ? attempts.reduce((sum: number, item: any) => sum + Number(item.providerCost), 0)
     : null
 
   await prisma.operationLog.update({
@@ -42,7 +42,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     data: {
       providerCost: total == null ? null : total.toFixed(8),
       currency: total == null ? null : currencies[0],
-      costSource: complete && attempts.every((item) => item.costSource === 'ACTUAL')
+      costSource: complete && attempts.every((item: any) => item.costSource === 'ACTUAL')
         ? 'ACTUAL'
         : 'PARTIAL',
     },

@@ -13,7 +13,7 @@ import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflo
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
-import { GENERATION_COSTS } from '@/lib/points-config'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 /**
  * 生成角色提示词（供 generate-prompts 和 generate-images 共用）
@@ -187,7 +187,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       }
     }
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.CHARACTER_DESIGN, params.id, 'generation.character_design', 'IMAGE')
+    const imageCost = calculateBatchCost(GENERATION_COSTS.CHARACTER_DESIGN, resolvedPrompts.length)
+    const pointsCheck = await checkPoints(imageCost, params.id, 'generation.character_design', 'IMAGE')
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -265,7 +266,9 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     })
   }
 
-  const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.CHARACTER_DESIGN
+  const frameworkForBilling = (project.framework || frameworkStep.outputData) as any
+  const characterCountForBilling = Math.min(5, Array.isArray(frameworkForBilling?.characters) ? frameworkForBilling.characters.length : 0)
+  const totalCost = GENERATION_COSTS.DEFAULT + calculateBatchCost(GENERATION_COSTS.CHARACTER_DESIGN, characterCountForBilling)
   const pointsCheck = await checkPoints(totalCost, params.id, 'generation.character_design', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
@@ -466,6 +469,16 @@ async function generateCharacterImagesBackground(
     }
 
     await completeStep(stepId, { portraits, characterCount: portraits.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
+    if (failedCharacters.length > 0) {
+      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.CHARACTER_DESIGN, failedCharacters.length), {
+        projectId,
+        workflowStepId: stepId,
+        billingSource,
+        billingGroupId,
+        finalStatus: 'PARTIAL',
+        errorMessage: `${failedCharacters.length}/${resolvedPrompts.length} 个角色图片生成失败，失败部分点数已退回`,
+      })
+    }
     const dbAssetCount = await prisma.asset.count({ where: { stepId } })
     console.log(`[CHARACTER-BG] 完成: 成功 ${portraits.length}/${resolvedPrompts.length} 条，数据库 Asset 数: ${dbAssetCount}`)
   } catch (e: any) {

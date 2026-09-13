@@ -34,15 +34,15 @@ export async function GET(req: Request) {
     // 统计
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const todayOrders = orders.filter((o) => o.createdAt >= today)
+    const todayOrders = orders.filter((o: any) => o.createdAt >= today)
     const stats = {
-      pendingCount: orders.filter((o) => o.status === 'pending').length,
+      pendingCount: orders.filter((o: any) => o.status === 'pending').length,
       todayAmount: todayOrders
-        .filter((o) => o.status === 'approved')
-        .reduce((sum, o) => sum + o.amountYuan, 0),
+        .filter((o: any) => o.status === 'approved')
+        .reduce((sum: number, o: any) => sum + o.amountYuan, 0),
       todayPoints: todayOrders
-        .filter((o) => o.status === 'approved')
-        .reduce((sum, o) => sum + o.points, 0),
+        .filter((o: any) => o.status === 'approved')
+        .reduce((sum: number, o: any) => sum + o.points, 0),
     }
 
     return NextResponse.json({ orders, stats })

@@ -33,8 +33,8 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
   console.log('[CONCEPT-STATUS] projectId:', params.id, 'stepId:', step?.id, 'status:', step?.status, 'resultAssets:', step?.resultAssets?.length || 0)
 
   const assets = (step?.resultAssets || [])
-    .filter((a) => (a.metadata as any)?.sceneIndex !== undefined)
-    .sort((a, b) => ((a.metadata as any)?.sceneIndex || 0) - ((b.metadata as any)?.sceneIndex || 0))
+    .filter((a: any) => (a.metadata as any)?.sceneIndex !== undefined)
+    .sort((a: any, b: any) => ((a.metadata as any)?.sceneIndex || 0) - ((b.metadata as any)?.sceneIndex || 0))
 
   console.log('[CONCEPT-STATUS] filtered assets:', assets.length)
 

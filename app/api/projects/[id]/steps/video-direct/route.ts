@@ -140,7 +140,7 @@ async function backgroundComposeDirectVideo(projectId: string) {
     const result = await composeVideo({
       projectId,
       stepName: 'VIDEO_DIRECT',
-      segments: segments.map((s) => ({
+      segments: segments.map((s: any) => ({
         id: s.id,
         storageKey: s.storageKey,
         videoUrl: s.videoUrl,
@@ -425,7 +425,7 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
     success: true,
     count: pendingSegments.length,
     resetCount,
-    segmentIds: pendingSegments.map((s) => s.id),
+    segmentIds: pendingSegments.map((s: any) => s.id),
     status: 'generating',
     message: `已启动 ${pendingSegments.length} 个片段的批量生成${resetCount > 0 ? `（已清理 ${resetCount} 个超时片段）` : ''}`,
   })
@@ -438,12 +438,12 @@ async function handleComposeDirectVideo(projectId: string, stepId: string) {
     orderBy: { sequence: 'asc' },
   })
 
-  const incomplete = segments.filter((s) => s.status !== 'completed')
+  const incomplete = segments.filter((s: any) => s.status !== 'completed')
   if (incomplete.length > 0) {
     return NextResponse.json({
       error: 'INCOMPLETE_SEGMENTS',
       message: `还有 ${incomplete.length} 个片段未生成完成，无法合成`,
-      incomplete: incomplete.map((s) => ({ id: s.id, shotId: s.shotId, status: s.status })),
+      incomplete: incomplete.map((s: any) => ({ id: s.id, shotId: s.shotId, status: s.status })),
     }, { status: 400 })
   }
 
@@ -476,7 +476,7 @@ async function handleGenerateDirectBgm(projectId: string, stepId: string, userId
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
+  const totalDuration = segments.reduce((sum: number, s: any) => sum + (s.duration || 5), 0)
 
   try {
     const fwStep = await prisma.workflowStep.findUnique({
@@ -563,7 +563,7 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
   return NextResponse.json({
     status: step?.status || 'not_found',
     strategy: hasLastFrames ? 'first-last' : 'first-only',
-    clips: assets.map((a) => ({
+    clips: assets.map((a: any) => ({
       shotId: (a.metadata as any)?.shotId,
       url: a.url,
       duration: (a.metadata as any)?.duration,

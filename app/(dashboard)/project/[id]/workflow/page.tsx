@@ -1826,37 +1826,34 @@ function IdeationPanel({
 
               // 4. 解析 drawing XML，提取每个图片的位置和关联的 rId
               const drawingXml = strFromU8(zipData[drawingPath])
-              // 支持三种 anchor 类型：oneCellAnchor, twoCellAnchor, absoluteAnchor
-              const anchorRegex = /<xdr:(?:one|two|absolute)CellAnchor[^>]*>([\s\S]*?)<\/xdr:(?:one|two|absolute)CellAnchor>/g
+              // 支持有/无 xdr: 前缀的两种格式
+              const anchorRegex = /<(?:xdr:)?(?:one|two|absolute)CellAnchor[^>]*>([\s\S]*?)<\/(?:xdr:)?(?:one|two|absolute)CellAnchor>/g
               const imagePositions: Array<{ row: number; col: number; mediaPath: string }> = []
               let anchorMatch
               while ((anchorMatch = anchorRegex.exec(drawingXml)) !== null) {
                 const anchor = anchorMatch[1]
 
-                // 提取 from row/col（oneCellAnchor 和 twoCellAnchor 有 <xdr:from>）
-                const fromMatch = anchor.match(/<xdr:from>([\s\S]*?)<\/xdr:from>/)
+                // 提取 from row/col（支持有/无前缀）
+                const fromMatch = anchor.match(/<(?:xdr:)?from>([\s\S]*?)<\/(?:xdr:)?from>/)
                 let col = -1, row = -1
                 if (fromMatch) {
                   const fromXml = fromMatch[1]
-                  const colMatch = fromXml.match(/<xdr:col>(\d+)<\/xdr:col>/)
-                  const rowMatch = fromXml.match(/<xdr:row>(\d+)<\/xdr:row>/)
+                  const colMatch = fromXml.match(/<(?:xdr:)?col>(\d+)<\/(?:xdr:)?col>/)
+                  const rowMatch = fromXml.match(/<(?:xdr:)?row>(\d+)<\/(?:xdr:)?row>/)
                   if (colMatch) col = parseInt(colMatch[1])
                   if (rowMatch) row = parseInt(rowMatch[1])
                 }
-                // absoluteAnchor 用 <xdr:pos> 但没有 row/col，需要从 <xdr:ext> 推算
-                // 对于 absoluteAnchor，尝试从 pic 的 nvPicPr 中提取 name 推断
+                // absoluteAnchor 用 pos 推算
                 if (row < 0 || col < 0) {
-                  // 尝试从 <xdr:pos x="..." y="..."> 推算（EMU 单位，约 914400 EMU = 1 inch）
-                  const posMatch = anchor.match(/<xdr:pos[^>]*x="(\d+)"[^>]*y="(\d+)"/)
+                  const posMatch = anchor.match(/<(?:xdr:)?pos[^>]*x="(\d+)"[^>]*y="(\d+)"/)
                   if (posMatch) {
-                    // 粗略推算：假设行高约 15pt = 190500 EMU，列宽约 64pt = 576000 EMU
                     col = Math.floor(parseInt(posMatch[1]) / 576000)
                     row = Math.floor(parseInt(posMatch[2]) / 190500)
                   }
                 }
                 if (row < 0 || col < 0) continue
 
-                // 提取 rId（在 <a:blip r:embed="rIdX"/> 中）
+                // 提取 rId（支持有/无命名空间前缀的 blip）
                 const blipMatch = anchor.match(/<a:blip[^>]*r:embed="([^"]+)"/)
                 if (!blipMatch) continue
                 const rid = blipMatch[1]

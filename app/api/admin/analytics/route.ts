@@ -60,8 +60,8 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     dailyData,
-    typeStats: typeStats.map((t) => ({ type: t.type, count: t._count.id })),
-    successStats: successStats.map((s) => ({ success: s.success, count: s._count.id })),
+    typeStats: typeStats.map((t: any) => ({ type: t.type, count: t._count.id })),
+    successStats: successStats.map((s: any) => ({ success: s.success, count: s._count.id })),
     summary: {
       totalOps,
       totalUsers,

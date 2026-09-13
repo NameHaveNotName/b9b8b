@@ -230,17 +230,17 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
       })
       const characterImageUrls = characterAssets
-        .map((a) => a.url)
-        .filter((u) => typeof u === 'string' && u.length > 0) as string[]
+        .map((a: any) => a.url)
+        .filter((u: any) => typeof u === 'string' && u.length > 0) as string[]
       const characterDescs = characterAssets
-        .map((a) => ({
+        .map((a: any) => ({
           name: (a.metadata as any)?.characterName || '',
           description:
             (a.metadata as any)?.chineseDesc ||
             (a.metadata as any)?.llmPrompt ||
             '',
         }))
-        .filter((c) => c.name) as Array<{ name: string; description: string }>
+        .filter((c: any) => c.name) as Array<{ name: string; description: string }>
 
       const refs = await getProjectReferences(params.id).catch(() => [])
       const userRefUrls = refs.filter(r => r.url).map(r => r.url)
@@ -381,16 +381,16 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
     })
     const characterRefs = characterAssets
-      .map((a) => (a.metadata as any)?.characterId)
+      .map((a: any) => (a.metadata as any)?.characterId)
       .filter(Boolean) as string[]
 
     // 工作指令.txt（Round 6 任务一）：收集所有角色图 URL，用于概念图多图参考。
     // openlux.ts 内部会过滤非 http(s)（data: URL 不能传给豆包多图模型）。
     const characterImageUrls = characterAssets
-      .map((a) => a.url)
-      .filter((u) => typeof u === 'string' && u.length > 0) as string[]
+      .map((a: any) => a.url)
+      .filter((u: any) => typeof u === 'string' && u.length > 0) as string[]
     console.log(
-      `[CONCEPT-READ] 角色图数量: ${characterImageUrls.length}, http(s) 数量: ${characterImageUrls.filter((u) => /^https?:\/\//i.test(u)).length}`
+      `[CONCEPT-READ] 角色图数量: ${characterImageUrls.length}, http(s) 数量: ${characterImageUrls.filter((u: any) => /^https?:\/\//i.test(u)).length}`
     )
 
     const refs = await getProjectReferences(params.id).catch(() => [])

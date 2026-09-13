@@ -83,8 +83,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
   })
   const characterImageUrls = characterAssets
-    .map((a) => a.url)
-    .filter((u) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u)) as string[]
+    .map((a: any) => a.url)
+    .filter((u: any) => typeof u === 'string' && u.length > 0 && /^https?:\/\//i.test(u)) as string[]
 
   const refs = await getProjectReferences(params.id).catch(() => [])
   const userRefUrls = refs.filter(r => r.url).map(r => r.url)

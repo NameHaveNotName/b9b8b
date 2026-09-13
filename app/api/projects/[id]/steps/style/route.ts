@@ -13,7 +13,7 @@ import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflo
 import { createQueue } from '@/lib/queue'
 import { processStyleGeneration } from '@/lib/style-processor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
-import { GENERATION_COSTS } from '@/lib/points-config'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { logOperation } from '@/lib/operations'
 import { getCurrentOperationId } from '@/lib/supplier-observability'
 
@@ -235,7 +235,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       }
     }
 
-    const pointsCheck = await checkPoints(GENERATION_COSTS.STYLE_UNIFY, params.id, 'generation.style_unify', 'IMAGE')
+    const imageCost = calculateBatchCost(GENERATION_COSTS.STYLE_UNIFY, resolvedPrompts.length)
+    const pointsCheck = await checkPoints(imageCost, params.id, 'generation.style_unify', 'IMAGE')
     if (!pointsCheck.ok) {
       return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
@@ -383,7 +384,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     })
   }
 
-  const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.STYLE_UNIFY
+  // The compatibility path always requests three style samples. STYLE_UNIFY is
+  // the per-image price, not a flat price for all three supplier calls.
+  const totalCost = GENERATION_COSTS.DEFAULT + calculateBatchCost(GENERATION_COSTS.STYLE_UNIFY, 3)
   const pointsCheck = await checkPoints(totalCost, params.id, 'generation.style_unify', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })

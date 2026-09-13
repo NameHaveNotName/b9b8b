@@ -70,18 +70,18 @@ export default async function AdminUserProjectsPage(props: PageProps) {
   })
 
   // 收集所有 workflowStepId 并查询对应步骤类型
-  const stepIds = operations.map((op) => op.workflowStepId).filter(Boolean) as string[]
+  const stepIds = operations.map((op: any) => op.workflowStepId).filter(Boolean) as string[]
   const workflowSteps = stepIds.length > 0
     ? await prisma.workflowStep.findMany({
         where: { id: { in: stepIds } },
         select: { id: true, stepType: true },
       })
     : []
-  const stepTypeMap = new Map(workflowSteps.map((s) => [s.id, s.stepType]))
+  const stepTypeMap = new Map(workflowSteps.map((s: any) => [s.id, s.stepType]))
 
   const stepCountMap = new Map<string, number>()
   for (const op of operations) {
-    const stepType = op.workflowStepId ? stepTypeMap.get(op.workflowStepId) || 'OTHER' : 'OTHER'
+    const stepType = String((op.workflowStepId ? stepTypeMap.get(op.workflowStepId) : null) || 'OTHER')
     stepCountMap.set(stepType, (stepCountMap.get(stepType) || 0) + 1)
   }
 
@@ -179,10 +179,10 @@ export default async function AdminUserProjectsPage(props: PageProps) {
                   </td>
                 </tr>
               ) : (
-                projects.map((project) => {
+                projects.map((project: any) => {
                   const latestCompletedStep = project.steps
-                    .filter((s) => s.status === 'COMPLETED' || s.status === 'SKIPPED')
-                    .sort((a, b) => {
+                    .filter((s: any) => s.status === 'COMPLETED' || s.status === 'SKIPPED')
+                    .sort((a: any, b: any) => {
                       const order = ['IDEATION','FRAMEWORK','STYLE','CHARACTER','CONCEPT','TRAILER','STORYBOARD','KEYFRAMES','VIDEO_DIRECT','VIDEO_RENDER','CAMERA','REVIEW']
                       return order.indexOf(a.stepType) - order.indexOf(b.stepType)
                     })
@@ -191,7 +191,7 @@ export default async function AdminUserProjectsPage(props: PageProps) {
                     ? STEP_LABELS[latestCompletedStep.stepType] || latestCompletedStep.stepType
                     : '未开始'
                   const completedSteps = project.steps.filter(
-                    (s) => s.status === 'COMPLETED' || s.status === 'SKIPPED'
+                    (s: any) => s.status === 'COMPLETED' || s.status === 'SKIPPED'
                   ).length
                   const isCompleted = completedSteps === project.steps.length && project.steps.length > 0
                   return (

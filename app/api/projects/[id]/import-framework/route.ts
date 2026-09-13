@@ -4,7 +4,6 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { WorkflowStepType } from '@prisma/client'
 
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params
@@ -102,11 +101,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     })
 
     // 4. 重置后续步骤（如果有的话）
-    const subsequentSteps: WorkflowStepType[] = ['STYLE', 'CHARACTER', 'CONCEPT', 'STORYBOARD', 'TRAILER']
+    const subsequentSteps: string[] = ['STYLE', 'CHARACTER', 'CONCEPT', 'STORYBOARD', 'TRAILER']
     await prisma.workflowStep.updateMany({
       where: {
         projectId: params.id,
-        stepType: { in: subsequentSteps },
+        stepType: { in: subsequentSteps as any },
       },
       data: {
         status: 'PENDING',

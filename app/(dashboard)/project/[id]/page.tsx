@@ -102,10 +102,10 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
         })
       : []
 
-    const completedCount = project.steps.filter((s) => s.status === 'COMPLETED').length
+    const completedCount = project.steps.filter((s: any) => s.status === 'COMPLETED').length
     const currentStep =
-      project.steps.find((s) => s.status === 'PROCESSING') ||
-      project.steps.find((s) => s.status === 'PENDING')
+      project.steps.find((s: any) => s.status === 'PROCESSING') ||
+      project.steps.find((s: any) => s.status === 'PENDING')
     const progressPercent = (completedCount / 12) * 100
 
     return (
@@ -169,7 +169,7 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
                 <div className="mt-5 border-t border-stone-100 pt-4">
                   <MoveToGroupButton
                     projectId={project.id}
-                    groups={availableGroups.map((item) => item.group)}
+                    groups={availableGroups.map((item: any) => item.group)}
                   />
                 </div>
               )}
@@ -193,7 +193,7 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
 
             {/* 迷你 Stepper */}
             <div className="space-y-2">
-              {project.steps.map((step) => {
+              {project.steps.map((step: any) => {
                 const Icon = STEP_ICONS[step.stepType]
                 const isActive = step.status === 'PROCESSING'
                 const isCompleted = step.status === 'COMPLETED'

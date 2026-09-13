@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import type { Prisma } from '@prisma/client'
 
 function boundedInt(value: string | null, fallback: number, min: number, max: number) {
   const parsed = Number.parseInt(value || '', 10)
@@ -27,7 +26,7 @@ export async function GET(req: Request) {
   const projectId = params.get('projectId')?.trim()
   const search = params.get('search')?.trim().slice(0, 100)
 
-  const where: Prisma.OperationLogWhereInput = {
+  const where: any = {
     createdAt: { gte: startDate },
     ...(status ? { status } : {}),
     ...(category ? { category } : {}),
@@ -70,25 +69,25 @@ export async function GET(req: Request) {
     }),
   ])
 
-  const projectIds = [...new Set(operations.map((item) => item.projectId).filter(Boolean))] as string[]
+  const projectIds = [...new Set(operations.map((item: any) => item.projectId).filter(Boolean))] as string[]
   const projects = projectIds.length
     ? await prisma.project.findMany({
         where: { id: { in: projectIds } },
         select: { id: true, title: true, groupId: true },
       })
     : []
-  const projectMap = new Map(projects.map((project) => [project.id, project]))
+  const projectMap = new Map(projects.map((project: any) => [project.id, project]))
 
   return NextResponse.json({
     page,
     pageSize,
     total,
     pages: Math.max(1, Math.ceil(total / pageSize)),
-    operations: operations.map((operation) => ({
+    operations: operations.map((operation: any) => ({
       ...operation,
       providerCost: operation.providerCost == null ? null : Number(operation.providerCost),
       project: operation.projectId ? projectMap.get(operation.projectId) || null : null,
-      providerAttempts: operation.providerAttempts.map((attempt) => ({
+      providerAttempts: operation.providerAttempts.map((attempt: any) => ({
         ...attempt,
         providerCost: attempt.providerCost == null ? null : Number(attempt.providerCost),
       })),

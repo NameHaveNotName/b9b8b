@@ -68,7 +68,7 @@ export default async function GroupsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {memberships.map((m) => (
+          {memberships.map((m: any) => (
             <Link
               key={m.group.id}
               href={`/groups/${m.group.id}`}

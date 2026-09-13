@@ -2,7 +2,6 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { WorkflowStepType } from '@prisma/client'
 import { projectCoreSelect } from '@/lib/db/project-select'
 import { checkGroupAccess } from '@/lib/project-permission'
 
@@ -35,14 +34,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       select: projectCoreSelect,
     })
 
-    const stepTypes: WorkflowStepType[] = [
+    const stepTypes: string[] = [
       'IDEATION', 'FRAMEWORK', 'STYLE', 'CHARACTER', 'CONCEPT', 'TRAILER',
       'STORYBOARD', 'KEYFRAMES', 'VIDEO_DIRECT', 'VIDEO_RENDER', 'CAMERA', 'REVIEW',
     ]
     await prisma.workflowStep.createMany({
       data: stepTypes.map((stepType, index) => ({
         projectId: project.id,
-        stepType,
+        stepType: stepType as any,
         order: index,
         status: 'PENDING',
       })),

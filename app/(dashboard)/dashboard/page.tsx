@@ -71,7 +71,7 @@ export default async function DashboardPage() {
 
     const evaluationsCount = userAssets.length > 0
       ? await prisma.evaluation.count({
-          where: { assetId: { in: userAssets.map((a) => a.id) } },
+          where: { assetId: { in: userAssets.map((a: { id: string }) => a.id) } },
         })
       : 0
 
@@ -158,7 +158,7 @@ export default async function DashboardPage() {
             </div>
           ) : (
             <ProjectList
-              initialProjects={projects.map((p) => ({
+              initialProjects={projects.map((p: any) => ({
                 id: p.id,
                 title: p.title || '未命名项目',
                 rawIdea: p.rawIdea || '',

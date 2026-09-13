@@ -156,9 +156,9 @@ export default async function AdminUserDetailPage(props: PageProps) {
               该用户暂无项目
             </div>
           ) : (
-            projects.map((project) => {
+            projects.map((project: any) => {
               const completedSteps = project.steps.filter(
-                (s) => s.status === 'COMPLETED' || s.status === 'SKIPPED'
+                (s: any) => s.status === 'COMPLETED' || s.status === 'SKIPPED'
               ).length
               return (
                 <Link

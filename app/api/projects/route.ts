@@ -2,7 +2,6 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { WorkflowStepType } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser, getCurrentUserId } from '@/lib/auth-helpers';
 import { projectDashboardSelect, projectCoreSelect } from '@/lib/db/project-select';
@@ -64,7 +63,7 @@ export async function POST(req: Request) {
     console.log('[POST /api/projects] created project:', project.id, 'with userId:', user.id)
 
     // 自动初始化 12 步 WorkflowStep 记录（全部 PENDING）
-    const stepTypes: WorkflowStepType[] = [
+    const stepTypes: string[] = [
       'IDEATION',
       'FRAMEWORK',
       'STYLE',
@@ -83,10 +82,10 @@ export async function POST(req: Request) {
       where: { projectId: project.id },
       select: { stepType: true },
     });
-    const existingTypes = new Set(existingSteps.map((s) => s.stepType));
+    const existingTypes = new Set(existingSteps.map((s: any) => s.stepType));
     const stepsToCreate = stepTypes
-      .map((type, idx) => ({ projectId: project.id, stepType: type, order: idx, status: 'PENDING' as const }))
-      .filter((s) => !existingTypes.has(s.stepType));
+      .map((type: string, idx: number) => ({ projectId: project.id, stepType: type as any, order: idx, status: 'PENDING' as const }))
+      .filter((s: any) => !existingTypes.has(s.stepType));
 
     if (stepsToCreate.length > 0) {
       await prisma.workflowStep.createMany({ data: stepsToCreate });

@@ -192,7 +192,7 @@ export async function deductPointsAndLog(
   if (!resolved) throw new Error('POINTS_ACCOUNT_NOT_FOUND')
 
   // 检查与扣减在同一条条件更新中完成，避免多人并发把余额扣成负数。
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: any) => {
     let balanceAfter: number
 
     if (resolved.source === 'GROUP' && resolved.groupId) {
@@ -289,7 +289,7 @@ export async function refundPointsAndLog(
     errorMessage: meta.errorMessage || '任务失败，点数已退回',
   })
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: any) => {
     // Background jobs can be delivered more than once. Claim the refund on the
     // original operation before changing a balance so retries cannot double-pay.
     if (operationId) {

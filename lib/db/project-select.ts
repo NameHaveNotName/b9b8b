@@ -9,8 +9,6 @@
  * TODO：当数据库迁移补齐缺失字段后，可移除该限制，恢复为完整查询。
  */
 
-import { Prisma } from '@prisma/client'
-
 /**
  * Project 核心标量字段：这些字段从项目最初就存在，数据库中一定存在。
  */
@@ -35,7 +33,7 @@ export const projectCoreSelect = {
   stepDirectDone: true,
   createdAt: true,
   updatedAt: true,
-} satisfies Prisma.ProjectSelect
+} as const
 
 /**
  * 仪表盘项目卡片需要的字段：核心字段 + 资产数 + 步骤进度
@@ -44,7 +42,7 @@ export const projectDashboardSelect = {
   ...projectCoreSelect,
   _count: { select: { assets: true } },
   steps: { select: { order: true, status: true } },
-} satisfies Prisma.ProjectSelect
+} as const
 
 /**
  * 项目详情页需要的字段：核心字段 + 步骤 + 最近资产
@@ -81,7 +79,7 @@ export const projectDetailSelect = {
       metadata: true,
     },
   },
-} satisfies Prisma.ProjectSelect
+} as const
 
 /**
  * 管理员项目列表需要的字段：核心字段 + 步骤 + 资产数
@@ -90,4 +88,4 @@ export const projectAdminSelect = {
   ...projectCoreSelect,
   _count: { select: { assets: true, steps: true } },
   steps: { select: { stepType: true, status: true } },
-} satisfies Prisma.ProjectSelect
+} as const

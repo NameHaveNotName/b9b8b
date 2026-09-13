@@ -181,7 +181,7 @@ async function backgroundComposeVideo(
     const result = await composeVideo({
       projectId,
       stepName,
-      segments: segments.map((s) => ({
+      segments: segments.map((s: any) => ({
         id: s.id,
         storageKey: s.storageKey,
         videoUrl: s.videoUrl,
@@ -339,7 +339,7 @@ async function handleLegacyTrailer(
     return NextResponse.json({ error: 'WORKFLOW_001', message: '未找到概念图，请先生成概念图' }, { status: 400 })
   }
 
-  const conceptImageKeys = filteredAssets.map((a) => a.storageKey)
+  const conceptImageKeys = filteredAssets.map((a: any) => a.storageKey)
 
   // Reserve points before dispatch so a fast queue worker cannot finish before
   // the billing record is committed.
@@ -531,7 +531,7 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
 
   // 批量更新为 generating
   await Promise.all(
-    pendingSegments.map((seg) =>
+    pendingSegments.map((seg: any) =>
       prisma.videoSegment.update({
         where: { id: seg.id },
         data: { status: 'generating', errorMessage: null },
@@ -588,7 +588,7 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
   return NextResponse.json({
     success: true,
     count: pendingSegments.length,
-    segmentIds: pendingSegments.map((s) => s.id),
+    segmentIds: pendingSegments.map((s: any) => s.id),
     status: 'generating',
     message: `已启动 ${pendingSegments.length} 个片段的批量生成`,
   })
@@ -601,12 +601,12 @@ async function handleComposeVideo(projectId: string, stepId: string, body?: any)
     orderBy: { sequence: 'asc' },
   })
 
-  const incomplete = segments.filter((s) => s.status !== 'completed')
+  const incomplete = segments.filter((s: any) => s.status !== 'completed')
   if (incomplete.length > 0) {
     return NextResponse.json({
       error: 'INCOMPLETE_SEGMENTS',
       message: `还有 ${incomplete.length} 个片段未生成完成，无法合成`,
-      incomplete: incomplete.map((s) => ({ id: s.id, shotId: s.shotId, status: s.status })),
+      incomplete: incomplete.map((s: any) => ({ id: s.id, shotId: s.shotId, status: s.status })),
     }, { status: 400 })
   }
 
@@ -641,7 +641,7 @@ async function handleGenerateBgm(projectId: string, stepId: string, userId: stri
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 5), 0)
+  const totalDuration = segments.reduce((sum: number, s: any) => sum + (s.duration || 5), 0)
 
   try {
     // 读取框架数据

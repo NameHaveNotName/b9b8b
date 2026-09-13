@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   const referenceImages = [
     ...template.referenceUrls,
-    ...userRefs.map((asset) => asset.url).filter(Boolean),
+    ...userRefs.map((asset: any) => asset.url).filter(Boolean),
   ]
 
   let finalPrompt = ''

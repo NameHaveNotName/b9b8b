@@ -21,7 +21,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       return NextResponse.json({ error: 'VALID_001', message: '转入点数必须是正整数' }, { status: 400 })
     }
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: any) => {
       const user = await tx.user.findUnique({
         where: { id: adminCheck.user.id },
         select: { id: true, points: true },

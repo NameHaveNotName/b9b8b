@@ -81,14 +81,14 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       where: { projectId: params.id, step: { stepType: 'CHARACTER' } },
     })
     const characterImageUrls = characterAssets
-      .map((a) => a.url)
-      .filter((u): u is string => typeof u === 'string' && u.length > 0)
+      .map((a: any) => a.url)
+      .filter((u: any): u is string => typeof u === 'string' && u.length > 0)
     const characterDescs = characterAssets
-      .map((a) => ({
+      .map((a: any) => ({
         name: (a.metadata as any)?.characterName || '',
         description: (a.metadata as any)?.chineseDesc || '',
       }))
-      .filter((c) => c.name)
+      .filter((c: any) => c.name)
 
     const results = []
 
