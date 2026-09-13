@@ -15,6 +15,7 @@ import { processStyleGeneration } from '@/lib/style-processor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 import { logOperation } from '@/lib/operations'
+import { getCurrentOperationId } from '@/lib/supplier-observability'
 
 const styleQueue = createQueue('style-generation')
 
@@ -273,7 +274,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         try {
           await styleQueue.add(
             'generate-style-images',
-            { stepId: step.id, projectId: params.id, styleOptions, aspectRatio, imageModel },
+            { stepId: step.id, projectId: params.id, styleOptions, aspectRatio, imageModel, operationId: getCurrentOperationId(), operationUserId: userId },
             {
               attempts: 2,
               backoff: { type: 'exponential', delay: 3000 },
@@ -481,7 +482,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       try {
         await styleQueue.add(
           'generate-style-images',
-          { stepId: step.id, projectId: params.id, styleOptions },
+          { stepId: step.id, projectId: params.id, styleOptions, operationId: getCurrentOperationId(), operationUserId: userId },
           {
             attempts: 2,
             backoff: { type: 'exponential', delay: 3000 },

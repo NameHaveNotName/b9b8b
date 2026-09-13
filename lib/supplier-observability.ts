@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 
 type OperationContext = { operationId: string; userId: string }
@@ -196,6 +197,32 @@ function findString(data: unknown, keys: string[]): string | undefined {
   return undefined
 }
 
+function findNumber(data: unknown, keys: string[]): number | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  const record = data as Record<string, unknown>
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
+  }
+  return undefined
+}
+
+function extractUsage(data: unknown) {
+  if (!data || typeof data !== 'object') return {}
+  const root = data as Record<string, unknown>
+  const usage = root.usage && typeof root.usage === 'object'
+    ? root.usage as Record<string, unknown>
+    : root.data && typeof root.data === 'object' && (root.data as Record<string, unknown>).usage
+      ? (root.data as Record<string, unknown>).usage as Record<string, unknown>
+      : undefined
+  if (!usage) return {}
+  const inputTokens = findNumber(usage, ['prompt_tokens', 'input_tokens'])
+  const outputTokens = findNumber(usage, ['completion_tokens', 'output_tokens'])
+  const totalTokens = findNumber(usage, ['total_tokens']) ??
+    (inputTokens != null || outputTokens != null ? (inputTokens || 0) + (outputTokens || 0) : undefined)
+  return { inputTokens, outputTokens, totalTokens }
+}
+
 /**
  * fetch-compatible supplier transport. It records request lifecycle metadata only;
  * request bodies, prompts, authorization headers and response payloads are never persisted.
@@ -213,6 +240,12 @@ export async function trackedSupplierFetch(
   const url = new URL(rawUrl)
   const endpoint = url.pathname.slice(0, 500)
   const model = extractRequestModel(init)
+  const inputSummary = typeof init?.body === 'string'
+    ? {
+        sha256: createHash('sha256').update(init.body).digest('hex'),
+        bytes: Buffer.byteLength(init.body),
+      }
+    : undefined
   const category = inferCategory(endpoint, model)
   const startedAt = new Date()
   let attemptId: string | undefined
@@ -233,12 +266,21 @@ export async function trackedSupplierFetch(
       },
     })
     attemptId = attempt.id
+    const operation = await prisma.operationLog.findUnique({
+      where: { id: context.operationId },
+      select: { actionKey: true, category: true },
+    })
     await prisma.operationLog.update({
       where: { id: context.operationId },
       data: {
         status: 'RUNNING',
-        category,
-        actionKey: `generation.${category.toLowerCase()}`,
+        // A transport-level inference must never erase the more precise product
+        // action recorded by checkPoints (for example keyframe vs concept art).
+        ...(operation?.category === 'OTHER' ? { category } : {}),
+        ...(operation?.actionKey === 'generation.unknown'
+          ? { actionKey: `generation.${category.toLowerCase()}` }
+          : {}),
+        ...(inputSummary ? { inputSummary } : {}),
       },
     })
   } catch (error) {
@@ -251,10 +293,12 @@ export async function trackedSupplierFetch(
     if (attemptId) {
       let externalTaskId: string | undefined
       let errorCode: string | undefined
+      let usage: ReturnType<typeof extractUsage> = {}
       try {
         const data = await response.clone().json()
         externalTaskId = findString(data, ['task_id', 'taskId', 'id'])
         errorCode = !response.ok ? findString(data, ['error_code', 'errorCode', 'code']) : undefined
+        usage = extractUsage(data)
       } catch {}
       await prisma.providerCallAttempt.update({
         where: { id: attemptId },
@@ -262,9 +306,13 @@ export async function trackedSupplierFetch(
           status: response.ok ? 'SUCCEEDED' : 'FAILED',
           httpStatus: response.status,
           requestId:
-            response.headers.get('x-request-id') || response.headers.get('request-id') || undefined,
+            response.headers.get('x-api-request-id') ||
+            response.headers.get('x-request-id') ||
+            response.headers.get('request-id') ||
+            undefined,
           externalTaskId,
           errorCode,
+          ...usage,
           completedAt,
           durationMs: completedAt.getTime() - startedAt.getTime(),
         },

@@ -10,7 +10,8 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { startStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
-import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
+import { attachOperationResults, finalizeCurrentSupplierOperation, getCurrentOperationId } from '@/lib/supplier-observability'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 /** 获取 storyboard shots 和 keyframes */
@@ -57,7 +58,7 @@ async function backgroundGenerateDirectSegment(
   duration: number,
   videoModel?: string,
   aspectRatio?: string
-) {
+): Promise<{ success: boolean; resultId?: string; errorMessage?: string }> {
   try {
     console.log(`[DIRECT-SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
     const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
@@ -83,7 +84,7 @@ async function backgroundGenerateDirectSegment(
       },
     })
 
-    await prisma.asset.create({
+    const asset = await prisma.asset.create({
       data: {
         projectId,
         type: 'VIDEO',
@@ -100,6 +101,7 @@ async function backgroundGenerateDirectSegment(
     })
 
     console.log(`[DIRECT-SEGMENT-BG] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
+    return { success: true, resultId: asset.id }
   } catch (e: any) {
     console.error(`[DIRECT-SEGMENT-BG] 失败 segmentId=${segmentId}:`, e?.message)
     await prisma.videoSegment.update({
@@ -109,6 +111,7 @@ async function backgroundGenerateDirectSegment(
         errorMessage: (e?.message || '生成失败').slice(0, 200),
       },
     })
+    return { success: false, errorMessage: (e?.message || '生成失败').slice(0, 500) }
   }
 }
 
@@ -287,16 +290,15 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
     return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segment.projectId, 'generation.video_direct_segment', 'VIDEO')
-  if (!pointsCheck.ok) {
-    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
-  }
-
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
   const shot = shots[segment.sequence] || shots.find((s: any) => s.shotId === segment.shotId)
   const firstFrameUrl = shot?.firstFrameUrl || ''
   if (!firstFrameUrl) {
     return NextResponse.json({ error: 'NO_IMAGE', message: '该分镜没有可用的首帧' }, { status: 400 })
+  }
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segment.projectId, 'generation.video_direct_segment', 'VIDEO')
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
   const kf = keyframes[segment.sequence] || keyframes.find((k: any) => k.shotId === segment.shotId)
   const lastFrameUrl = kf?.lastFrameUrl || null
@@ -310,16 +312,22 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
   await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, assetId: segmentId, success: true })
 
   const defaultAspectRatio = await getProjectDefaultAspectRatio(projectId)
-  waitUntil(backgroundGenerateDirectSegment(
-    segmentId,
-    projectId,
-    segment.prompt,
-    firstFrameUrl,
-    lastFrameUrl,
-    segment.duration || 5,
-    body?.videoModel,
-    defaultAspectRatio
-  ))
+  waitUntil((async () => {
+    const outcome = await backgroundGenerateDirectSegment(
+      segmentId, projectId, segment.prompt, firstFrameUrl, lastFrameUrl,
+      segment.duration || 5, body?.videoModel, defaultAspectRatio,
+    )
+    if (outcome.success) {
+      await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId, resultId: outcome.resultId })
+    } else {
+      await refundPointsAndLog(userId, pointsCheck.cost, {
+        projectId, workflowStepId: stepId,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+        errorMessage: outcome.errorMessage,
+      })
+    }
+  })())
 
   return NextResponse.json({
     success: true,
@@ -359,7 +367,10 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
   const defaultAspectRatio = await getProjectDefaultAspectRatio(projectId)
 
+  const operationId = getCurrentOperationId()
   waitUntil((async () => {
+    let succeeded = 0
+    let failed = 0
     for (const segment of pendingSegments) {
       const shot = shots.find((s: any) => s.shotId === segment.shotId)
       const firstFrameUrl = shot?.firstFrameUrl || ''
@@ -368,6 +379,7 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
           where: { id: segment.id },
           data: { status: 'failed', errorMessage: '没有可用的首帧' },
         })
+        failed += 1
         continue
       }
 
@@ -379,7 +391,7 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
 
       const kf = keyframes.find((k: any) => k.shotId === segment.shotId)
       const lastFrameUrl = kf?.lastFrameUrl || null
-      await backgroundGenerateDirectSegment(
+      const outcome = await backgroundGenerateDirectSegment(
         segment.id,
         projectId,
         segment.prompt,
@@ -389,6 +401,23 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
         body?.videoModel,
         defaultAspectRatio
       )
+      if (outcome.success) {
+        succeeded += 1
+        if (operationId && outcome.resultId) await attachOperationResults(operationId, outcome.resultId)
+      } else {
+        failed += 1
+      }
+    }
+    if (failed > 0) {
+      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, failed), {
+        projectId, workflowStepId: stepId,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+        finalStatus: succeeded > 0 ? 'PARTIAL' : 'FAILED',
+        errorMessage: `${failed}/${pendingSegments.length} 个视频片段生成失败，失败部分点数已退回`,
+      })
+    } else {
+      await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId })
     }
   })())
 

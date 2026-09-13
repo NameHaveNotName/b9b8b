@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma'
 import { completeStep, failStep, isStepCancelled } from '../lib/workflow-executor'
 import { generateOneVideoSegment } from '../lib/video-segment-utils'
 import { uploadFile, getSignedFileUrl } from '../lib/r2'
+import { enterOperationContext } from '../lib/supplier-observability'
 
 // 动态加载 video client（避免在导入时解析路径别名问题）
 async function getVideoClient() {
@@ -12,7 +13,8 @@ async function getVideoClient() {
 }
 
 const worker = new Worker('video-generation', async (job) => {
-  const { stepId, projectId, conceptImageKeys, shotId, firstFrameKey, lastFrameKey, type, segmentId } = job.data
+  const { stepId, projectId, conceptImageKeys, shotId, firstFrameKey, lastFrameKey, type, segmentId, operationId, operationUserId } = job.data
+  if (operationId && operationUserId) enterOperationContext(operationId, operationUserId)
   // 工作指令.txt 第二阶段：Worker 入口诊断三件套
   console.log(`[TRAILER-JOB-START] job.id=${job.id}, name=${job.name}, projectId=${projectId}, stepId=${stepId}, timestamp=${new Date().toISOString()}`)
   console.log(`[TRAILER-JOB-DATA] type=${type}, conceptImages count=${(conceptImageKeys || []).length}, shotId=${shotId || ''}, segmentId=${segmentId || ''}`)

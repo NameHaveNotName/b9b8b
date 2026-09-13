@@ -10,7 +10,8 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { startStep, completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
-import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
+import { attachOperationResults, finalizeCurrentSupplierOperation, getCurrentOperationId } from '@/lib/supplier-observability'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 // ============================================================
@@ -98,7 +99,7 @@ async function backgroundGenerateSegment(
   duration: number,
   videoModel?: string,
   aspectRatio?: string
-) {
+): Promise<{ success: boolean; resultId?: string; errorMessage?: string }> {
   try {
     console.log(`[SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
     const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
@@ -127,7 +128,7 @@ async function backgroundGenerateSegment(
     })
 
     // 创建 Asset
-    await prisma.asset.create({
+    const asset = await prisma.asset.create({
       data: {
         projectId,
         type: 'VIDEO',
@@ -144,6 +145,7 @@ async function backgroundGenerateSegment(
     })
 
     console.log(`[SEGMENT-BG] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
+    return { success: true, resultId: asset.id }
   } catch (e: any) {
     console.error(`[SEGMENT-BG] 失败 segmentId=${segmentId}:`, e?.message)
     await prisma.videoSegment.update({
@@ -153,6 +155,7 @@ async function backgroundGenerateSegment(
         errorMessage: (e?.message || '生成失败').slice(0, 200),
       },
     })
+    return { success: false, errorMessage: (e?.message || '生成失败').slice(0, 500) }
   }
 }
 
@@ -338,6 +341,10 @@ async function handleLegacyTrailer(
 
   const conceptImageKeys = filteredAssets.map((a) => a.storageKey)
 
+  // Reserve points before dispatch so a fast queue worker cannot finish before
+  // the billing record is committed.
+  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: step.id, success: true })
+
   // 尝试使用 BullMQ 队列（可选）
   let queued = false
   if (process.env.TRAILER_USE_QUEUE === '1') {
@@ -348,6 +355,8 @@ async function handleLegacyTrailer(
         stepId: step.id,
         projectId,
         conceptImageKeys,
+        operationId: getCurrentOperationId(),
+        operationUserId: userId,
       })
       queued = true
       console.log(`[TRAILER-POST] 入队成功 job.id=${job.id}`)
@@ -361,7 +370,6 @@ async function handleLegacyTrailer(
     waitUntil(processTrailerInline(step.id, projectId, conceptImageKeys))
   }
 
-  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: step.id, success: true })
   return NextResponse.json({
     success: true,
     taskId: step.id,
@@ -446,17 +454,16 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
     return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segment.projectId, 'generation.trailer_segment', 'VIDEO')
-  if (!pointsCheck.ok) {
-    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
-  }
-
   // 获取概念图 URL（shotId 复用为 concept asset id）
   const conceptImages = await getConceptImages(projectId)
   const conceptImage = conceptImages.find((img: any) => img.id === segment.shotId)
   const imageUrl = conceptImage?.url || ''
   if (!imageUrl) {
     return NextResponse.json({ error: 'NO_IMAGE', message: '该片段没有可用的概念图' }, { status: 400 })
+  }
+  const pointsCheck = await checkPoints(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segment.projectId, 'generation.trailer_segment', 'VIDEO')
+  if (!pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
   // 原子更新：只有状态为 pending/failed 时才设置为 generating，防止并发重复生成
@@ -476,16 +483,22 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
   await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, assetId: segmentId, success: true })
 
   // 后台生成
-  waitUntil(backgroundGenerateSegment(
-    segmentId,
-    projectId,
-    'TRAILER',
-    segment.prompt,
-    imageUrl,
-    segment.duration || 5,
-    body?.videoModel,
-    body?.aspectRatio
-  ))
+  waitUntil((async () => {
+    const outcome = await backgroundGenerateSegment(
+      segmentId, projectId, 'TRAILER', segment.prompt, imageUrl,
+      segment.duration || 5, body?.videoModel, body?.aspectRatio,
+    )
+    if (outcome.success) {
+      await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId, resultId: outcome.resultId })
+    } else {
+      await refundPointsAndLog(userId, pointsCheck.cost, {
+        projectId, workflowStepId: stepId,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+        errorMessage: outcome.errorMessage,
+      })
+    }
+  })())
 
   return NextResponse.json({
     success: true,
@@ -527,7 +540,10 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
   )
 
   // 后台逐个生成
+  const operationId = getCurrentOperationId()
   waitUntil((async () => {
+    let succeeded = 0
+    let failed = 0
     for (const segment of pendingSegments) {
       const conceptImage = conceptImages.find((img: any) => img.id === segment.shotId)
       const imageUrl = conceptImage?.url || ''
@@ -536,9 +552,10 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
           where: { id: segment.id },
           data: { status: 'failed', errorMessage: '没有可用的概念图' },
         })
+        failed += 1
         continue
       }
-      await backgroundGenerateSegment(
+      const outcome = await backgroundGenerateSegment(
         segment.id,
         projectId,
         'TRAILER',
@@ -548,6 +565,23 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
         body?.videoModel,
         body?.aspectRatio
       )
+      if (outcome.success) {
+        succeeded += 1
+        if (operationId && outcome.resultId) await attachOperationResults(operationId, outcome.resultId)
+      } else {
+        failed += 1
+      }
+    }
+    if (failed > 0) {
+      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, failed), {
+        projectId, workflowStepId: stepId,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+        finalStatus: succeeded > 0 ? 'PARTIAL' : 'FAILED',
+        errorMessage: `${failed}/${pendingSegments.length} 个视频片段生成失败，失败部分点数已退回`,
+      })
+    } else {
+      await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId })
     }
   })())
 

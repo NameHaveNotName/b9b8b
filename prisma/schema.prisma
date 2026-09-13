@@ -374,6 +374,7 @@ model OperationLog {
   stepName         String?
   assetId          String? // legacy polymorphic result id
   pointsCost       Int                   @default(0)
+  pointsRefunded   Int                   @default(0)
   success          Boolean               @default(true)
   errorCode        String?
   errorMessage     String?
@@ -419,6 +420,10 @@ model ProviderCallAttempt {
   providerCost   Decimal?     @db.Decimal(18, 8)
   currency       String?
   costSource     String       @default("UNKNOWN")
+  inputTokens    Int?
+  outputTokens   Int?
+  totalTokens    Int?
+  reconciledAt   DateTime?
   errorCode      String?
   errorMessage   String?
   metadata       Json?
@@ -429,6 +434,7 @@ model ProviderCallAttempt {
   @@index([operationId, startedAt])
   @@index([provider, model, startedAt])
   @@index([externalTaskId])
+  @@index([requestId])
 }
 
 model OperationResult {

@@ -2,6 +2,7 @@ import { prisma } from './prisma';
 import { WorkflowStepType, StepStatus } from '@prisma/client';
 import { getStepOrder } from './workflow';
 import { STEP_CONFIG, TYPE_TO_STEP_ID, ProjectState } from './workflow-state';
+import { finalizeCurrentSupplierOperation } from './supplier-observability';
 
 export async function createStep(projectId: string, stepType: WorkflowStepType, order: number) {
   return prisma.workflowStep.create({
@@ -60,15 +61,27 @@ export async function completeStep(stepId: string, outputData: any) {
   });
   if (step) {
     await markProjectStepDone(step.projectId, step.stepType as WorkflowStepType)
+    await finalizeCurrentSupplierOperation({
+      status: 'SUCCEEDED',
+      projectId: step.projectId,
+      workflowStepId: step.id,
+    })
   }
   return updated
 }
 
 export async function failStep(stepId: string, errorMessage: string) {
-  return prisma.workflowStep.update({
+  const failed = await prisma.workflowStep.update({
     where: { id: stepId },
     data: { status: 'FAILED' as StepStatus, errorMessage },
   });
+  await finalizeCurrentSupplierOperation({
+    status: errorMessage.startsWith('[CANCELLED]') ? 'CANCELLED' : 'FAILED',
+    projectId: failed.projectId,
+    workflowStepId: failed.id,
+    errorMessage,
+  })
+  return failed
 }
 
 /** 检查步骤是否被用户取消（使用 FAILED + [CANCELLED] 前缀标记） */

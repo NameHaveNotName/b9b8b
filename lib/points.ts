@@ -276,18 +276,30 @@ export async function refundPointsAndLog(
     billingSource: BillingSource
     billingGroupId: string | null
     errorMessage?: string
+    finalStatus?: 'PARTIAL' | 'FAILED' | 'CANCELLED'
   },
 ) {
   if (cost <= 0) return
+  const operationId = getCurrentOperationId()
 
   await finalizeCurrentSupplierOperation({
-    status: 'FAILED',
+    status: meta.finalStatus || 'FAILED',
     projectId: meta.projectId,
     workflowStepId: meta.workflowStepId,
     errorMessage: meta.errorMessage || '任务失败，点数已退回',
   })
 
   await prisma.$transaction(async (tx) => {
+    // Background jobs can be delivered more than once. Claim the refund on the
+    // original operation before changing a balance so retries cannot double-pay.
+    if (operationId) {
+      const claim = await tx.operationLog.updateMany({
+        where: { id: operationId, pointsRefunded: 0 },
+        data: { pointsRefunded: cost },
+      })
+      if (claim.count !== 1) return
+    }
+
     let balanceAfter: number
 
     if (meta.billingSource === 'GROUP' && meta.billingGroupId) {
@@ -318,6 +330,7 @@ export async function refundPointsAndLog(
         billingSource: meta.billingSource,
         billingGroupId: meta.billingGroupId,
         balanceAfter,
+        metadata: operationId ? { refundedOperationId: operationId } : undefined,
       },
     })
   })

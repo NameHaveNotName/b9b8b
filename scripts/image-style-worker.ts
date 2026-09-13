@@ -4,9 +4,10 @@ dotenv.config({ path: '.env.local' })
 import { Worker } from 'bullmq'
 import { redisConnection } from '../lib/queue'
 import { processStyleGeneration } from '../lib/style-processor'
+import { enterOperationContext } from '../lib/supplier-observability'
 
 const worker = new Worker('style-generation', async (job) => {
-  const { stepId, projectId, styleOptions } = job.data as {
+  const { stepId, projectId, styleOptions, operationId, operationUserId } = job.data as {
     stepId: string
     projectId: string
     styleOptions: Array<{
@@ -15,7 +16,11 @@ const worker = new Worker('style-generation', async (job) => {
       styleDescription: string
       prompt: string
     }>
+    operationId?: string
+    operationUserId?: string
   }
+
+  if (operationId && operationUserId) enterOperationContext(operationId, operationUserId)
 
   console.log(`[StyleWorker] Starting job ${job.id} for step ${stepId}`)
   await processStyleGeneration(stepId, projectId, styleOptions)
