@@ -132,7 +132,7 @@ export default function AppSidebar({
                 }`}
               >
                 <BarChart3 className="h-4 w-4" />
-                请求统计
+                数据统计
               </Link>
             </div>
           </div>

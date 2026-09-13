@@ -7,6 +7,7 @@
  */
 import { config } from 'dotenv'
 import path from 'path'
+import { trackedSupplierFetch } from '@/lib/supplier-observability'
 
 config({ path: path.join(process.cwd(), '.env.local') })
 
@@ -50,7 +51,7 @@ export async function generateMusicQwen(params: {
 
   console.log('[QWEN-MUSIC] 请求:', JSON.stringify(body, null, 2))
 
-  const res = await fetch(`${DASHSCOPE_BASE_URL}/services/audio/music/generation`, {
+  const res = await trackedSupplierFetch(`${DASHSCOPE_BASE_URL}/services/audio/music/generation`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${DASHSCOPE_API_KEY}`,

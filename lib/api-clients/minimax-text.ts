@@ -9,6 +9,8 @@
  * - 失败时抛出 MinimaxTextError，上层决定是否兜底
  */
 
+import { trackedSupplierFetch } from '@/lib/supplier-observability'
+
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || ''
 const MINIMAX_BASE_URL = 'https://api.minimax.chat'
 
@@ -57,7 +59,7 @@ export async function generateTextMinimax(
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(`${MINIMAX_BASE_URL}/v1/text/chatcompletion_v2`, {
+    const response = await trackedSupplierFetch(`${MINIMAX_BASE_URL}/v1/text/chatcompletion_v2`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

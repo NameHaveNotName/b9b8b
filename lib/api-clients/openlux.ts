@@ -1,6 +1,7 @@
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { IMAGE_MODELS, MODEL_SIZE_MAP, VIDEO_MODELS } from '@/lib/models-config'
 import { generateTextMinimax, MinimaxTextError } from './minimax-text'
+import { trackedSupplierFetch } from '@/lib/supplier-observability'
 import fs from 'fs'
 import path from 'path'
 
@@ -108,7 +109,7 @@ export async function resolveImageToBase64(urlOrPath: string): Promise<string> {
     }
 
     console.log('[BASE64] 下载公网图片:', urlOrPath.slice(0, 120))
-    const res = await fetch(urlOrPath)
+    const res = await trackedSupplierFetch(urlOrPath)
     if (!res.ok) throw new Error(`[BASE64] 下载失败 ${res.status}: ${urlOrPath.slice(0, 120)}`)
     const buffer = Buffer.from(await res.arrayBuffer())
     const mime = res.headers.get('content-type') || 'image/jpeg'
@@ -168,7 +169,7 @@ async function openLuxFetch(path: string, body: any, timeoutMs = 120000) {
   const id = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await trackedSupplierFetch(`${BASE_URL}${path}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${API_KEY}`,
@@ -383,7 +384,7 @@ async function callGeminiImage(p: GenerateImageParams): Promise<OpenLuxImageRaw>
   console.log('Body preview:', bodyStr.slice(0, 500))
   console.log('======================================')
 
-  const res = await fetch(endpoint, {
+  const res = await trackedSupplierFetch(endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -729,7 +730,7 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<OpenLuxImageRaw
   if (imgUrls.length > 0) {
     const downloads = await Promise.allSettled(
       imgUrls.map(async (url) => {
-        const resp = await fetch(url, { signal: AbortSignal.timeout(15000) })
+        const resp = await trackedSupplierFetch(url, { signal: AbortSignal.timeout(15000) })
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
         const buffer = Buffer.from(await resp.arrayBuffer())
         const ct = resp.headers.get('content-type') || 'image/png'
@@ -791,7 +792,7 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<OpenLuxImageRaw
 
   // gpt-image-2 with multiple reference images often needs more than 90s.
   // Keep this below the Vercel function limit so the route can still return a real error.
-  const res = await fetch(`${BASE_URL}/v1/images/edits`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/v1/images/edits`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -859,7 +860,7 @@ async function callOpenLuxImageOnce(p: GenerateImageParams): Promise<OpenLuxImag
   }, 180000)
   console.log(`[OPENLUX-IMG-FETCH] 发起 fetch，model=${params.model}，timeout=180s`)
 
-  const res = await fetch(`${BASE_URL}/v1/images/generations`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/v1/images/generations`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -1171,7 +1172,7 @@ async function rawToBuffer(raw: OpenLuxImageRaw): Promise<Buffer> {
       const cleaned = raw.url.replace(/^data:image\/\w+;base64,/, '')
       return Buffer.from(cleaned, 'base64')
     }
-    const imgRes = await fetch(raw.url)
+    const imgRes = await trackedSupplierFetch(raw.url)
     if (!imgRes.ok) throw new Error(`Failed to download generated image: ${imgRes.status}`)
     return Buffer.from(await imgRes.arrayBuffer())
   }
@@ -1245,7 +1246,7 @@ export async function generateVideo(
 }
 
 export async function queryVideoTask(taskId: string): Promise<{ status: string; url?: string }> {
-  const data = await fetch(`${BASE_URL}/v1/video/tasks/${taskId}`, {
+  const data = await trackedSupplierFetch(`${BASE_URL}/v1/video/tasks/${taskId}`, {
     headers: { 'Authorization': `Bearer ${API_KEY}` },
   }).then((r) => r.json())
 
@@ -1317,7 +1318,7 @@ async function callOpenLuxVideoOnce(
   console.log('Body:', JSON.stringify(body).slice(0, 500));
   console.log('========================================')
 
-  const res = await fetch(`${BASE_URL}/v1/videos/generations`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/v1/videos/generations`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -1373,7 +1374,7 @@ async function pollVideoTask(
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, pollIntervalMs))
     try {
-      const res = await fetch(`${BASE_URL}/v1/videos/tasks/${taskId}`, {
+      const res = await trackedSupplierFetch(`${BASE_URL}/v1/videos/tasks/${taskId}`, {
         headers: { 'Authorization': `Bearer ${API_KEY}` },
         signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
       })
@@ -1546,7 +1547,7 @@ export async function submitJimengVideo(params: {
   console.log(`[JIMENG-SUBMIT] API key exists=${!!API_KEY}, key prefix=${API_KEY?.slice(0, 8) || '(none)'}`)
   console.log('[JIMENG-SUBMIT] →', body.slice(0, 300))
 
-  const res = await fetch(`${BASE_URL}/jimeng/submit/videos`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/jimeng/submit/videos`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -1600,7 +1601,7 @@ export async function pollJimengTask(
     try {
       // TODO(round8): 校对真实查询接口
       const url = `${BASE_URL}/jimeng/query/videos?task_id=${encodeURIComponent(taskId)}`
-      const res = await fetch(url, {
+      const res = await trackedSupplierFetch(url, {
         headers: { 'Authorization': `Bearer ${API_KEY}` },
         signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
       })
@@ -1699,7 +1700,7 @@ export async function submitHailuoVideo(params: {
   console.log('[HAILUO-SUBMIT] →', body.slice(0, 500));
   console.log('[HAILUO-SUBMIT] duration 适配:', params.duration ?? 6, '→', params.duration === 10 ? 10 : 6)
 
-  const res = await fetch(`${BASE_URL}/minimax/v1/video_generation`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/minimax/v1/video_generation`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -1757,7 +1758,7 @@ export async function pollHailuoTask(
 
     for (const url of queryUrls) {
       try {
-        const res = await fetch(url, {
+        const res = await trackedSupplierFetch(url, {
           headers: { 'Authorization': `Bearer ${API_KEY}` },
           signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
         })
@@ -1852,7 +1853,7 @@ export async function submitWanVideo(params: WanSubmitParams): Promise<SubmitTas
   console.log('[WAN-SUBMIT] →', body.length > 500 ? body.slice(0, 500) + '...(Base64 已截断)' : body)
   console.log('[WAN-SUBMIT] URL:', `${BASE_URL}/alibailian/api/v1/services/aigc/video-generation/video-synthesis`)
 
-  const res = await fetch(`${BASE_URL}/alibailian/api/v1/services/aigc/video-generation/video-synthesis`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/alibailian/api/v1/services/aigc/video-generation/video-synthesis`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -1895,7 +1896,7 @@ export async function pollWanTask(
     await new Promise((r) => setTimeout(r, pollIntervalMs))
     try {
       const url = `${BASE_URL}/alibailian/api/v1/tasks/${encodeURIComponent(taskId)}`
-      const res = await fetch(url, {
+      const res = await trackedSupplierFetch(url, {
         headers: { 'Authorization': `Bearer ${API_KEY}` },
         signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
       })
@@ -1993,7 +1994,7 @@ export async function submitViduVideo(params: ViduSubmitParams): Promise<SubmitT
   })
 
   console.log('[VIDU-SUBMIT] → POST', `${BASE_URL}/ent/v2/img2video`, `model=${params.model || 'viduq2-turbo'} duration=${duration}`)
-  const res = await fetch(`${BASE_URL}/ent/v2/img2video`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/ent/v2/img2video`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${API_KEY}`,
@@ -2034,7 +2035,7 @@ export async function pollViduTask(
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
     const url = `${BASE_URL}/ent/v2/tasks/${encodeURIComponent(taskId)}/creations`
     try {
-      const res = await fetch(url, {
+      const res = await trackedSupplierFetch(url, {
         headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' },
         signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
       })
@@ -2139,7 +2140,7 @@ export async function submitVeoVideo(params: VeoSubmitParams): Promise<SubmitTas
   console.log('[VEO-SUBMIT] →', body.length > 500 ? body.slice(0, 500) + '...(Base64 已截断)' : body)
   console.log('[VEO-SUBMIT] URL:', `${BASE_URL}/v1/video/create`)
 
-  const res = await fetch(`${BASE_URL}/v1/video/create`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/v1/video/create`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -2199,7 +2200,7 @@ export async function pollVeoTask(
 
     for (const url of queryUrls) {
       try {
-        const res = await fetch(url, {
+        const res = await trackedSupplierFetch(url, {
           headers: {
             'Authorization': `Bearer ${API_KEY}`,
             'Accept': 'application/json',
@@ -2292,7 +2293,7 @@ export async function submitSunoMusic(params: {
 
   console.log('[SUNO-SUBMIT] →', body.slice(0, 300))
 
-  const res = await fetch(`${BASE_URL}/suno/submit/music`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/suno/submit/music`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -2352,7 +2353,7 @@ export async function pollSunoTask(
     let bestUrlForLog = ''
     for (const url of queryUrls) {
       try {
-        const res = await fetch(url, {
+        const res = await trackedSupplierFetch(url, {
           headers: {
             'Authorization': `Bearer ${API_KEY}`,
             'Accept': 'application/json',
@@ -2430,7 +2431,7 @@ export async function pollSunoTaskFull(
     let bestData: any = null
     for (const url of queryUrls) {
       try {
-        const res = await fetch(url, {
+        const res = await trackedSupplierFetch(url, {
           headers: {
             'Authorization': `Bearer ${API_KEY}`,
             'Accept': 'application/json',
@@ -2487,7 +2488,7 @@ export async function downloadSunoWav(clipId: string): Promise<string> {
   const url = `${BASE_URL}/suno/act/wav/${encodeURIComponent(clipId)}`
   console.log('[SUNO-WAV] →', url)
 
-  const res = await fetch(url, {
+  const res = await trackedSupplierFetch(url, {
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
       'Accept': 'application/json',
@@ -2652,7 +2653,7 @@ export async function generateMusicMinimax(params: {
   // 官方 API 实测生成耗时约 137s,故超时设为 300s
   const timeoutMs = useOfficial ? 300000 : 120000
 
-  const res = await fetch(endpoint, {
+  const res = await trackedSupplierFetch(endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -2779,7 +2780,7 @@ async function imageToBuffer(src: string): Promise<Buffer> {
     return Buffer.from(cleaned, 'base64')
   }
   if (src.startsWith('http')) {
-    const res = await fetch(src)
+    const res = await trackedSupplierFetch(src)
     if (!res.ok) throw new Error(`[EDIT-IMG] 下载失败 ${res.status}: ${src.slice(0, 120)}`)
     return Buffer.from(await res.arrayBuffer())
   }
@@ -2833,7 +2834,7 @@ export async function editImage(params: EditImageParams): Promise<EditImageResul
   console.log('Prompt:', params.prompt.slice(0, 200))
   console.log('====================================')
 
-  const res = await fetch(`${BASE_URL}/v1/images/edits`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/v1/images/edits`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
@@ -2877,7 +2878,7 @@ export async function editImage(params: EditImageParams): Promise<EditImageResul
   if (b64) {
     buffer = Buffer.from(b64, 'base64')
   } else {
-    const imgRes = await fetch(url!)
+    const imgRes = await trackedSupplierFetch(url!)
     if (!imgRes.ok) throw new Error(`editImage: 下载图片失败 ${imgRes.status}`)
     buffer = Buffer.from(await imgRes.arrayBuffer())
   }
@@ -3002,7 +3003,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
     const bodyStr = JSON.stringify(body)
     console.log('[VIDEO-DIRECT-HAILUO] →', bodyStr.slice(0, 500))
 
-    const res = await fetch(`${BASE_URL}/minimax/v1/video_generation`, {
+    const res = await trackedSupplierFetch(`${BASE_URL}/minimax/v1/video_generation`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${API_KEY}`,
@@ -3061,7 +3062,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
 
     console.log('[VIDEO-DIRECT-VEO] → POST /v1/video/create images count=', images.length)
 
-    const res = await fetch(`${BASE_URL}/v1/video/create`, {
+    const res = await trackedSupplierFetch(`${BASE_URL}/v1/video/create`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${API_KEY}`,
@@ -3143,7 +3144,7 @@ export async function generateConceptSceneWithEdit(params: {
       for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i)
       return new Blob([arr], { type: mime })
     }
-    const res = await fetch(url)
+    const res = await trackedSupplierFetch(url)
     if (!res.ok) throw new Error(`Failed to fetch image: ${res.status} ${url}`)
     return res.blob()
   }
@@ -3174,7 +3175,7 @@ export async function generateConceptSceneWithEdit(params: {
     characterCount: characterImageUrls?.length || 0,
   })
 
-  const res = await fetch(`${BASE_URL}/v1/images/edits`, {
+  const res = await trackedSupplierFetch(`${BASE_URL}/v1/images/edits`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,

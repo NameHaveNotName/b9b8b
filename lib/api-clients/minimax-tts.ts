@@ -1,3 +1,5 @@
+import { trackedSupplierFetch } from '@/lib/supplier-observability'
+
 /**
  * MiniMax TTS 官方 API 客户端
  *
@@ -129,7 +131,7 @@ export async function generateSpeechMinimax(
 
   console.log(`[MINIMAX-TTS] → POST ${endpoint}`, bodyStr.slice(0, 300))
 
-  const res = await fetch(endpoint, {
+  const res = await trackedSupplierFetch(endpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${MINIMAX_TTS_API_KEY}`,

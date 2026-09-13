@@ -109,6 +109,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return NextResponse.json({ error: 'VALID_002', message: '请选择导入模式' }, { status: 400 })
   }
 
+  const pointsCheck = mode === 'ai_complete'
+    ? await checkPoints(GENERATION_COSTS.FRAMEWORK, params.id)
+    : null
+  if (pointsCheck && !pointsCheck.ok) {
+    return NextResponse.json({ error: 'POINTS_001', required: pointsCheck.cost, current: pointsCheck.currentPoints }, { status: 402 })
+  }
+  let ledgerClosed = false
+
   try {
     // 1. 转换分镜表格式
     const convertedShots = shots.map((shot: StoryboardShot, index: number) => ({
@@ -287,10 +295,29 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         })
 
         console.log('[IMPORT-STORYBOARD] AI补完成功')
+        await deductPointsAndLog(userId, pointsCheck!.cost, 'generate', {
+          projectId: params.id,
+          workflowStepId: storyboardStep.id,
+          stepName: 'STORYBOARD_IMPORT',
+          success: true,
+          billingSource: pointsCheck!.billingSource,
+          billingGroupId: pointsCheck!.billingGroupId,
+        })
+        ledgerClosed = true
       } else {
         // AI 补完失败，使用默认框架
         console.warn('[IMPORT-STORYBOARD] AI补完失败，使用默认框架')
         await createDefaultFramework(params.id, shots, convertedShots)
+        await deductPointsAndLog(userId, 0, 'error', {
+          projectId: params.id,
+          workflowStepId: storyboardStep.id,
+          stepName: 'STORYBOARD_IMPORT',
+          success: false,
+          errorMessage: lastError?.message || 'AI 补完未返回有效框架，已使用默认框架',
+          billingSource: pointsCheck!.billingSource,
+          billingGroupId: pointsCheck!.billingGroupId,
+        })
+        ledgerClosed = true
       }
     } else {
       // skip_framework 模式：跳过中间步骤
@@ -334,6 +361,16 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     })
   } catch (e: any) {
     console.error('[IMPORT-STORYBOARD] Error:', e.message)
+    if (pointsCheck && !ledgerClosed) {
+      await deductPointsAndLog(userId, 0, 'error', {
+        projectId: params.id,
+        stepName: 'STORYBOARD_IMPORT',
+        success: false,
+        errorMessage: e.message,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+      })
+    }
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

@@ -3,6 +3,11 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST } from '@/lib/points-config'
 import { logOperation } from '@/lib/operations'
 import { selectBillingTarget, type BillingSource } from '@/lib/billing-policy'
+import {
+  attachOperationResults,
+  beginSupplierOperation,
+  getCurrentOperationId,
+} from '@/lib/supplier-observability'
 
 // 重新导出常量，保持 API 路由的 backward compatibility
 export { DEFAULT_GENERATE_COST, DEFAULT_REGENERATE_COST }
@@ -91,8 +96,24 @@ export async function checkPoints(
     }
   }
 
+  const ok = target.currentPoints >= target.cost
+  if (ok) {
+    try {
+      await beginSupplierOperation({
+        userId,
+        pointsCost: target.cost,
+        billingSource: target.source,
+        billingGroupId: target.groupId,
+        projectId,
+      })
+    } catch (error: any) {
+      // Observability is fail-open: an unavailable ledger must not block generation.
+      console.error('[supplier-ledger] begin operation failed:', error?.message)
+    }
+  }
+
   return {
-    ok: target.currentPoints >= target.cost,
+    ok,
     userId,
     currentPoints: target.currentPoints,
     cost: target.cost,
@@ -114,9 +135,11 @@ export async function deductPointsAndLog(
     errorMessage?: string
     billingSource?: BillingSource
     billingGroupId?: string | null
+    stepName?: string
   } = {}
 ) {
   const resolved = await resolveBillingTarget(userId, cost, meta.projectId)
+  const operationId = getCurrentOperationId()
 
   // 只有操作成功时才扣点；失败时只记录日志，不扣点
   if (cost <= 0 || meta.success === false) {
@@ -130,8 +153,13 @@ export async function deductPointsAndLog(
       status: meta.success === false ? 'failed' : 'success',
       billingSource: meta.billingSource || resolved?.source,
       billingGroupId: meta.billingGroupId ?? resolved?.groupId,
+      operationId,
+      stepName: meta.stepName,
       metadata: meta.errorMessage ? { error: meta.errorMessage } : undefined,
     })
+    if (operationId && meta.success !== false) {
+      await attachOperationResults(operationId, meta.assetId)
+    }
     return
   }
 
@@ -165,21 +193,46 @@ export async function deductPointsAndLog(
       balanceAfter = user.points
     }
 
-    await tx.operationLog.create({
-      data: {
+    const completedAt = new Date()
+    const operationData = {
         userId,
         type,
+        ...(meta.stepName
+          ? { actionKey: `generation.${meta.stepName.toLowerCase()}` }
+          : operationId
+            ? {}
+            : { actionKey: `generation.${type}` }),
+        status: 'SUCCEEDED',
         projectId: meta.projectId,
         workflowStepId: meta.workflowStepId,
+        stepName: meta.stepName,
         assetId: meta.assetId,
         pointsCost: cost,
         success: true,
         billingSource: resolved.source,
         billingGroupId: resolved.groupId,
         balanceAfter,
-      },
-    })
+        completedAt,
+      }
+    if (operationId) {
+      const existing = await tx.operationLog.findUnique({
+        where: { id: operationId },
+        select: { startedAt: true },
+      })
+      await tx.operationLog.update({
+        where: { id: operationId },
+        data: {
+          ...operationData,
+          durationMs: existing
+            ? Math.max(0, completedAt.getTime() - existing.startedAt.getTime())
+            : undefined,
+        },
+      })
+    } else {
+      await tx.operationLog.create({ data: operationData })
+    }
   })
+  if (operationId) await attachOperationResults(operationId, meta.assetId)
 }
 
 /**

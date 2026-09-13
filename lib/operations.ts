@@ -15,6 +15,9 @@ export interface LogOperationInput {
   billingSource?: 'USER' | 'GROUP'
   billingGroupId?: string | null
   balanceAfter?: number
+  operationId?: string
+  actionKey?: string
+  category?: string
   metadata?: Record<string, any>
 }
 
@@ -24,12 +27,20 @@ export interface LogOperationInput {
  */
 export async function logOperation(input: LogOperationInput) {
   try {
-    await prisma.operationLog.create({
-      data: {
+    const completedAt = new Date()
+    const data = {
         userId: input.userId,
         type: input.actionType,
+        ...(input.actionKey || input.stepName
+          ? { actionKey: input.actionKey || `generation.${input.stepName!.toLowerCase()}` }
+          : input.operationId
+            ? {}
+            : { actionKey: `generation.${input.actionType}` }),
+        category: input.category || 'OTHER',
+        status: input.status === 'success' ? 'SUCCEEDED' : 'FAILED',
         projectId: input.projectId,
         workflowStepId: input.workflowStepId,
+        stepName: input.stepName,
         assetId: input.assetId,
         pointsCost: input.cost ?? 0,
         success: input.status === 'success',
@@ -40,10 +51,29 @@ export async function logOperation(input: LogOperationInput) {
           input.status === 'failed' && input.metadata?.error
             ? String(input.metadata.error).slice(0, 500)
             : undefined,
-      },
-    })
+        completedAt,
+      }
+    if (input.operationId) {
+      const existing = await prisma.operationLog.findUnique({
+        where: { id: input.operationId },
+        select: { startedAt: true },
+      })
+      await prisma.operationLog.update({
+        where: { id: input.operationId },
+        data: {
+          ...data,
+          durationMs: existing
+            ? Math.max(0, completedAt.getTime() - existing.startedAt.getTime())
+            : undefined,
+        },
+      })
+      return input.operationId
+    }
+    const created = await prisma.operationLog.create({ data })
+    return created.id
   } catch (e: any) {
     // 日志写入失败不能阻断主流程，仅打印错误
     console.error('[logOperation] 写入失败:', e?.message, input)
+    return undefined
   }
 }
