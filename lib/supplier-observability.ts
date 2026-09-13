@@ -116,6 +116,42 @@ export async function attachOperationResults(operationId: string, resultId?: str
   }
 }
 
+export async function finalizeCurrentSupplierOperation(input: {
+  status: 'SUCCEEDED' | 'PARTIAL' | 'FAILED' | 'CANCELLED'
+  projectId?: string
+  workflowStepId?: string
+  resultId?: string
+  errorMessage?: string
+}) {
+  const operationId = getCurrentOperationId()
+  if (!operationId) return
+  try {
+    const operation = await prisma.operationLog.findUnique({
+      where: { id: operationId },
+      select: { startedAt: true },
+    })
+    if (!operation) return
+    const completedAt = new Date()
+    await prisma.operationLog.update({
+      where: { id: operationId },
+      data: {
+        status: input.status,
+        success: input.status === 'SUCCEEDED' || input.status === 'PARTIAL',
+        projectId: input.projectId,
+        workflowStepId: input.workflowStepId,
+        errorMessage: input.errorMessage ? safeMessage(input.errorMessage) : undefined,
+        completedAt,
+        durationMs: Math.max(0, completedAt.getTime() - operation.startedAt.getTime()),
+      },
+    })
+    if (input.status === 'SUCCEEDED' || input.status === 'PARTIAL') {
+      await attachOperationResults(operationId, input.resultId)
+    }
+  } catch (error) {
+    console.error('[supplier-ledger] finalize operation failed:', safeMessage(error))
+  }
+}
+
 function inferProvider(rawUrl: string): string | null {
   try {
     const host = new URL(rawUrl).hostname.toLowerCase()
