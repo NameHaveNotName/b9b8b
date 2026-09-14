@@ -54,6 +54,10 @@ type Operation = {
   workflowStepId?: string | null;
   stepName?: string | null;
   errorMessage?: string | null;
+  scopeType?: string | null;
+  scopeKey?: string | null;
+  startedAt: string;
+  completedAt?: string | null;
   createdAt: string;
   durationMs?: number | null;
   user: { email: string; name?: string | null };
@@ -77,6 +81,78 @@ const statusClasses: Record<string, string> = {
   FAILED: "bg-red-50 text-red-700",
   CANCELLED: "bg-stone-100 text-stone-600",
 };
+
+const actionLabels: Record<string, string> = {
+  "generation.idea_diffusion": "创意发散",
+  "generation.framework": "故事框架生成",
+  "generation.framework_deepen": "故事框架深化",
+  "generation.style_prompts": "风格提示词生成",
+  "generation.style_unify": "视觉风格生成",
+  "generation.character_prompts": "角色提示词生成",
+  "generation.character_design": "角色设计",
+  "generation.concept_prompts": "概念图提示词生成",
+  "generation.concept_art": "概念图生成",
+  "generation.representative": "代表画面生成",
+  "generation.storyboard_prompts": "分镜提示词生成",
+  "generation.storyboard_images": "分镜占位图生成",
+  "generation.storyboard_act_image": "分镜画面生成",
+  "generation.storyboard": "分镜生成",
+  "generation.keyframe_prompts": "关键帧提示词生成",
+  "generation.keyframe": "关键帧生成",
+  "generation.ending_frame": "结尾帧生成",
+  "generation.trailer_prompts": "预告片提示词生成",
+  "generation.trailer_segment": "预告片片段生成",
+  "generation.trailer": "预告片生成",
+  "generation.video_direct_prompts": "直出视频提示词生成",
+  "generation.video_direct_segment": "直出视频片段生成",
+  "generation.voiceover_scripts": "配音文案生成",
+  "generation.voiceover_audio_segment": "配音音频生成",
+  "generation.bgm": "背景音乐生成",
+  "generation.user_asset": "素材生成",
+  "generation.generate": "内容生成（旧记录）",
+  "generation.regenerate": "内容重新生成（旧记录）",
+  "generation.unknown": "生成任务（旧记录）",
+};
+
+const categoryLabels: Record<string, string> = {
+  TEXT: "文本",
+  IMAGE: "图片",
+  VIDEO: "视频",
+  AUDIO: "音频",
+  MUSIC: "音乐",
+  OTHER: "其他",
+};
+
+const typeLabels: Record<string, string> = {
+  generate: "首次生成",
+  regenerate: "重新生成",
+  skip: "跳过",
+  error: "失败记录",
+  refund: "退款",
+};
+
+const resultKindLabels: Record<string, string> = {
+  IMAGE: "图片",
+  VIDEO: "视频",
+  AUDIO: "音频",
+  MUSIC: "音乐",
+  TEXT: "文本",
+};
+
+const localActionKeys = new Set(["generation.storyboard_images"]);
+
+function actionLabel(actionKey: string) {
+  return actionLabels[actionKey] || actionKey.replace(/^generation\./, "").replaceAll("_", " ");
+}
+
+function formatDuration(durationMs?: number | null) {
+  if (durationMs == null) return "历史记录未追踪";
+  if (durationMs < 1000) return `${durationMs}ms`;
+  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = Math.round((durationMs % 60_000) / 1000);
+  return `${minutes}分${seconds}秒`;
+}
 
 export default function AdminAnalyticsPage() {
   const [days, setDays] = useState(30);
@@ -311,9 +387,10 @@ export default function AdminAnalyticsPage() {
             </thead>
             <tbody className="divide-y">
               {operations.map((operation) => {
-                const first = operation.providerAttempts[0];
                 const netPoints = operation.pointsCost - operation.pointsRefunded;
-                const isLocalTask = operation.actionKey === "generation.storyboard_images";
+                const isLocalTask = localActionKeys.has(operation.actionKey);
+                const providers = [...new Set(operation.providerAttempts.map((attempt) => attempt.provider))];
+                const models = [...new Set(operation.providerAttempts.map((attempt) => attempt.model).filter(Boolean))];
                 return (
                   <tr key={operation.id} className="hover:bg-stone-50">
                     <td className="whitespace-nowrap px-4 py-3 text-xs text-stone-500">{new Date(operation.createdAt).toLocaleString("zh-CN")}</td>
@@ -323,13 +400,15 @@ export default function AdminAnalyticsPage() {
                     </td>
                     <td className="px-4 py-3">{operation.project?.title || operation.projectId?.slice(0, 8) || "—"}</td>
                     <td className="px-4 py-3">
-                      <div>{operation.actionKey}</div>
-                      <div className="text-xs text-stone-400">{operation.category}</div>
+                      <div>{actionLabel(operation.actionKey)}</div>
+                      <div className="text-xs text-stone-400">
+                        {categoryLabels[operation.category] || operation.category} · {typeLabels[operation.type] || operation.type}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div>{first?.provider || (isLocalTask ? "平台本地任务" : operation.providerAttempts.length ? "未知供应商" : "无调用明细")}</div>
+                      <div>{providers.join("、") || (isLocalTask ? "平台本地服务" : "调用追踪缺失")}</div>
                       <div className="max-w-44 truncate text-xs text-stone-400">
-                        {first?.model || "—"} · {operation.providerAttempts.length} 次调用
+                        {models.join("、") || (isLocalTask ? "无需外部模型" : "模型未记录")} · {operation.providerAttempts.length} 次调用
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -348,7 +427,7 @@ export default function AdminAnalyticsPage() {
                         {operation.providerCost == null ? "待对账" : `${operation.providerCost} ${operation.currency || ""}`}
                       </div>
                     </td>
-                    <td className="px-4 py-3">{operation.durationMs == null ? "—" : `${(operation.durationMs / 1000).toFixed(1)}s`}</td>
+                    <td className="whitespace-nowrap px-4 py-3">{formatDuration(operation.durationMs)}</td>
                     <td className="px-4 py-3">
                       <button
                         onClick={() => {
@@ -403,6 +482,13 @@ export default function AdminAnalyticsPage() {
             </div>
             <dl className="mt-5 grid grid-cols-2 gap-3 rounded-lg bg-stone-50 p-4 text-sm">
               <div>
+                <dt className="text-xs text-stone-400">任务</dt>
+                <dd>{actionLabel(selected.actionKey)}</dd>
+                <dd className="text-xs text-stone-400">
+                  {categoryLabels[selected.category] || selected.category} · {typeLabels[selected.type] || selected.type}
+                </dd>
+              </div>
+              <div>
                 <dt className="text-xs text-stone-400">项目</dt>
                 <dd>{selected.project?.title || "—"}</dd>
               </div>
@@ -413,6 +499,7 @@ export default function AdminAnalyticsPage() {
               <div>
                 <dt className="text-xs text-stone-400">状态</dt>
                 <dd>{statusLabels[selected.status] || selected.status}</dd>
+                <dd className="text-xs text-stone-400">耗时 {formatDuration(selected.durationMs)}</dd>
               </div>
               <div>
                 <dt className="text-xs text-stone-400">点数收入</dt>
@@ -427,6 +514,20 @@ export default function AdminAnalyticsPage() {
                   {selected.providerCost == null ? "待对账" : `${selected.providerCost} ${selected.currency || ""}`}（{selected.costSource}）
                 </dd>
               </div>
+              <div>
+                <dt className="text-xs text-stone-400">开始时间</dt>
+                <dd>{new Date(selected.startedAt).toLocaleString("zh-CN")}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-stone-400">完成时间</dt>
+                <dd>{selected.completedAt ? new Date(selected.completedAt).toLocaleString("zh-CN") : "尚未完成"}</dd>
+              </div>
+              {(selected.scopeType || selected.scopeKey) && (
+                <div className="col-span-2">
+                  <dt className="text-xs text-stone-400">任务目标</dt>
+                  <dd className="break-all">{[selected.scopeType, selected.scopeKey].filter(Boolean).join(" · ")}</dd>
+                </div>
+              )}
             </dl>
             {selected.errorMessage && <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{selected.errorMessage}</div>}
             <h3 className="mb-2 mt-6 text-sm font-semibold">供应商调用与实付</h3>
@@ -452,9 +553,7 @@ export default function AdminAnalyticsPage() {
                     </div>
                   )}
                   <div className="mt-2 flex items-center justify-between gap-3 text-xs">
-                    <span>
-                      实付：{attempt.providerCost == null ? "待对账" : `${attempt.providerCost} ${attempt.currency || ""}`}（{attempt.costSource}）
-                    </span>
+                    <span>耗时：{formatDuration(attempt.durationMs)} · 实付：{attempt.providerCost == null ? "待对账" : `${attempt.providerCost} ${attempt.currency || ""}`}（{attempt.costSource}）</span>
                     <button onClick={() => void reconcileCost(attempt)} className="shrink-0 rounded border px-2 py-1 hover:bg-stone-50">
                       录入实付
                     </button>
@@ -462,17 +561,29 @@ export default function AdminAnalyticsPage() {
                   {attempt.errorMessage && <div className="mt-1 text-xs text-red-600">{attempt.errorMessage}</div>}
                 </div>
               ))}
-              {selected.providerAttempts.length === 0 && <p className="text-sm text-stone-400">没有供应商调用明细；若这是 SVG 等本地任务，应归为平台服务费，否则说明调用链尚未接入追踪。</p>}
+              {selected.providerAttempts.length === 0 && (
+                <div className="rounded-lg border border-dashed p-3 text-sm text-stone-500">
+                  {localActionKeys.has(selected.actionKey)
+                    ? "该任务由平台本地完成，不调用外部供应商或模型。"
+                    : "这是一条调用追踪修复前产生的历史记录，无法可靠还原供应商、模型及实付信息。后续任务会自动记录完整调用链。"}
+                </div>
+              )}
             </div>
             <h3 className="mb-2 mt-6 text-sm font-semibold">任务成果</h3>
             <div className="flex flex-wrap gap-2">
               {selected.results.map((result) => (
                 <button key={result.id} onClick={() => void openPreview(result)} className="rounded-lg border px-3 py-2 text-sm hover:bg-stone-50">
-                  {result.title || result.kind}
+                  {result.title || resultKindLabels[result.kind] || result.kind}
                   {result.isMock ? "（兜底）" : ""}
                 </button>
               ))}
-              {selected.results.length === 0 && <p className="text-sm text-stone-400">该记录没有可关联成果</p>}
+              {selected.results.length === 0 && (
+                <div className="rounded-lg border border-dashed p-3 text-sm text-stone-500">
+                  {selected.status === "SUCCEEDED"
+                    ? "这是一条成果关联修复前产生的历史记录，原始成果无法仅凭该记录可靠定位；后续成功任务会在这里展示并支持预览。"
+                    : "任务尚未产生成果。"}
+                </div>
+              )}
             </div>
             {previewLoading && <p className="mt-4 text-sm text-stone-500">正在生成安全预览链接…</p>}
             {preview && <div className="mt-4 overflow-hidden rounded-xl border bg-black/5 p-2">{preview.mimeType.startsWith("image/") ? <img src={preview.url} alt={preview.title || "任务成果"} className="max-h-[60vh] w-full object-contain" /> : preview.mimeType.startsWith("video/") ? <video src={preview.url} controls autoPlay className="max-h-[60vh] w-full" /> : preview.mimeType.startsWith("audio/") ? <audio src={preview.url} controls autoPlay className="w-full" /> : <iframe src={preview.url} title={preview.title || "任务成果"} className="h-[60vh] w-full bg-white" />}</div>}

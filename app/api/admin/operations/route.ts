@@ -83,14 +83,20 @@ export async function GET(req: Request) {
     pageSize,
     total,
     pages: Math.max(1, Math.ceil(total / pageSize)),
-    operations: operations.map((operation: any) => ({
-      ...operation,
-      providerCost: operation.providerCost == null ? null : Number(operation.providerCost),
-      project: operation.projectId ? projectMap.get(operation.projectId) || null : null,
-      providerAttempts: operation.providerAttempts.map((attempt: any) => ({
-        ...attempt,
-        providerCost: attempt.providerCost == null ? null : Number(attempt.providerCost),
-      })),
-    })),
+    operations: operations.map((operation: any) => {
+      const timestampDuration = operation.completedAt
+        ? Math.max(0, operation.completedAt.getTime() - operation.startedAt.getTime())
+        : null
+      return {
+        ...operation,
+        durationMs: operation.durationMs ?? timestampDuration,
+        providerCost: operation.providerCost == null ? null : Number(operation.providerCost),
+        project: operation.projectId ? projectMap.get(operation.projectId) || null : null,
+        providerAttempts: operation.providerAttempts.map((attempt: any) => ({
+          ...attempt,
+          providerCost: attempt.providerCost == null ? null : Number(attempt.providerCost),
+        })),
+      }
+    }),
   })
 }

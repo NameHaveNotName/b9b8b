@@ -8,6 +8,8 @@ import {
   beginSupplierOperation,
   finalizeCurrentSupplierOperation,
   getCurrentOperationId,
+  prepareOperationContext,
+  activateOperationContext,
   type OperationCategory,
   type OperationTarget,
 } from '@/lib/supplier-observability'
@@ -97,6 +99,9 @@ export async function checkPoints(
   actionKey?: string,
   category?: OperationCategory,
 ): Promise<PointsCheckResult> {
+  // This must run before the first await in this function. See
+  // prepareOperationContext for why the timing matters.
+  const pendingOperationContext = prepareOperationContext()
   const userId = await getCurrentUserId()
   if (!userId) {
     return {
@@ -124,7 +129,7 @@ export async function checkPoints(
   const ok = target.currentPoints >= target.cost
   if (ok) {
     try {
-      await beginSupplierOperation({
+      const operationId = await beginSupplierOperation({
         userId,
         pointsCost: target.cost,
         billingSource: target.source,
@@ -133,6 +138,7 @@ export async function checkPoints(
         actionKey,
         category,
       })
+      activateOperationContext(pendingOperationContext, operationId, userId)
     } catch (error: any) {
       // Observability is fail-open: an unavailable ledger must not block generation.
       console.error('[supplier-ledger] begin operation failed:', error?.message)

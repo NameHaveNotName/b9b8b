@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 
-type OperationContext = { operationId: string; userId: string }
+type OperationContext = { operationId?: string; userId?: string }
 
 const globalStore = globalThis as typeof globalThis & {
   __supplierOperationContext?: AsyncLocalStorage<OperationContext>
@@ -35,6 +35,27 @@ function safeMessage(error: unknown) {
 
 export function getCurrentOperationId() {
   return operationContext.getStore()?.operationId
+}
+
+/**
+ * Establish the request-local container before checkPoints reaches its first
+ * await. AsyncLocalStorage continuations inherit the container that is active
+ * when an await is registered, so creating it after the ledger INSERT is too
+ * late for the route handler that awaits checkPoints.
+ */
+export function prepareOperationContext() {
+  const context: OperationContext = {}
+  operationContext.enterWith(context)
+  return context
+}
+
+export function activateOperationContext(
+  context: OperationContext,
+  operationId: string,
+  userId: string,
+) {
+  context.operationId = operationId
+  context.userId = userId
 }
 
 export function enterOperationContext(operationId: string, userId: string) {
@@ -338,7 +359,7 @@ export async function trackedSupplierFetch(
     typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
   const provider = inferProvider(rawUrl)
   const context = operationContext.getStore()
-  if (!provider || !context) return fetch(input, init)
+  if (!provider || !context?.operationId) return fetch(input, init)
 
   const url = new URL(rawUrl)
   const endpoint = url.pathname.slice(0, 500)
