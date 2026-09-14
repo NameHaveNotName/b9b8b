@@ -25,10 +25,23 @@ try {
         actionKey: true,
         category: true,
         status: true,
+        scopeType: true,
+        scopeKey: true,
       },
     }),
     prisma.providerCallAttempt.findFirst({ select: { id: true, operationId: true, provider: true } }),
-    prisma.operationResult.findFirst({ select: { id: true, operationId: true, storageKey: true } }),
+    prisma.operationResult.findFirst({
+      select: {
+        id: true,
+        operationId: true,
+        storageKey: true,
+        targetType: true,
+        targetKey: true,
+        shotId: true,
+        actNumber: true,
+        adoptionStatus: true,
+      },
+    }),
   ])
   console.log('database schema contract verified')
 } finally {

@@ -15,8 +15,10 @@ import {
   LogOut,
   Mail,
   UserPlus,
+  BarChart3,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
+import ContributionPanel from './ContributionPanel'
 
 interface GroupDetail {
   id: string
@@ -49,7 +51,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
   const [currentRole, setCurrentRole] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'projects' | 'members' | 'settings'>('projects')
+  const [activeTab, setActiveTab] = useState<'projects' | 'members' | 'contributions' | 'settings'>('projects')
 
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteLoading, setInviteLoading] = useState(false)
@@ -230,7 +232,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
 
       <div className="border-b border-stone-200">
         <nav className="-mb-px flex gap-6">
-          {(['projects', 'members', 'settings'] as const).map((tab) => (
+          {(['projects', 'members', 'contributions', 'settings'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -242,6 +244,7 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
             >
               {tab === 'projects' && '项目'}
               {tab === 'members' && '成员'}
+              {tab === 'contributions' && <span className="inline-flex items-center gap-1"><BarChart3 className="h-4 w-4" />贡献</span>}
               {tab === 'settings' && '设置'}
             </button>
           ))}
@@ -325,6 +328,8 @@ export default function GroupDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       )}
+
+      {activeTab === 'contributions' && <ContributionPanel groupId={groupId} />}
 
       {activeTab === 'settings' && isAdmin && (
         <div className="space-y-6 rounded-lg border border-stone-200 bg-white p-6">

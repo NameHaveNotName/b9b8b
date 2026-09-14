@@ -372,6 +372,8 @@ model OperationLog {
   projectId        String?
   workflowStepId   String?
   stepName         String?
+  scopeType        String?
+  scopeKey         String?
   assetId          String? // legacy polymorphic result id
   pointsCost       Int                   @default(0)
   pointsRefunded   Int                   @default(0)
@@ -400,6 +402,7 @@ model OperationLog {
   @@index([type, createdAt])
   @@index([status, createdAt])
   @@index([projectId, createdAt])
+  @@index([projectId, scopeType, scopeKey])
   @@index([category, createdAt])
 }
 
@@ -451,6 +454,14 @@ model OperationResult {
   mimeType           String?
   externalUrl        String?
   isMock             Boolean      @default(false)
+  targetType         String?
+  targetKey          String?
+  targetLabel        String?
+  shotId             String?
+  actNumber          Int?
+  adoptionStatus     String       @default("GENERATED")
+  adoptedAt          DateTime?
+  adoptedById        String?
   metadata           Json?
   createdAt          DateTime     @default(now())
 
@@ -459,6 +470,8 @@ model OperationResult {
   @@unique([operationId, videoSegmentId])
   @@unique([operationId, voiceoverSegmentId])
   @@index([operationId, createdAt])
+  @@index([targetType, targetKey])
+  @@index([adoptionStatus, createdAt])
 }
 
 // 创意扩散深化迭代历史版本

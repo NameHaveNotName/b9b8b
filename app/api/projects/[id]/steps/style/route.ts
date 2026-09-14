@@ -664,17 +664,49 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     selectedAspectRatio,
   }
 
-  // 更新数据库（事务：workflowStep + project.selectedStyleId + stepStyleDone 三写，保证前端解锁状态正确）
-  const [updated] = await prisma.$transaction([
-    prisma.workflowStep.update({
+  const selectedAsset = await prisma.asset.findFirst({
+    where: {
+      projectId: params.id,
+      stepId: existing!.id,
+      metadata: { path: ['styleId'], equals: selectedStyleId },
+    },
+    select: { id: true },
+  })
+
+  // 更新数据库（工作流、项目状态和采用结果同一事务提交）
+  const updated = await prisma.$transaction(async (tx: any) => {
+    const nextStep = await tx.workflowStep.update({
       where: { id: existing!.id },
       data: { outputData: newOutput, status: 'COMPLETED' },
-    }),
-    prisma.project.update({
+    })
+    await tx.project.update({
       where: { id: params.id },
       data: { selectedStyleId, stepStyleDone: true },
-    }),
-  ])
+    })
+    await tx.operationResult.updateMany({
+      where: {
+        operation: { projectId: params.id },
+        targetType: 'STYLE',
+        adoptionStatus: { in: ['ACTIVE', 'ADOPTED'] },
+        ...(selectedAsset ? { assetId: { not: selectedAsset.id } } : {}),
+      },
+      data: { adoptionStatus: 'SUPERSEDED' },
+    })
+    if (selectedAsset) {
+      await tx.operationResult.updateMany({
+        where: { operation: { projectId: params.id }, assetId: selectedAsset.id },
+        data: {
+          targetType: 'STYLE',
+          targetKey: `style:${selectedStyleId}`,
+          targetLabel: selectedStyleId,
+          adoptionStatus: 'ADOPTED',
+          adoptedAt: new Date(),
+          adoptedById: permission.user.id,
+        },
+      })
+    }
+    return nextStep
+  })
 
   // 【强制日志3】确认写入成功
   console.log('[STYLE-PATCH-DB] 更新后 outputData:', JSON.stringify(updated.outputData).slice(0, 500))

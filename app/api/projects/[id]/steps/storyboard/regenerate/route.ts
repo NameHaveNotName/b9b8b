@@ -14,6 +14,7 @@ import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { setCurrentOperationTarget } from '@/lib/supplier-observability'
 
 const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 
@@ -192,6 +193,18 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001' }, { status: 403 })
   }
+  const operationTarget = {
+    scopeType: 'SHOT',
+    scopeKey: `act:${targetActNumber || 0}/shot:${shotId}`,
+    targetType: 'SHOT',
+    targetKey: `act:${targetActNumber || 0}/shot:${shotId}`,
+    targetLabel: targetActNumber ? `第${targetActNumber}幕 · ${shotId}` : shotId,
+    shotId,
+    ...(targetActNumber != null ? { actNumber: targetActNumber } : {}),
+    adoptionStatus: 'ACTIVE' as const,
+    adoptedById: userId,
+  }
+  await setCurrentOperationTarget(operationTarget)
 
   const shotPrompt = shotPrompts.find((p: any) => p.shotId === shotId && sameActNumber(p.actNumber, targetActNumber))
     || shotPrompts.find((p: any) => p.shotId === shotId && p.actNumber == null)
@@ -559,7 +572,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     userId,
     pointsCheck.cost,
     isMockResult ? 'error' : 'regenerate',
-    { projectId: params.id, workflowStepId: step.id, success: !isMockResult, errorMessage: isMockResult ? (lastError || '返回 Mock 图') : undefined }
+    {
+      projectId: params.id,
+      workflowStepId: step.id,
+      assetId: newAsset.id,
+      success: !isMockResult,
+      errorMessage: isMockResult ? (lastError || '返回 Mock 图') : undefined,
+      target: operationTarget,
+    }
   )
 
   console.log(`[STORYBOARD-REGENERATE] 重新生成${isMockResult ? '（Mock 兜底）' : '成功'}:`, newAsset.id)

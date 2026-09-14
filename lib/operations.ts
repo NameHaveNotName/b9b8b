@@ -19,6 +19,8 @@ export interface LogOperationInput {
   operationId?: string
   actionKey?: string
   category?: string
+  scopeType?: string
+  scopeKey?: string
   metadata?: Record<string, any>
 }
 
@@ -56,6 +58,8 @@ export async function logOperation(input: LogOperationInput) {
         projectId: input.projectId,
         workflowStepId: input.workflowStepId,
         stepName: input.stepName,
+        scopeType: input.scopeType,
+        scopeKey: input.scopeKey,
         assetId: input.assetId,
         pointsCost: input.cost ?? 0,
         success: input.status === 'success',

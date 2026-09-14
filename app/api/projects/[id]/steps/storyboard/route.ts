@@ -17,6 +17,7 @@ import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
+import { setCurrentOperationTarget } from '@/lib/supplier-observability'
 
 const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 const STORYBOARD_MIN_TOTAL_SHOTS = 20
@@ -708,6 +709,18 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       }
 
       activeShotId = targetShotId
+      const operationTarget = {
+        scopeType: 'SHOT',
+        scopeKey: `act:${actNumber}/shot:${targetShotId}`,
+        targetType: 'SHOT',
+        targetKey: `act:${actNumber}/shot:${targetShotId}`,
+        targetLabel: `第${actNumber}幕 · ${targetShotId}`,
+        shotId: targetShotId,
+        actNumber,
+        adoptionStatus: 'ACTIVE' as const,
+        adoptedById: userId,
+      }
+      await setCurrentOperationTarget(operationTarget)
 
       let shotPrompt = currentShotPrompts.find((p: any) => p.actNumber === actNumber && p.shotId === targetShotId)
       if (!shotPrompt) {
@@ -987,7 +1000,13 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
         data: { stepStoryboardFirstframeDone: true },
       })
 
-      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
+      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', {
+        projectId: params.id,
+        workflowStepId: step.id,
+        assetId: asset.id,
+        success: true,
+        target: operationTarget,
+      })
 
       console.log(`[STORYBOARD-ACT] 第 ${actNumber} 幕进度: ${processedCount}/${actPrompts.length}, 当前: ${targetShotId}, 剩余: ${remainingCount}`)
       return NextResponse.json({

@@ -9,6 +9,7 @@ import {
   finalizeCurrentSupplierOperation,
   getCurrentOperationId,
   type OperationCategory,
+  type OperationTarget,
 } from '@/lib/supplier-observability'
 
 /**
@@ -162,6 +163,7 @@ export async function deductPointsAndLog(
     billingSource?: BillingSource
     billingGroupId?: string | null
     stepName?: string
+    target?: OperationTarget
   } = {}
 ) {
   const resolved = await resolveBillingTarget(userId, cost, meta.projectId)
@@ -181,10 +183,12 @@ export async function deductPointsAndLog(
       billingGroupId: meta.billingGroupId ?? resolved?.groupId,
       operationId,
       stepName: meta.stepName,
+      scopeType: meta.target?.scopeType || meta.target?.targetType,
+      scopeKey: meta.target?.scopeKey || meta.target?.targetKey,
       metadata: meta.errorMessage ? { error: meta.errorMessage } : undefined,
     })
     if (operationId && meta.success !== false) {
-      await attachOperationResults(operationId, meta.assetId)
+      await attachOperationResults(operationId, meta.assetId, meta.target)
     }
     return
   }
@@ -234,6 +238,8 @@ export async function deductPointsAndLog(
         projectId: meta.projectId,
         workflowStepId: meta.workflowStepId,
         stepName: meta.stepName,
+        scopeType: meta.target?.scopeType || meta.target?.targetType,
+        scopeKey: meta.target?.scopeKey || meta.target?.targetKey,
         assetId: meta.assetId,
         pointsCost: cost,
         success: true,
@@ -260,7 +266,7 @@ export async function deductPointsAndLog(
       await tx.operationLog.create({ data: operationData })
     }
   })
-  if (operationId) await attachOperationResults(operationId, meta.assetId)
+  if (operationId) await attachOperationResults(operationId, meta.assetId, meta.target)
 }
 
 /**

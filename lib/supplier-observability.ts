@@ -16,6 +16,18 @@ globalStore.__supplierOperationContext = operationContext
 
 export type OperationCategory = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'MUSIC' | 'OTHER'
 
+export type OperationTarget = {
+  scopeType?: string
+  scopeKey?: string
+  targetType?: string
+  targetKey?: string
+  targetLabel?: string
+  shotId?: string
+  actNumber?: number
+  adoptionStatus?: 'GENERATED' | 'ACTIVE' | 'ADOPTED' | 'REJECTED' | 'SUPERSEDED'
+  adoptedById?: string
+}
+
 function safeMessage(error: unknown) {
   const value = error instanceof Error ? error.message : String(error)
   return value.replace(/sk-[A-Za-z0-9_-]+/g, '[REDACTED]').slice(0, 1000)
@@ -38,6 +50,8 @@ export async function beginSupplierOperation(input: {
   actionKey?: string
   category?: OperationCategory
   idempotencyKey?: string
+  scopeType?: string
+  scopeKey?: string
 }) {
   const operation = await prisma.operationLog.create({
     data: {
@@ -52,13 +66,74 @@ export async function beginSupplierOperation(input: {
       billingSource: input.billingSource || 'USER',
       billingGroupId: input.billingGroupId,
       idempotencyKey: input.idempotencyKey,
+      scopeType: input.scopeType,
+      scopeKey: input.scopeKey,
     },
   })
   enterOperationContext(operation.id, input.userId)
   return operation.id
 }
 
-export async function attachOperationResults(operationId: string, resultId?: string) {
+export async function setCurrentOperationTarget(target: OperationTarget) {
+  const operationId = getCurrentOperationId()
+  if (!operationId) return
+  await prisma.operationLog.update({
+    where: { id: operationId },
+    data: {
+      scopeType: target.scopeType || target.targetType,
+      scopeKey: target.scopeKey || target.targetKey,
+    },
+  }).catch((error) => console.error('[supplier-ledger] set target failed:', safeMessage(error)))
+}
+
+function normalizedResultTarget(metadata: unknown, target?: OperationTarget) {
+  const record = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
+  const shotId = target?.shotId || (typeof record.shotId === 'string' ? record.shotId : undefined)
+  const styleId = typeof record.styleId === 'string' ? record.styleId : undefined
+  const characterId = typeof record.characterId === 'string' ? record.characterId : undefined
+  const rawActNumber = target?.actNumber ?? record.actNumber
+  const actNumber = typeof rawActNumber === 'number' && Number.isFinite(rawActNumber)
+    ? Math.trunc(rawActNumber)
+    : undefined
+  const inferredType = shotId ? 'SHOT' : styleId ? 'STYLE' : characterId ? 'CHARACTER' : undefined
+  const inferredKey = shotId
+    ? `act:${actNumber || 0}/shot:${shotId}`
+    : styleId
+      ? `style:${styleId}`
+      : characterId
+        ? `character:${characterId}`
+        : undefined
+  const targetType = target?.targetType || target?.scopeType || inferredType
+  const targetKey = target?.targetKey || target?.scopeKey || inferredKey
+  return {
+    targetType,
+    targetKey,
+    targetLabel: target?.targetLabel,
+    shotId,
+    actNumber,
+    adoptionStatus: target?.adoptionStatus,
+    adoptedAt: target?.adoptionStatus === 'ACTIVE' || target?.adoptionStatus === 'ADOPTED' ? new Date() : undefined,
+    adoptedById: target?.adoptedById,
+  }
+}
+
+async function supersedePreviousResult(operationId: string, resultId: string, target: ReturnType<typeof normalizedResultTarget>) {
+  if ((target.adoptionStatus !== 'ACTIVE' && target.adoptionStatus !== 'ADOPTED') || !target.targetType || !target.targetKey) return
+  const operation = await prisma.operationLog.findUnique({ where: { id: operationId }, select: { projectId: true } })
+  if (!operation?.projectId) return
+  await prisma.operationResult.updateMany({
+    where: {
+      id: { not: resultId },
+      operation: { projectId: operation.projectId },
+      targetType: target.targetType,
+      targetKey: target.targetKey,
+      adoptionStatus: { in: ['ACTIVE', 'ADOPTED'] },
+    },
+    data: { adoptionStatus: 'SUPERSEDED' },
+  })
+}
+
+export async function attachOperationResults(operationId: string, resultId?: string, target?: OperationTarget) {
   try {
     const operation = await prisma.operationLog.findUnique({
       where: { id: operationId },
@@ -78,12 +153,16 @@ export async function attachOperationResults(operationId: string, resultId?: str
         : userAsset
           ? { kind: userAsset.kind, userAssetId: userAsset.id, title: userAsset.title, storageKey: userAsset.storageKey, mimeType: userAsset.mimeType, metadata: userAsset.metadata === null ? undefined : userAsset.metadata }
           : video
-            ? { kind: 'VIDEO', videoSegmentId: video.id, title: video.caption, storageKey: video.storageKey, mimeType: 'video/mp4', isMock: video.isMock }
+            ? { kind: 'VIDEO', videoSegmentId: video.id, title: video.caption, storageKey: video.storageKey, mimeType: 'video/mp4', isMock: video.isMock, metadata: { shotId: video.shotId, actNumber: video.actNumber, stepName: video.stepName } }
             : voice
               ? { kind: 'AUDIO', voiceoverSegmentId: voice.id, title: voice.speaker, storageKey: voice.storageKey, mimeType: 'audio/mpeg' }
               : null
       if (result) {
-        await prisma.operationResult.create({ data: { operationId, ...result } }).catch(() => undefined)
+        const normalizedTarget = normalizedResultTarget(result.metadata, target)
+        const created = await prisma.operationResult.create({
+          data: { operationId, ...result, ...normalizedTarget },
+        }).catch(() => undefined)
+        if (created) await supersedePreviousResult(operationId, created.id, normalizedTarget)
         return
       }
     }
@@ -100,7 +179,8 @@ export async function attachOperationResults(operationId: string, resultId?: str
         take: 50,
       })
       for (const asset of assets) {
-        await prisma.operationResult.create({
+        const normalizedTarget = normalizedResultTarget(asset.metadata, target)
+        const created = await prisma.operationResult.create({
           data: {
             operationId,
             kind: asset.type,
@@ -108,8 +188,10 @@ export async function attachOperationResults(operationId: string, resultId?: str
             storageKey: asset.storageKey,
             mimeType: asset.mimeType,
             metadata: asset.metadata === null ? undefined : asset.metadata,
+            ...normalizedTarget,
           },
         }).catch(() => undefined)
+        if (created) await supersedePreviousResult(operationId, created.id, normalizedTarget)
       }
     }
   } catch (error) {
@@ -123,6 +205,7 @@ export async function finalizeCurrentSupplierOperation(input: {
   workflowStepId?: string
   resultId?: string
   errorMessage?: string
+  target?: OperationTarget
 }) {
   const operationId = getCurrentOperationId()
   if (!operationId) return
@@ -146,7 +229,7 @@ export async function finalizeCurrentSupplierOperation(input: {
       },
     })
     if (input.status === 'SUCCEEDED' || input.status === 'PARTIAL') {
-      await attachOperationResults(operationId, input.resultId)
+      await attachOperationResults(operationId, input.resultId, input.target)
     }
   } catch (error) {
     console.error('[supplier-ledger] finalize operation failed:', safeMessage(error))
