@@ -37,8 +37,8 @@ export default function DashboardShell({ children }: { children: React.ReactNode
 
         // 并行获取用户信息和最近项目
         const [userData, projectsData] = await Promise.all([
-          apiClient<{ user: User }>('/api/user'),
-          apiClient<{ projects: Project[] }>('/api/projects'),
+          apiClient<{ user: User }>('/api/user', { redirectOnAuthError: false }),
+          apiClient<{ projects: Project[] }>('/api/projects', { redirectOnAuthError: false }),
         ])
 
         if (!mounted) return
@@ -48,7 +48,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
       } catch (e: any) {
         if (!mounted) return
         console.error('[DashboardShell] fetch error:', e)
-        // 401 已由 apiClient 自动跳转到登录页；其他错误静默，避免阻塞页面
+        // 后台数据同步失败时保留当前页面；真实未登录由路由中间件处理。
       } finally {
         if (mounted) setLoading(false)
       }

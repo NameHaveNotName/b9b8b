@@ -64,7 +64,9 @@ export default function Header() {
     let mounted = true
     async function loadPoints() {
       try {
-        const data = await apiClient<{ user?: { points?: number } }>('/api/user')
+        const data = await apiClient<{ user?: { points?: number } }>('/api/user', {
+          redirectOnAuthError: false,
+        })
         if (mounted && data.user?.points !== undefined) {
           setPoints(data.user.points)
         }

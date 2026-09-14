@@ -51,22 +51,22 @@ import SuggestionBar from '@/components/workflow/SuggestionBar'
 import { exportStoryboardExcel } from '@/lib/storyboard-excel-export'
 import { proxiedMediaUrl } from '@/lib/media-url'
 import { ApiError } from '@/lib/api-client'
-import { shouldRedirectToLogin } from '@/lib/auth-response-policy'
 
-const fetcher = (url: string) =>
-  fetch(url).then((r) => {
-    if (shouldRedirectToLogin(r.status, 'page-load') && typeof window !== 'undefined') {
-      const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-      window.location.href = `/login?redirect=${redirect}`
-      throw new ApiError('未登录或会话已过期', 401)
-    }
-    if (!r.ok) {
-      return r.text().then((text) => {
-        try { return JSON.parse(text) } catch { return { error: `HTTP_${r.status}`, message: text } }
-      })
-    }
-    return r.json()
-  })
+const fetcher = async (url: string) => {
+  const response = await fetch(url)
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    let payload: { message?: string; error?: string } | null = null
+    try { payload = text ? JSON.parse(text) as { message?: string; error?: string } : null } catch {}
+    const message = payload?.message || payload?.error || text || `HTTP ${response.status}`
+
+    // This fetcher runs every three seconds. A single auth refresh race must not
+    // navigate away from an open project; middleware still protects real page
+    // loads, and SWR retains the last valid project while polling recovers.
+    throw new ApiError(message, response.status, payload)
+  }
+  return response.json()
+}
 
 const STEP_LABELS: Record<string, string> = {
   IDEATION: '创意扩散',
@@ -172,7 +172,10 @@ async function fetchWithRetry(url: string, init: RequestInit, maxRetries = 2): P
 export default function WorkflowPage(props: { params: Promise<{ id: string }> }) {
   const params = use(props.params);
   const { data, error, mutate, isLoading } = useSWR(`/api/projects/${params.id}`, fetcher, {
-    refreshInterval: 3000,
+    refreshInterval: (latest: { project?: { steps?: Array<{ status?: string }> } } | undefined) =>
+      latest?.project?.steps?.some((step) => step.status === 'PROCESSING') ? 3000 : 15000,
+    keepPreviousData: true,
+    refreshWhenHidden: false,
   })
 
   const [activeStepType, setActiveStepType] = useState<string | null>(null)
@@ -500,7 +503,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
   }
 
   if (isLoading) return <LoadingBlock />
-  if (error) return <ErrorBlock message={error.message} />
+  if (error && !project) return <ErrorBlock message={error.message} />
   if (!project) {
     const apiError = data?.error
     if (apiError === 'AUTH_001' || apiError === 'AUTH_002') {
