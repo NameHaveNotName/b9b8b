@@ -209,7 +209,10 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   }
 
   if (!(await canExecuteStep(params.id, 'STORYBOARD'))) {
-    return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'WORKFLOW_002', message: '请先完成框架搭建，再生成分镜图片' },
+      { status: 400 },
+    )
   }
 
   const step = await prisma.workflowStep.findUnique({

@@ -1,7 +1,7 @@
 import { prisma } from './prisma';
 import { WorkflowStepType, StepStatus } from '@prisma/client';
 import { getStepOrder } from './workflow';
-import { STEP_CONFIG, TYPE_TO_STEP_ID, ProjectState } from './workflow-state';
+import { computeProjectStateFromSteps, STEP_CONFIG, TYPE_TO_STEP_ID, ProjectState } from './workflow-state';
 import { finalizeCurrentSupplierOperation } from './supplier-observability';
 
 export async function createStep(projectId: string, stepType: WorkflowStepType, order: number) {
@@ -125,17 +125,22 @@ export async function canExecuteStep(projectId: string, targetStep: WorkflowStep
       },
     });
     if (project) {
+      // Keep the execution guard consistent with the project GET endpoint.
+      // Older projects can have completed WorkflowStep rows while the later
+      // step_*_done columns are still false because those columns did not exist
+      // when the step completed.
+      const derivedState = computeProjectStateFromSteps(steps);
       const state: ProjectState = {
-        stepIdeaDone: project.stepIdeaDone ?? false,
-        stepFrameworkDone: project.stepFrameworkDone ?? false,
-        stepStyleDone: project.stepStyleDone ?? false,
-        stepCharacterDone: project.stepCharacterDone ?? false,
-        stepConceptDone: project.stepConceptDone ?? false,
-        stepStoryboardDone: project.stepStoryboardDone ?? false,
-        stepStoryboardFirstframeDone: project.stepStoryboardFirstframeDone ?? false,
-        stepTrailerDone: project.stepTrailerDone ?? false,
-        stepEndingDone: project.stepEndingDone ?? false,
-        stepDirectDone: project.stepDirectDone ?? false,
+        stepIdeaDone: project.stepIdeaDone || derivedState.stepIdeaDone,
+        stepFrameworkDone: project.stepFrameworkDone || derivedState.stepFrameworkDone,
+        stepStyleDone: project.stepStyleDone || derivedState.stepStyleDone,
+        stepCharacterDone: project.stepCharacterDone || derivedState.stepCharacterDone,
+        stepConceptDone: project.stepConceptDone || derivedState.stepConceptDone,
+        stepStoryboardDone: project.stepStoryboardDone || derivedState.stepStoryboardDone,
+        stepStoryboardFirstframeDone: project.stepStoryboardFirstframeDone || derivedState.stepStoryboardFirstframeDone,
+        stepTrailerDone: project.stepTrailerDone || derivedState.stepTrailerDone,
+        stepEndingDone: project.stepEndingDone || derivedState.stepEndingDone,
+        stepDirectDone: project.stepDirectDone || derivedState.stepDirectDone,
       };
       const dagOk = STEP_CONFIG[stepId].unlockCondition(state);
 
