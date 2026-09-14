@@ -403,6 +403,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const result = await generateImage({
       model: newModel,
       prompt: guardedPromptFinal,
+      quality: 'medium',
       referenceImages: refImages.length > 0 ? refImages : undefined,
       // 修改原图模式：referenceImageUrl 作为编辑基础（gpt-image-1 edits 端点的 ref_0）
       referenceImageUrl: mode === 'edit-original' ? primaryRefForEdit : undefined,
@@ -507,6 +508,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         actNumber: targetActNumber,
         aspectRatio: newRatio,
         imageModel: newModel,
+        quality: 'medium',
         referenceImageCount: refImages.length + (primaryRefForEdit ? 1 : 0),
         referenceImageUrls: [...(primaryRefForEdit ? [primaryRefForEdit] : []), ...refImages],
         prompt: shotPrompt.prompt,

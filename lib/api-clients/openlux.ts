@@ -461,6 +461,8 @@ export interface GenerateImageParams {
   size?: string
   aspectRatio?: string
   n?: number
+  /** GPT Image 质量档。必须由业务入口显式选择，避免供应商默认落到高成本档。 */
+  quality?: 'low' | 'medium' | 'high' | 'auto'
   watermark?: boolean
   /** 多图模型用：是否开启组图生成（'auto' / 'disabled'） */
   sequentialImageGeneration?: 'auto' | 'disabled'
@@ -649,7 +651,13 @@ function buildPayload(p: GenerateImageParams): Record<string, any> {
     const size = p.model.toLowerCase().includes('gpt-image')
       ? mapToGptImageSize(p.model, p.size, p.aspectRatio)
       : mapToDalleSize(p.size, p.aspectRatio)
-    return { model: p.model, prompt, n: typeof p.n === 'number' ? p.n : 1, size }
+    return {
+      model: p.model,
+      prompt,
+      n: typeof p.n === 'number' ? p.n : 1,
+      size,
+      ...(p.model.toLowerCase().includes('gpt-image') && p.quality ? { quality: p.quality } : {}),
+    }
   }
 
   if (kind === 'flux') {
@@ -777,6 +785,9 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<OpenLuxImageRaw
   parts.push(textPart('prompt', p.prompt || ''))
   parts.push(textPart('model', model))
   parts.push(textPart('n', String(p.n || 1)))
+  if (p.quality) {
+    parts.push(textPart('quality', p.quality))
+  }
   if (p.size || p.aspectRatio) {
     const sz = resolveSize(p.model, p.aspectRatio, p.size)
     console.log(`[GPT-EDIT] requested size=${sz}, aspectRatio=${p.aspectRatio || '-'}`)
@@ -936,7 +947,7 @@ const _imageDedup = new Map<string, { promise: Promise<GenerateImageResult>; cre
 function makeImageDedupKey(p: GenerateImageParams): string {
   const ref = p.referenceImageUrl || ''
   const refs = Array.isArray(p.referenceImages) ? p.referenceImages.join(',') : ''
-  return `${p.model}|${(p.prompt || '').slice(0, 200)}|${p.size || ''}|${p.aspectRatio || ''}|${ref.slice(0, 80)}|${refs.slice(0, 80)}`
+  return `${p.model}|${p.quality || ''}|${(p.prompt || '').slice(0, 200)}|${p.size || ''}|${p.aspectRatio || ''}|${ref.slice(0, 80)}|${refs.slice(0, 80)}`
 }
 function getDedupEntry(key: string): Promise<GenerateImageResult> | undefined {
   const entry = _imageDedup.get(key)

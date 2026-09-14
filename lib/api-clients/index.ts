@@ -93,6 +93,7 @@ export interface ConceptSceneResult {
     styleRef: string
     characterRefs: string[]
     seed: number
+    quality: 'low'
     isMock?: boolean
     mockReason?: string
   }
@@ -105,6 +106,7 @@ export interface KeyframeResult {
     seed: number
     prompt: string
     frameType: 'first' | 'last'
+    quality: 'medium'
   }
 }
 
@@ -190,6 +192,7 @@ export async function getImageClient(): Promise<ImageClient> {
           const { buffer, isMock, lastError } = await generateImage({
             model,
             prompt,
+            quality: 'low',
             aspectRatio: ar,
             watermark: false,
             referenceImages: userRefUrls.length > 0 ? userRefUrls : undefined,
@@ -219,6 +222,7 @@ export async function getImageClient(): Promise<ImageClient> {
         const { buffer, isMock, lastError } = await generateImage({
           model,
           prompt,
+          quality: 'medium',
           referenceImageUrl: styleRefUrl,
           referenceImages: hasUserRefs ? userReferenceUrls : undefined,
           aspectRatio: ar,
@@ -247,6 +251,7 @@ export async function getImageClient(): Promise<ImageClient> {
         const { buffer, isMock, lastError } = await generateImage({
           model,
           prompt,
+          quality: 'low',
           referenceImages: refs,
           aspectRatio: aspectRatio || '16:9',
           watermark: false,
@@ -262,6 +267,7 @@ export async function getImageClient(): Promise<ImageClient> {
             styleRef: _stylePrompt || '',
             characterRefs: characterImageUrls || [],
             seed: Math.floor(Math.random() * 999999),
+            quality: 'low',
             isMock: !!isMock,
             ...(lastError ? { lastError } : {}),
           },
@@ -298,6 +304,7 @@ export async function getImageClient(): Promise<ImageClient> {
         const { buffer } = await generateImage({
           model,
           prompt,
+          quality: 'medium',
           referenceImages: secondaryRefs,
           referenceImageUrl: primaryRef,
           aspectRatio: aspectRatio || '16:9',
@@ -312,6 +319,7 @@ export async function getImageClient(): Promise<ImageClient> {
             seed: Math.floor(Math.random() * 999999),
             prompt: sceneDesc,
             frameType,
+            quality: 'medium',
           },
         }
       },

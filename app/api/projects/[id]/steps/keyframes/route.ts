@@ -11,7 +11,7 @@ import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
-import { GENERATION_COSTS } from '@/lib/points-config'
+import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -153,11 +153,6 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
   // === generate-images: 读取已保存提示词，执行生图 ===
   if (action === 'generate-images') {
-    const pointsCheck = await checkPoints(GENERATION_COSTS.KEYFRAME, params.id, 'generation.keyframe', 'IMAGE')
-    if (!pointsCheck.ok) {
-      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
-    }
-
     const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
     const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
@@ -171,6 +166,12 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     if (prompts.length === 0) {
       console.error('[KEYFRAMES-IMAGE] No prompts found. existingOutput:', JSON.stringify(existingOutput).slice(0, 500))
       return NextResponse.json({ error: 'No prompts found. Please call generate-prompts first.' }, { status: 400 })
+    }
+
+    const imageCost = calculateBatchCost(GENERATION_COSTS.KEYFRAME, prompts.length)
+    const pointsCheck = await checkPoints(imageCost, params.id, 'generation.keyframe', 'IMAGE')
+    if (!pointsCheck.ok) {
+      return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
     }
 
     if (force) {
@@ -238,6 +239,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
             metadata: {
               pairId: promptItem.shotId,
               frameType: 'last',
+              quality: 'medium',
               sceneDesc: promptItem.chineseDesc,
               llmPrompt: promptItem.englishPrompt,
               aspectRatio,
@@ -266,7 +268,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   }
 
   // === 默认兼容：无 action 时走原有完整流程 ===
-  const totalCost = GENERATION_COSTS.DEFAULT + GENERATION_COSTS.KEYFRAME
+  const totalCost = GENERATION_COSTS.DEFAULT + calculateBatchCost(GENERATION_COSTS.KEYFRAME, shotsWithFirstFrame.length)
   const pointsCheck = await checkPoints(totalCost, params.id, 'generation.keyframe', 'IMAGE')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
@@ -338,7 +340,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           mimeType: 'image/png',
           storageKey: `projects/${params.id}/keyframes/${shot.shotId}_last.png`,
           url: lastResult.url,
-          metadata: { pairId: shot.shotId, frameType: 'last', sceneDesc: shot.description, llmPrompt: lastPromptText },
+          metadata: { pairId: shot.shotId, frameType: 'last', quality: 'medium', sceneDesc: shot.description, llmPrompt: lastPromptText },
         }
       })
 

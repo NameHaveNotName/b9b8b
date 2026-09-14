@@ -150,7 +150,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         mimeType: 'image/png',
         storageKey: `projects/${params.id}/keyframes/${shot.shotId}_last.png`,
         url: result.url,
-        metadata: { pairId: shot.shotId, frameType: 'last', sceneDesc: shot.description, llmPrompt: generatedPrompt },
+        metadata: { pairId: shot.shotId, frameType: 'last', quality: 'medium', sceneDesc: shot.description, llmPrompt: generatedPrompt },
       }
     })
 

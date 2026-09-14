@@ -80,6 +80,7 @@ export async function POST(req: NextRequest) {
     const { buffer, model, revisedPrompt, isMock, lastError } = await generateImage({
       model: imageModel,
       prompt: finalPrompt,
+      quality: 'medium',
       referenceImages: referenceImages.length ? referenceImages : undefined,
       aspectRatio: kind === 'CHARACTER' ? '3:4' : '16:9',
       watermark: false,
@@ -119,6 +120,7 @@ export async function POST(req: NextRequest) {
           referenceAssetIds,
           referenceImages,
           model,
+          quality: 'medium',
           revisedPrompt,
         },
       },

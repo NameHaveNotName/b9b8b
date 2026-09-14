@@ -122,6 +122,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           llmPrompt: latestPrompt?.englishPrompt || character.description,
           aspectRatio: newRatio,
           imageModel: newModel,
+          quality: 'medium',
           regenerated: true,
           originalAssetId: assetId,
           isMock: !!result.isMock,

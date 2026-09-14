@@ -39,7 +39,7 @@ import { PROJECT_TAG_OPTIONS, PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import HoverImageBadge from '@/components/generation/HoverImageBadge'
 import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
-import { DEFAULT_GENERATE_COST, getImageGenerationCost } from '@/lib/points-config'
+import { DEFAULT_GENERATE_COST, GENERATION_COSTS, calculateBatchCost, getImageGenerationCost } from '@/lib/points-config'
 import { getStepDisplayState, prismaTypeToStepId } from '@/lib/workflow-state'
 import { exportFrameworkToWord } from '@/lib/framework-export'
 import FrameworkImportModal from '@/components/framework/FrameworkImportModal'
@@ -3858,7 +3858,7 @@ const IMAGE_MODEL_OPTIONS = IMAGE_MODELS.available
   .map(m => ({
   label: m.label,
   value: m.id,
-  desc: `${getImageGenerationCost(m.id)} 点/张 · ${m.tags.join(' · ')}`,
+  desc: m.tags.join(' · '),
   provider: m.provider,
 }))
 
@@ -3903,6 +3903,13 @@ function PromptPreview({
   stepType?: string
   onSaveSuccess?: () => void
 }) {
+  const imageCostPerItem =
+    stepLabel === 'STYLE' ? GENERATION_COSTS.STYLE_UNIFY
+      : stepLabel === 'CHARACTER' ? GENERATION_COSTS.CHARACTER_DESIGN
+        : stepLabel === 'CONCEPT' ? GENERATION_COSTS.CONCEPT_ART
+          : stepLabel === 'KEYFRAMES' ? GENERATION_COSTS.KEYFRAME
+            : DEFAULT_GENERATE_COST
+  const confirmedGenerationCost = calculateBatchCost(imageCostPerItem, prompts.length)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [localPrompts, setLocalPrompts] = useState(prompts)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -3998,7 +4005,11 @@ function PromptPreview({
               >
                 {IMAGE_MODEL_OPTIONS.map(opt => (
                   <option key={opt.value} value={opt.value}>
-                    {opt.label} — {opt.provider} · {opt.desc}
+                    {opt.label} — {opt.provider} · {getImageGenerationCost(
+                      opt.value,
+                      imageCostPerItem,
+                      stepLabel === 'STYLE' || stepLabel === 'CONCEPT' ? 'low' : 'medium',
+                    )} 点/张 · {opt.desc}
                   </option>
                 ))}
               </select>
@@ -4130,7 +4141,7 @@ function PromptPreview({
             >
               确认执行
             </button>
-            <CostBadge cost={DEFAULT_GENERATE_COST} />
+            <CostBadge cost={confirmedGenerationCost} />
           </div>
         </div>
       </div>
@@ -5924,7 +5935,14 @@ function StoryboardPanel({
                         <><ImageIcon className="h-3 w-3" /> 生图</>
                       )}
                     </button>
-                    {!allGenerated && !actProgress[actNumber] && <CostBadge cost={DEFAULT_GENERATE_COST} />}
+                    {!allGenerated && !actProgress[actNumber] && (
+                      <CostBadge
+                        cost={calculateBatchCost(
+                          getImageGenerationCost(model, GENERATION_COSTS.STORYBOARD_ACT_IMAGE, 'medium'),
+                          totalCount - generatedCount,
+                        )}
+                      />
+                    )}
                   </div>
                   )}
                 </div>

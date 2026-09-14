@@ -910,6 +910,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       const { buffer, isMock, lastError } = await generateImage({
         model: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
         prompt: guardedPrompt,
+        quality: 'medium',
         referenceImages: refImages.length > 0 ? refImages : undefined,
         aspectRatio,
         watermark: false,
@@ -937,6 +938,7 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
             actNumber,
             aspectRatio,
             imageModel: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
+            quality: 'medium',
             referenceImageCount: refStats.total,
             referenceImageBreakdown: refStats,
             referenceImageUrls: refImages,

@@ -66,6 +66,7 @@ export async function processStyleGeneration(
             const { buffer, model: usedModel, revisedPrompt, isMock, lastError } = await generateImage({
               model: modelId,
               prompt: finalPrompt,
+              quality: 'low',
               aspectRatio,
               referenceImages: userRefUrls.length > 0 ? userRefUrls : undefined,
             })
@@ -174,6 +175,7 @@ export async function processStyleGeneration(
               modelId: r.modelId,
               modelLabel: r.modelLabel,
               aspectRatio: aspectRatio,
+              quality: 'low',
               type: 'style_sample',
               ...(r.mockReason ? { mockReason: r.mockReason } : {}),
               ...(r.revisedPrompt ? { revisedPrompt: r.revisedPrompt } : {}),

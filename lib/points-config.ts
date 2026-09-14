@@ -12,20 +12,33 @@
  */
 export const POINTS_PER_YUAN = 100
 
+/**
+ * GPT Image 1 的暂定质量档位点数（按 1 点 = ¥0.01 留出小幅汇率波动）。
+ * 2026-09-14 已实测 1536x1024 high 约 $0.0556/张；low/medium 先按图像
+ * token 档位比例估算，后续以 OperationLog 的真实供应商实付继续校准。
+ */
+export const IMAGE_QUALITY_COSTS = {
+  low: 4,
+  medium: 12,
+  high: 45,
+} as const
+
+export type ImageGenerationQuality = keyof typeof IMAGE_QUALITY_COSTS
+
 /** 各工作流步骤/生成按钮的点数开销（基于实际 API 调用成本） */
 export const GENERATION_COSTS = {
   // 文本类（DeepSeek chat 等，单次约 0.001 ~ 0.02 元）
   IDEA_DIFFUSION: 1,        // 创意发散
   FRAMEWORK: 1,             // 框架搭建
   FRAMEWORK_DEEPEN_ALL: 3,  // 框架自动深化全套（角色+故事+环境）
-  STYLE_UNIFY: 2,           // 风格统一（含文本 + 可能出图）
-  CHARACTER_DESIGN: 3,      // 角色设计（文本 + 出图）
-  CONCEPT_ART: 3,           // 概念图（文本 + 出图）
+  STYLE_UNIFY: IMAGE_QUALITY_COSTS.low,       // 风格探索图，low，每张
+  CHARACTER_DESIGN: IMAGE_QUALITY_COSTS.medium, // 角色设计图，medium，每张
+  CONCEPT_ART: IMAGE_QUALITY_COSTS.low,       // 概念探索图，low，每张
   STORYBOARD_PROMPTS: 1,    // 分镜：仅生成分镜提示词（文本）
   STORYBOARD_IMAGES: 1,     // 分镜：生成所有占位草图（无 AI 图生成本）
-  STORYBOARD_ACT_IMAGE: 3,  // 分镜：按幕/按镜头生成真实首帧（文本 + AI 出图）
-  KEYFRAME: 3,              // 关键帧/首帧（文本 + 出图）
-  ENDING_FRAME: 3,          // 结尾帧（文本 + 出图）
+  STORYBOARD_ACT_IMAGE: IMAGE_QUALITY_COSTS.medium, // 分镜真实首帧，medium，每张
+  KEYFRAME: IMAGE_QUALITY_COSTS.medium,       // 关键帧/尾帧，medium，每张
+  ENDING_FRAME: IMAGE_QUALITY_COSTS.medium,   // 结尾帧，medium，每张
   TRAILER: 150,             // 预告片（文本 + 视频，约 1.5 元）
 
   // 直出视频（OpenLux / Vidu 实际成本尚需按账户价格校准）
@@ -48,13 +61,17 @@ export const DEFAULT_REGENERATE_COST = GENERATION_COSTS.DEFAULT
 
 /**
  * 返回指定图片模型的单张生成点数。
- * OpenLux 尚未提供到账户级价格配置时使用调用方给出的业务步骤成本，
- * 避免在未经确认的情况下改变现有扣费规则。
+ * GPT Image 1 按明确质量档计费；其它模型在尚无可靠实测数据时，
+ * 使用调用方给出的业务步骤成本。
  */
 export function getImageGenerationCost(
-  _modelId: string,
+  modelId: string,
   fallback: number = GENERATION_COSTS.DEFAULT,
+  quality: ImageGenerationQuality = 'medium',
 ): number {
+  if (modelId.toLowerCase() === 'gpt-image-1') {
+    return IMAGE_QUALITY_COSTS[quality]
+  }
   return fallback
 }
 

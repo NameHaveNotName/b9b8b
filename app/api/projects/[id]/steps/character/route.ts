@@ -442,6 +442,7 @@ async function generateCharacterImagesBackground(
               llmPrompt: promptItem.englishPrompt,
               aspectRatio,
               imageModel: imageModel || IMAGE_MODELS.primary,
+              quality: 'medium',
               isMock: !!result.isMock,
               ...(result.lastError ? { mockReason: result.lastError } : {}),
             },
