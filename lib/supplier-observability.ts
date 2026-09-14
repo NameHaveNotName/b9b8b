@@ -137,7 +137,7 @@ export async function attachOperationResults(operationId: string, resultId?: str
   try {
     const operation = await prisma.operationLog.findUnique({
       where: { id: operationId },
-      select: { projectId: true, workflowStepId: true, startedAt: true },
+      select: { projectId: true, workflowStepId: true, startedAt: true, userId: true },
     })
     if (!operation) return
 
@@ -158,6 +158,22 @@ export async function attachOperationResults(operationId: string, resultId?: str
               ? { kind: 'AUDIO', voiceoverSegmentId: voice.id, title: voice.speaker, storageKey: voice.storageKey, mimeType: 'audio/mpeg' }
               : null
       if (result) {
+        if (asset) {
+          const metadata = asset.metadata && typeof asset.metadata === 'object' ? asset.metadata as Record<string, unknown> : {}
+          await prisma.asset.updateMany({
+            where: { id: asset.id, createdById: null },
+            data: {
+              createdById: operation.userId,
+              origin: metadata.source === 'storyboard-import' ? 'IMPORTED' : 'GENERATED',
+            },
+          })
+        }
+        if (video) {
+          await prisma.videoSegment.updateMany({
+            where: { id: video.id, createdById: null },
+            data: { createdById: operation.userId },
+          })
+        }
         const normalizedTarget = normalizedResultTarget(result.metadata, target)
         const created = await prisma.operationResult.create({
           data: { operationId, ...result, ...normalizedTarget },
@@ -179,6 +195,10 @@ export async function attachOperationResults(operationId: string, resultId?: str
         take: 50,
       })
       for (const asset of assets) {
+        await prisma.asset.updateMany({
+          where: { id: asset.id, createdById: null },
+          data: { createdById: operation.userId },
+        })
         const normalizedTarget = normalizedResultTarget(asset.metadata, target)
         const created = await prisma.operationResult.create({
           data: {

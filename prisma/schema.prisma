@@ -302,20 +302,23 @@ model WorkflowStep {
 }
 
 model Asset {
-  id         String        @id @default(cuid())
-  projectId  String
-  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  stepId     String?
-  step       WorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
-  type       AssetType
-  mimeType   String
-  storageKey String // R2 上的唯一 key
-  url        String // 预签名 URL（短期）
-  metadata   Json? // { seed, modelUsed, prompt, duration, size, styleRef, characterRef }
-  createdAt  DateTime      @default(now())
+  id          String        @id @default(cuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stepId      String?
+  step        WorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  type        AssetType
+  mimeType    String
+  storageKey  String // R2 上的唯一 key
+  url         String // 预签名 URL（短期）
+  metadata    Json? // { seed, modelUsed, prompt, duration, size, styleRef, characterRef }
+  createdById String?
+  origin      String        @default("GENERATED")
+  createdAt   DateTime      @default(now())
 
   @@index([projectId, type])
   @@index([stepId])
+  @@index([createdById, createdAt])
 }
 
 model Evaluation {
@@ -491,6 +494,7 @@ model VideoSegment {
   duration     Int?     @map("duration") // 片段时长（秒）
   isMock       Boolean  @default(false) @map("is_mock") // 是否 Ken Burns 兜底
   errorMessage String?  @map("error_message") // 失败原因
+  createdById  String?  @map("created_by_id")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -498,6 +502,7 @@ model VideoSegment {
   @@index([projectId, stepName])
   @@index([projectId, sequence])
   @@index([projectId, stepName, actNumber, shotId])
+  @@index([createdById, createdAt])
   @@map("VideoSegment")
 }
 

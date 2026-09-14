@@ -65,6 +65,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         const asset = await prisma.asset.create({
           data: {
             projectId: params.id,
+            createdById: userId,
+            origin: 'IMPORTED',
             type: 'IMAGE',
             url,
             storageKey,

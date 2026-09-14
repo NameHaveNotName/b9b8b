@@ -35,6 +35,7 @@ type ContributionData = {
     stepName: string | null
     scopeKey: string | null
     models: string[]
+    requestCount: number
     providerCallCount: number
     outputCount: number
     netPointsCost: number
@@ -48,6 +49,7 @@ type ContributionData = {
 
 const statusLabel: Record<string, string> = {
   SUCCEEDED: '成功', PARTIAL: '部分成功', FAILED: '失败', RUNNING: '进行中', SUBMITTED: '已提交', CANCELLED: '已取消',
+  IMPORTED: '已导入',
 }
 
 export default function ContributionPanel({ groupId }: { groupId: string }) {
@@ -86,7 +88,7 @@ export default function ContributionPanel({ groupId }: { groupId: string }) {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-stone-500">按实际操作人统计，失败和退款会保留在流水中。</p>
+        <p className="text-sm text-stone-500">请求与结果独立统计；保留在分镜、尾帧或视频表中的结果自动视为已采用。</p>
         <div className="flex gap-2">
           <a href={`/api/groups/${groupId}/contributions/export?days=${days}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`} className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600 hover:bg-stone-50">导出 CSV</a>
           <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm">
@@ -122,8 +124,8 @@ export default function ContributionPanel({ groupId }: { groupId: string }) {
               const firstResult = row.results[0]
               const target = firstResult?.shotId ? `第${firstResult.actNumber || '-'}幕 / ${firstResult.shotId}` : row.scopeKey || row.stepName || row.actionKey
               const adopted = row.results.some((result) => result.adoptionStatus === 'ADOPTED' || result.adoptionStatus === 'ACTIVE')
-              const decisionLabel = adopted ? '已采用' : row.results.some((result) => result.adoptionStatus === 'REJECTED') ? '未采用' : row.results.some((result) => result.adoptionStatus === 'SUPERSEDED') ? '已替换' : row.results.length ? '未标记' : '-'
-              return <tr key={row.id} className="hover:bg-stone-50"><td className="whitespace-nowrap px-4 py-3 text-xs text-stone-500">{new Date(row.startedAt).toLocaleString('zh-CN')}</td><td className="px-4 py-3">{row.member.name || row.member.email}</td><td className="px-4 py-3">{row.project?.title || '-'}</td><td className="px-4 py-3"><div>{row.stepName || row.category}</div><div className="text-xs text-stone-400">{target}</div></td><td className="px-4 py-3 text-xs">{row.models.join(', ') || '-'}</td><td className="px-4 py-3 text-xs">请求 1 / 调用 {row.providerCallCount} / 结果 {row.outputCount}</td><td className="px-4 py-3">{row.durationMs == null ? '-' : `${(row.durationMs / 1000).toFixed(1)}s`}</td><td className="px-4 py-3"><div>{row.netPointsCost} 点</div>{row.providerCost != null && <div className="text-xs text-stone-400">{row.providerCost.toFixed(4)} {row.currency}</div>}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-xs ${adopted ? 'bg-emerald-50 text-emerald-700' : 'bg-stone-100 text-stone-600'}`}>{decisionLabel}</span></td><td className="px-4 py-3">{statusLabel[row.status] || row.status}</td></tr>
+              const decisionLabel = adopted ? '已采用' : '未采用'
+              return <tr key={row.id} className="hover:bg-stone-50"><td className="whitespace-nowrap px-4 py-3 text-xs text-stone-500">{new Date(row.startedAt).toLocaleString('zh-CN')}</td><td className="px-4 py-3">{row.member.name || row.member.email}</td><td className="px-4 py-3">{row.project?.title || '-'}</td><td className="px-4 py-3"><div>{row.stepName || row.category}</div><div className="text-xs text-stone-400">{target}</div></td><td className="px-4 py-3 text-xs">{row.models.join(', ') || '-'}</td><td className="px-4 py-3 text-xs">请求 {row.requestCount} / 调用 {row.providerCallCount} / 结果 {row.outputCount}</td><td className="px-4 py-3">{row.durationMs == null ? '-' : `${(row.durationMs / 1000).toFixed(1)}s`}</td><td className="px-4 py-3"><div>{row.netPointsCost} 点</div>{row.providerCost != null && <div className="text-xs text-stone-400">{row.providerCost.toFixed(4)} {row.currency}</div>}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-xs ${adopted ? 'bg-emerald-50 text-emerald-700' : 'bg-stone-100 text-stone-600'}`}>{decisionLabel}</span></td><td className="px-4 py-3">{statusLabel[row.status] || row.status}</td></tr>
             })}</tbody>
           </table>
         </div>

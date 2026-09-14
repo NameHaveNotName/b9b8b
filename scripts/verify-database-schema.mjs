@@ -30,6 +30,8 @@ try {
       },
     }),
     prisma.providerCallAttempt.findFirst({ select: { id: true, operationId: true, provider: true } }),
+    prisma.asset.findFirst({ select: { id: true, createdById: true, origin: true } }),
+    prisma.videoSegment.findFirst({ select: { id: true, createdById: true } }),
     prisma.operationResult.findFirst({
       select: {
         id: true,

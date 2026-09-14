@@ -452,6 +452,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         const asset = await prisma.asset.create({
           data: {
             projectId: params.id,
+            createdById: userId,
             stepId: step.id,
             type: 'IMAGE',
             mimeType: 'image/png',
@@ -921,6 +922,7 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
       const asset = await prisma.asset.create({
         data: {
           projectId: params.id,
+          createdById: userId,
           stepId: step.id,
           type: 'IMAGE',
           mimeType: 'image/png',
@@ -1142,6 +1144,7 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
       const asset = await prisma.asset.create({
         data: {
           projectId: params.id,
+          createdById: userId,
           stepId: step.id,
           type: 'IMAGE',
           mimeType: 'image/png',
