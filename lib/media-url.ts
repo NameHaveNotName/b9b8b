@@ -15,8 +15,10 @@ function isAbsoluteUrl(url: string): boolean {
 }
 
 function isR2Url(url: string): boolean {
-  if (!R2_PUBLIC_URL) return false
-  return url.startsWith(R2_PUBLIC_URL) || url.includes('.r2.dev')
+  // R2 预签名 URL（S3 兼容端点）与公共 URL（.r2.dev / 自定义域名）都直接可访问，无需代理
+  if (url.includes('.r2.cloudflarestorage.com') || url.includes('.r2.dev')) return true
+  if (R2_PUBLIC_URL && url.startsWith(R2_PUBLIC_URL)) return true
+  return false
 }
 
 function needsProxy(url: string): boolean {

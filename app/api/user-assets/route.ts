@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   const filename = file.name || 'asset.png'
   const storageKey = `users/${userId}/assets/${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`
   await uploadFile(storageKey, buffer, file.type)
-  const url = await getSignedFileUrl(storageKey, 3600)
+  const url = await getSignedFileUrl(storageKey)
 
   const asset = await prisma.userAsset.create({
     data: {

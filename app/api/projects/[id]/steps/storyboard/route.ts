@@ -837,7 +837,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       console.log(`[STORYBOARD-ACT] 参考图统计: total=${refStats.total}, topPriority=${refStats.topPriority}, chars=${refStats.characters}, style=${refStats.style}, prev=${refStats.previousShot}, userRefs=${refStats.userReferences}`)
       refImages.forEach((url, index) => console.log(`[STORYBOARD-ACT] ref[${index}]=${url.slice(0, 100)}`))
       if (refImages.length === 0) {
-        throw new Error('STORYBOARD_REF_MISSING: 分镜生图未找到人物设计、风格统一或参考素材图片，已停止生成以避免产出无关图片')
+        console.warn('[STORYBOARD-ACT] 无任何参考图（人物/风格/用户参考/上一帧），降级为纯文生图')
       }
 
       const currentDesc = currentShot?.description || shotPrompt.caption || shotPrompt.prompt || ''

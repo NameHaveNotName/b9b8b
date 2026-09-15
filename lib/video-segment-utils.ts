@@ -27,6 +27,7 @@ import {
 } from './video-utils'
 import path from 'path'
 import fsPromises from 'fs/promises'
+import sharp from 'sharp'
 
 /** 将相对路径或任意 URL 转为 downloadUrlToTemp 可处理的完整 URL */
 function resolveUrlForDownload(url: string): string {
@@ -37,6 +38,57 @@ function resolveUrlForDownload(url: string): string {
     return `${baseUrl}${url}`
   }
   return url
+}
+
+/** 直生视频 API 要求首/尾帧分辨率 >= 300×300 */
+const VIDEO_FRAME_MIN_DIMENSION = 300
+
+/**
+ * 确保首/尾帧满足视频 API 的最小分辨率要求。
+ * 导入文档里的图片可能是小尺寸（如 480×270），直生视频 API 会拒绝，
+ * 这里检测到任一维度 < 300 时按比例放大并重新上传 R2，返回新 URL。
+ * 已在范围内则原样返回原 URL；任何异常都回退到原 URL，保证不阻断主流程。
+ */
+async function ensureVideoFrameResolution(url: string, projectId: string): Promise<string> {
+  const tempDir = makeTempDir(`frame-${projectId}-`)
+  await ensureDir(tempDir)
+  const imgPath = path.join(tempDir, 'frame.png')
+  try {
+    await downloadUrlToTemp(url, imgPath)
+    const buf = await fsPromises.readFile(imgPath)
+    let width = 0
+    let height = 0
+    try {
+      const metadata = await sharp(buf).metadata()
+      width = metadata.width || 0
+      height = metadata.height || 0
+    } catch {
+      return url
+    }
+    if (width >= VIDEO_FRAME_MIN_DIMENSION && height >= VIDEO_FRAME_MIN_DIMENSION) {
+      return url
+    }
+    const scale = Math.max(
+      VIDEO_FRAME_MIN_DIMENSION / width,
+      VIDEO_FRAME_MIN_DIMENSION / height,
+    )
+    const targetW = Math.max(VIDEO_FRAME_MIN_DIMENSION, Math.round(width * scale))
+    const targetH = Math.max(VIDEO_FRAME_MIN_DIMENSION, Math.round(height * scale))
+    const upscaled = await sharp(buf)
+      .resize(targetW, targetH, { fit: 'fill' })
+      .png()
+      .toBuffer()
+    const storageKey = `projects/${projectId}/video-frames/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`
+    await uploadFile(storageKey, upscaled, 'image/png')
+    const newUrl = await getSignedFileUrl(storageKey)
+    console.log(`[VIDEO-FRAME] 分辨率 ${width}×${height} 不足，放大到 ${targetW}×${targetH}`)
+    return newUrl
+  } catch (err: any) {
+    console.warn(`[VIDEO-FRAME] 首帧分辨率处理失败，使用原图: ${err?.message}`)
+    return url
+  } finally {
+    await removeDir(tempDir)
+  }
 }
 
 /** 安全 JSON 提取 */
@@ -463,7 +515,7 @@ export async function generateOneVideoSegment(args: {
             const buf = await fsPromises.readFile(trimmedPath)
             const storageKey = `projects/${projectId}/segments/${segmentId}.mp4`
             await uploadFile(storageKey, buf, 'video/mp4')
-            const url = await getSignedFileUrl(storageKey, 3600)
+            const url = await getSignedFileUrl(storageKey)
             await removeDir(tempDir)
             return { storageKey, url, duration, isMock: false }
           } catch (err: any) {
@@ -480,7 +532,7 @@ export async function generateOneVideoSegment(args: {
       const buf = await fsPromises.readFile(segPath)
       const storageKey = `projects/${projectId}/segments/${segmentId}.mp4`
       await uploadFile(storageKey, buf, 'video/mp4')
-      const url = await getSignedFileUrl(storageKey, 3600)
+      const url = await getSignedFileUrl(storageKey)
       await removeDir(tempDir)
       return { storageKey, url, duration, isMock: true }
     }
@@ -488,10 +540,14 @@ export async function generateOneVideoSegment(args: {
     if (isDirect) {
       // Direct: 首尾帧视频生成（复用 OpenLux 直生视频）
       const modelId = videoModel || VIDEO_MODELS.direct.primary
+      const firstFrameForVideo = await ensureVideoFrameResolution(imageUrl, projectId)
+      const lastFrameForVideo = lastFrameUrlFromContext
+        ? await ensureVideoFrameResolution(lastFrameUrlFromContext, projectId)
+        : null
       try {
         const result = await generateDirectVideoOpenLux({
-          firstFrameUrl: imageUrl,
-          lastFrameUrl: lastFrameUrlFromContext,
+          firstFrameUrl: firstFrameForVideo,
+          lastFrameUrl: lastFrameForVideo,
           prompt: finalPrompt || 'A cinematic shot with smooth camera motion',
           model: modelId,
           aspectRatio: segmentAspectRatio || '16:9',
@@ -507,7 +563,7 @@ export async function generateOneVideoSegment(args: {
 
         const storageKey = `projects/${projectId}/segments/${segmentId}.mp4`
         await uploadFile(storageKey, buf, 'video/mp4')
-        const url = await getSignedFileUrl(storageKey, 3600)
+        const url = await getSignedFileUrl(storageKey)
         await removeDir(tempDir)
         return { storageKey, url, duration: 5, isMock: false }
       } catch (err: any) {
@@ -522,7 +578,7 @@ export async function generateOneVideoSegment(args: {
       const buf = await fsPromises.readFile(segPath)
       const storageKey = `projects/${projectId}/segments/${segmentId}.mp4`
       await uploadFile(storageKey, buf, 'video/mp4')
-      const url = await getSignedFileUrl(storageKey, 3600)
+      const url = await getSignedFileUrl(storageKey)
       await removeDir(tempDir)
       return { storageKey, url, duration, isMock: true }
     }
@@ -560,7 +616,7 @@ export async function composeVideo(args: {
       }
       const segPath = path.join(tempDir, `seg_${seg.id}.mp4`)
       if (seg.storageKey) {
-        const url = await getSignedFileUrl(seg.storageKey, 3600)
+        const url = await getSignedFileUrl(seg.storageKey)
         await downloadUrlToTemp(resolveUrlForDownload(url), segPath)
       } else if (seg.videoUrl) {
         await downloadUrlToTemp(resolveUrlForDownload(seg.videoUrl), segPath)
@@ -632,7 +688,7 @@ export async function composeVideo(args: {
     const finalBuf = await fsPromises.readFile(finalPath)
     const finalKey = `projects/${projectId}/${isTrailer ? 'trailer' : 'direct'}_composed_${Date.now()}.mp4`
     await uploadFile(finalKey, finalBuf, 'video/mp4')
-    const videoUrl = await getSignedFileUrl(finalKey, 3600)
+    const videoUrl = await getSignedFileUrl(finalKey)
 
     // 更新 step outputData 记录合成结果（不再写 Project 表）
     const step = await prisma.workflowStep.findUnique({

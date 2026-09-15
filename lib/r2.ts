@@ -148,7 +148,7 @@ export async function uploadFile(key: string, body: Buffer, contentType: string)
   }
 }
 
-export async function getSignedFileUrl(key: string, expiresIn: number = 3600) {
+export async function getSignedFileUrl(key: string, expiresIn: number = 3600 * 24 * 7) {
   if (isMockMode) {
     return buildPublicUrl(key)
   }
@@ -254,8 +254,8 @@ export async function uploadThumbnail(
 
   await uploadFile(originalKey, buffer, contentType)
 
-  const thumbnailUrl = needsThumbnail ? await getSignedFileUrl(thumbnailKey, 3600) : await getSignedFileUrl(originalKey, 3600)
-  const originalUrl = await getSignedFileUrl(originalKey, 3600)
+  const thumbnailUrl = needsThumbnail ? await getSignedFileUrl(thumbnailKey) : await getSignedFileUrl(originalKey)
+  const originalUrl = await getSignedFileUrl(originalKey)
 
   return { originalKey, thumbnailKey, thumbnailUrl, originalUrl }
 }
@@ -421,16 +421,16 @@ export async function getThumbnailUrl(originalKey: string): Promise<string> {
   const { getThumbnailKey, isThumbnailKey } = await import('./thumbnail')
 
   if (isThumbnailKey(originalKey)) {
-    return getSignedFileUrl(originalKey, 3600)
+    return getSignedFileUrl(originalKey)
   }
 
   const thumbnailKey = getThumbnailKey(originalKey)
 
   try {
-    const url = await getSignedFileUrl(thumbnailKey, 3600)
+    const url = await getSignedFileUrl(thumbnailKey)
     return url
   } catch {
-    return getSignedFileUrl(originalKey, 3600)
+    return getSignedFileUrl(originalKey)
   }
 }
 

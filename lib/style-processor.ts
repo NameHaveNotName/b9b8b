@@ -79,7 +79,7 @@ export async function processStyleGeneration(
             try {
               storageKey = `projects/${projectId}/styles/style_${opt.id}_${Date.now()}.png`
               await uploadFile(storageKey, buffer, 'image/png')
-              url = await getSignedFileUrl(storageKey, 3600)
+              url = await getSignedFileUrl(storageKey)
               console.log(
                 `[StyleProcessor] Image ${idx + 1} uploaded (model=${usedModel}, isMock=${!!isMock}): ${url.slice(0, 80)}...`
               )
