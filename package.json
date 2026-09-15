@@ -6,6 +6,7 @@
     "node": "24.x"
   },
   "scripts": {
+    "batch:video": "node scripts/batch-video.mjs",
     "dev": "next dev",
     "dev:lan": "node scripts/show-ip.js && next dev -p 3000 -H 0.0.0.0",
     "build": "next build",
