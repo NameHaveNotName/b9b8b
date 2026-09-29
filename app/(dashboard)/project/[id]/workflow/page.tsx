@@ -6222,12 +6222,6 @@ function KeyframesPanel({
     return <ProcessingBlock message="正在生成尾帧..." />
   }
 
-  // 生成全部尾帧（批量）
-  function handleGenerateAll() {
-    console.log('[KEYFRAMES-GENERATE-ALL] 开始生成全部尾帧')
-    onExecute('KEYFRAMES', { action: 'generate-images' })
-  }
-
   // 只要有 shots 数据就显示编辑器（不再要求 step.status === 'COMPLETED'）
   const hasShots = localShots.length > 0
 
@@ -6300,28 +6294,6 @@ function KeyframesPanel({
           </div>
 
           <div className="flex items-center gap-3">
-            {/* 生成全部尾帧按钮 */}
-            <div className="relative inline-block">
-              <button
-                onClick={handleGenerateAll}
-                disabled={isExecuting}
-                className="flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-stone-800 disabled:opacity-50"
-              >
-                {isExecuting ? (
-                  <>
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                    生成中...
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4" />
-                    生成全部尾帧
-                  </>
-                )}
-              </button>
-              <CostBadge cost={DEFAULT_GENERATE_COST} />
-            </div>
-
             {/* 视图切换 */}
             <div className="flex items-center rounded-lg border border-stone-200 bg-white p-1 shadow-sm">
               <button

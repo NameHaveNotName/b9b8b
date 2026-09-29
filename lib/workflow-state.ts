@@ -173,10 +173,16 @@ export function getAllStepDisplayStates(project: ProjectState) {
  * 用于在现有 WorkflowStep 数据之上计算 ProjectState
  */
 export function computeProjectStateFromSteps(
-  steps: Array<{ stepType: string; status: string }>
+  steps: Array<{ stepType: string; status: string; outputData?: unknown }>
 ): ProjectState {
   const isDone = (type: string) =>
     steps.some((s) => s.stepType === type && (s.status === 'COMPLETED' || s.status === 'SKIPPED'))
+  const storyboardStep = steps.find((step) => step.stepType === 'STORYBOARD')
+  const storyboardOutput = storyboardStep?.outputData && typeof storyboardStep.outputData === 'object'
+    ? storyboardStep.outputData as { shots?: Array<{ firstFrameUrl?: unknown }> }
+    : null
+  const hasStoryboardFirstFrame = Array.isArray(storyboardOutput?.shots)
+    && storyboardOutput.shots.some((shot) => typeof shot?.firstFrameUrl === 'string' && shot.firstFrameUrl.trim().length > 0)
 
   return {
     stepIdeaDone: isDone('IDEATION'),
@@ -185,7 +191,7 @@ export function computeProjectStateFromSteps(
     stepCharacterDone: isDone('CHARACTER'),
     stepConceptDone: isDone('CONCEPT'),
     stepStoryboardDone: isDone('STORYBOARD'),
-    stepStoryboardFirstframeDone: isDone('STORYBOARD'), // TODO: 区分普通完成 vs 首帧完成
+    stepStoryboardFirstframeDone: hasStoryboardFirstFrame,
     stepTrailerDone: isDone('TRAILER'),
     stepEndingDone: isDone('KEYFRAMES'),
     stepDirectDone: isDone('VIDEO_DIRECT'),

@@ -5,6 +5,15 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Film, ArrowLeft } from 'lucide-react'
 
+function resetErrorMessage(error: { message?: string; status?: number }) {
+  const message = error.message || ''
+  if (error.status === 429 || /rate limit|too many requests/i.test(message)) {
+    return '请求过于频繁，请稍后再试。为了保护账号，邮件服务会限制短时间内重复发送。'
+  }
+  if (/email.*not.*valid|invalid.*email/i.test(message)) return '邮箱格式不正确，请检查后重试。'
+  return '暂时无法发送重置邮件，请稍后重试。'
+}
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -23,12 +32,13 @@ export default function ForgotPasswordPage() {
     }
 
     const supabase = createClient()
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      // 该地址已加入 Supabase Redirect URLs；重置页负责交换 PKCE code。
       redirectTo: `${window.location.origin}/reset-password`,
     })
 
     if (resetError) {
-      setError(resetError.message)
+      setError(resetErrorMessage(resetError))
       setIsLoading(false)
       return
     }

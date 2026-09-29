@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { Film, Eye, EyeOff } from 'lucide-react'
+import { Film, Eye, EyeOff, LoaderCircle } from 'lucide-react'
+
+type RecoveryState = 'checking' | 'ready' | 'invalid'
 
 export default function ResetPasswordPage() {
   const router = useRouter()
@@ -13,19 +16,64 @@ export default function ResetPasswordPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [recoveryState, setRecoveryState] = useState<RecoveryState>('checking')
+  const recoveryCheckStarted = useRef(false)
 
   useEffect(() => {
+    if (recoveryCheckStarted.current) return
+    recoveryCheckStarted.current = true
     const supabase = createClient()
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        // 用户通过邮件链接进入，准备接收新密码
+    let active = true
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('code')
+    const tokenHash = params.get('token_hash')
+    const type = params.get('type')
+
+    const markReadyIfAuthenticated = async (exchangeError?: Error | null) => {
+      const { data } = await supabase.auth.getUser()
+      if (!active) return
+      if (data.user) {
+        window.history.replaceState({}, '', '/reset-password')
+        setRecoveryState('ready')
+      } else {
+        setError(exchangeError?.message ? '重置链接无效或已过期，请重新申请。' : '请从密码重置邮件中的链接进入此页面。')
+        setRecoveryState('invalid')
+      }
+    }
+
+    const establishRecoverySession = async () => {
+      if (code) {
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+        await markReadyIfAuthenticated(exchangeError)
+        return
+      }
+      if (tokenHash && type === 'recovery') {
+        const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
+        await markReadyIfAuthenticated(verifyError)
+        return
+      }
+      await markReadyIfAuthenticated()
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return
+      if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
+        setRecoveryState('ready')
       }
     })
-    return () => subscription.unsubscribe()
+    void establishRecoverySession()
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (recoveryState !== 'ready') {
+      setError('重置链接尚未通过验证，请重新打开邮件中的链接。')
+      return
+    }
     setIsLoading(true)
     setError('')
 
@@ -75,7 +123,19 @@ export default function ResetPasswordPage() {
           </div>
         )}
 
-        {success ? (
+        {recoveryState === 'checking' ? (
+          <div className="flex items-center justify-center gap-2 rounded-md bg-stone-50 p-4 text-sm text-stone-600">
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+            正在验证重置链接…
+          </div>
+        ) : recoveryState === 'invalid' ? (
+          <Link
+            href="/forgot-password"
+            className="flex w-full items-center justify-center rounded-md bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-stone-800"
+          >
+            重新申请重置邮件
+          </Link>
+        ) : success ? (
           <div className="space-y-4">
             <div className="rounded-md bg-green-50 p-3 text-sm text-green-700">
               密码重置成功！正在跳转到登录页面...

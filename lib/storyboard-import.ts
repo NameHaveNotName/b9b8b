@@ -27,25 +27,30 @@ export async function importStoryboardShots(options: ImportShotsOptions) {
   const { projectId, shots, mode, firstFrameMap } = options
 
   // 1. 转换分镜表格式
-  const convertedShots = shots.map((shot, index) => ({
-    shotId: shot.shotId || `shot_${String(index + 1).padStart(3, '0')}`,
-    actNumber: 1,
-    description: shot.description,
-    cameraMove: shot.cameraMove || '固定',
-    duration: shot.duration || 5,
-    narration: shot.narration || '',
-    characters: [],
-    sceneName: '',
-    visualDetail: shot.visualDetail || '',
-    transition: shot.transition || '',
-    // 如果有首帧图，附加到 shot 上
-    ...(firstFrameMap?.[shot.shotId]
-      ? {
-          firstFrameUrl: firstFrameMap[shot.shotId].url,
-          firstFrameAssetId: firstFrameMap[shot.shotId].assetId,
-        }
-      : {}),
-  }))
+  const convertedShots = shots.map((shot, index) => {
+    const shotId = shot.shotId || `shot_${String(index + 1).padStart(3, '0')}`
+    const firstFrame = firstFrameMap?.[shotId]
+    return {
+      shotId,
+      actNumber: 1,
+      description: shot.description,
+      cameraMove: shot.cameraMove || '固定',
+      duration: shot.duration || 5,
+      narration: shot.narration || '',
+      characters: [],
+      sceneName: '',
+      visualDetail: shot.visualDetail || '',
+      transition: shot.transition || '',
+      // 如果有首帧图，附加到 shot 上
+      ...(firstFrame
+        ? {
+            firstFrameUrl: firstFrame.url,
+            firstFrameAssetId: firstFrame.assetId,
+          }
+        : {}),
+    }
+  })
+  const hasFirstFrame = convertedShots.some((shot) => Boolean(shot.firstFrameUrl))
 
   // 2. 创建提示词
   const prompts = convertedShots.map((shot: any) => ({
@@ -143,6 +148,7 @@ export async function importStoryboardShots(options: ImportShotsOptions) {
     data: {
       frameworkSource: 'imported',
       rawIdea: shots.map(s => s.description).join('\n'),
+      stepStoryboardFirstframeDone: hasFirstFrame,
     },
   })
 

@@ -136,6 +136,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       ...(firstFrame ? { firstFrameUrl: firstFrame.url, firstFrameAssetId: firstFrame.assetId } : {}),
     }
     })
+    const hasFirstFrame = convertedShots.some((shot: any) => Boolean(shot.firstFrameUrl))
 
     // 2. 创建提示词（基础版本，后续可由 AI 优化）
     const prompts = convertedShots.map((shot: any, i: number) => ({
@@ -353,6 +354,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       data: {
         frameworkSource: 'imported',
         rawIdea: project.rawIdea || shots.map((s: StoryboardShot) => s.description).join('\n'),
+        stepStoryboardFirstframeDone: hasFirstFrame,
       },
     })
 
