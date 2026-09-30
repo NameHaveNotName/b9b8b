@@ -8,7 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
-import { startStep, completeStep, failStep } from '@/lib/workflow-executor'
+import { claimStepForGeneration, completeStep, failStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 import { runDeepening } from '@/lib/framework-deepen'
@@ -154,7 +154,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   try {
     // 重置步骤状态
-    await startStep(step.id)
+    if (!(await claimStepForGeneration(step.id))) {
+      return NextResponse.json(
+        { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+      )
+    }
 
     // 清空旧的 outputData 中的深化结果，但保留结构便于前端过渡
     const oldOutput = (step.outputData as any) || {}

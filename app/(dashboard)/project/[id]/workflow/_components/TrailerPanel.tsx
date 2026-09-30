@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import useSWR from 'swr'
-import { LoaderCircle, Play, RefreshCw, Film, Music } from 'lucide-react'
+import { LoaderCircle, Play, RefreshCw, Film, Music, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ASPECT_RATIO_OPTIONS } from '@/lib/models-config'
 import CostBadge from '@/components/CostBadge'
 import { GENERATION_COSTS } from '@/lib/points-config'
+
+/** 合成看门狗：超过这个时间仍拿不到 combinedVideoUrl 就认为合成失败 */
+const COMPOSE_WATCHDOG_MS = 8 * 60 * 1000
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -186,6 +189,9 @@ export default function TrailerPanel({
 
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null)
   const [isComposing, setIsComposing] = useState(false)
+  const [composeStartedAt, setComposeStartedAt] = useState<number | null>(null)
+  // 原实现所有失败只写 console.error，用户以为底层没反应就反复点
+  const [localError, setLocalError] = useState<string | null>(null)
   const [isGeneratingBgm, setIsGeneratingBgm] = useState(false)
   const [selectedAspectRatio, setSelectedAspectRatio] = useState(
     stepOutput.aspectRatio || defaultAspectRatio || '16:9'
@@ -222,6 +228,8 @@ export default function TrailerPanel({
       // BGM 会写入 step.outputData.musicUrl，mutate 刷新后 UI 自动更新
     } catch (e: any) {
       console.error('[BGM] 生成失败:', e)
+      setLocalError('音乐生成失败：' + (e?.message || '未知错误'))
+      ;(window as any).__showToast?.({ kind: 'error', message: '音乐生成失败：' + (e?.message || '未知错误') })
     } finally {
       setIsGeneratingBgm(false)
     }
@@ -275,6 +283,8 @@ export default function TrailerPanel({
 
   const handleCompose = () => {
     setIsComposing(true)
+    setComposeStartedAt(Date.now())
+    setLocalError(null)
     onExecute('TRAILER', { action: 'compose-video', aspectRatio: selectedAspectRatio })
   }
 
@@ -286,7 +296,26 @@ export default function TrailerPanel({
 
   const hasSegments = segments.length > 0
   const allCompleted = summary?.allCompleted || false
-  const isProcessing = combinedVideoStatus === 'processing' || isComposing
+  // isComposing 不会自身复位，合成失败时面板会永久卡在「拼接中」
+  const composeStuck = isComposing && !combinedVideoUrl && composeStartedAt !== null
+    && Date.now() - composeStartedAt > COMPOSE_WATCHDOG_MS
+  const isProcessing = combinedVideoStatus === 'processing' || (isComposing && !composeStuck)
+
+  useEffect(() => {
+    if (combinedVideoUrl) {
+      setIsComposing(false)
+      setComposeStartedAt(null)
+    }
+  }, [combinedVideoUrl])
+
+  useEffect(() => {
+    if (!composeStuck) return
+    console.warn('[TRAILER] 合成超时，解除本地锁定并提示重试')
+    setIsComposing(false)
+    setComposeStartedAt(null)
+    setLocalError('视频合成超时或失败，请重新点击「合成视频」重试')
+    ;(window as any).__showToast?.({ kind: 'error', message: '视频合成超时或失败，请重试' })
+  }, [composeStuck])
 
   if (combinedVideoUrl) {
     return (
@@ -339,13 +368,34 @@ export default function TrailerPanel({
     )
   }
 
+  const errorBanner = localError ? (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+      <span className="min-w-0 break-words">{localError}</span>
+      <button
+        onClick={() => setLocalError(null)}
+        className="shrink-0 rounded px-1 text-red-500 hover:text-red-700"
+        aria-label="关闭提示"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  ) : null
+
   if (isProcessing) {
-    return <ProcessingBlock message="视频合成中，请稍后..." />
+    return (
+      <div className="space-y-4">
+        <ProcessingBlock message="视频拼接中，请稍候..." />
+        <p className="text-center text-xs text-stone-500">
+          合成在后台进行，可以离开本页面；完成后回来刷新即可看到结果。
+        </p>
+      </div>
+    )
   }
 
   if (hasSegments) {
     return (
       <div className="flex flex-col h-[calc(100vh-8rem)]">
+        {errorBanner}
         {/* 上半部分：操作区 */}
         <div className="shrink-0 flex items-center justify-between pb-4">
           <div>

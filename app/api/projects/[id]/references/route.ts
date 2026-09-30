@@ -3,6 +3,8 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { uploadFile, getSignedFileUrl, deleteFile } from '@/lib/r2'
+import { safeSegment } from '@/lib/upload-safety'
+import { assertSsrfSafe, safeFetch } from '@/lib/ssrf-guard'
 
 const MAX_REFERENCES = 10
 const MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -75,7 +77,16 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         if (!url.startsWith('http')) url = 'https://' + url.replace(/^\/\//, '')
         sourceUrl = url
         console.log('[REFERENCES-POST] Downloading from URL:', url)
-        const resp = await fetch(url, { signal: AbortSignal.timeout(30000) })
+        // 必须走 SSRF 校验：url 完全由用户控制，不校验就能打到
+        // 169.254.169.254（云元数据）或内网服务
+        const ssrf = await assertSsrfSafe(url)
+        if (!ssrf.ok) {
+          return NextResponse.json(
+            { error: `Refused to fetch URL (${ssrf.reason})` },
+            { status: 400 }
+          )
+        }
+        const resp = await safeFetch(url, { signal: AbortSignal.timeout(30000) })
         if (!resp.ok) {
           const errorText = await resp.text().catch(() => '')
           return NextResponse.json({ error: `Failed to download image: ${resp.status} ${errorText.slice(0, 100)}` }, { status: 400 })
@@ -100,7 +111,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     }
 
     const ext = contentType.split('/')[1] || 'png'
-    const storageKey = `projects/${params.id}/references/${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const storageKey = `projects/${params.id}/references/${Date.now()}_${safeSegment(filename, 'reference')}`
     await uploadFile(storageKey, buffer, contentType)
     const url = await getSignedFileUrl(storageKey)
 

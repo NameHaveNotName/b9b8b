@@ -9,7 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown, assignModelNoFallback } from '@/lib/prompts'
-import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { createQueue } from '@/lib/queue'
 import { processStyleGeneration } from '@/lib/style-processor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
@@ -255,7 +255,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       })
     }
 
-    await startStep(step.id)
+    if (!(await claimStepForGeneration(step.id))) {
+      return NextResponse.json(
+        { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+      )
+    }
 
     // 构建 styleOptions 用于生图（携带 modelNo）
     const styleOptions = resolvedPrompts.map((p: any) => ({
@@ -275,8 +279,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         try {
           await styleQueue.add(
             'generate-style-images',
-            { stepId: step.id, projectId: params.id, styleOptions, aspectRatio, imageModel, operationId: getCurrentOperationId(), operationUserId: userId },
+            { stepId: step.id, projectId: params.id, styleOptions, aspectRatio, imageModel, operationId: getCurrentOperationId(), operationUserId: userId, billing: { billingSource: pointsCheck.billingSource, billingGroupId: pointsCheck.billingGroupId, unitCost: GENERATION_COSTS.STYLE_UNIFY } },
             {
+              // jobId 按 step 去重：attempts 重试 / 被 Vercel 杀掉后重投时不会并存
+              // 第二个任务，避免重复上传资产与重复扣费
+              jobId: `style:${step.id}`,
               attempts: 2,
               backoff: { type: 'exponential', delay: 3000 },
               removeOnComplete: 50,
@@ -296,7 +303,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           (async () => {
             console.log(`[STYLE-IMAGE] waitUntil 回调开始执行，stepId=${step.id}`)
             try {
-              await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel, userId)
+              await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel, userId, {
+                userId,
+                billingSource: pointsCheck.billingSource,
+                billingGroupId: pointsCheck.billingGroupId,
+                unitCost: GENERATION_COSTS.STYLE_UNIFY,
+              })
               console.log(`[STYLE-IMAGE] waitUntil 回调成功完成，stepId=${step.id}`)
             } catch (e: any) {
               // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
@@ -355,7 +367,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   if (!force && step.status === 'PROCESSING') {
-    return NextResponse.json({ success: true, message: '生成任务已在进行中', status: 'PROCESSING' })
+    return NextResponse.json({ success: true, message: '生成任务已在进行中，请等待当前任务完成', status: 'PROCESSING', alreadyRunning: true })
   }
 
   if (force) {
@@ -392,7 +404,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  await startStep(step.id)
+  if (!(await claimStepForGeneration(step.id))) {
+    return NextResponse.json(
+      { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+    )
+  }
 
   try {
     const framework = project.framework || (frameworkStep.outputData as any)
@@ -485,8 +501,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       try {
         await styleQueue.add(
           'generate-style-images',
-          { stepId: step.id, projectId: params.id, styleOptions, operationId: getCurrentOperationId(), operationUserId: userId },
+          { stepId: step.id, projectId: params.id, styleOptions, operationId: getCurrentOperationId(), operationUserId: userId, billing: { billingSource: pointsCheck.billingSource, billingGroupId: pointsCheck.billingGroupId, unitCost: GENERATION_COSTS.STYLE_UNIFY } },
           {
+            jobId: `style:${step.id}`,
             attempts: 2,
             backoff: { type: 'exponential', delay: 3000 },
             removeOnComplete: 50,
@@ -508,7 +525,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         (async () => {
           console.log(`[STYLE] waitUntil 回调开始执行（compat），stepId=${step.id}`)
           try {
-            await processStyleGeneration(step.id, params.id, styleOptions, aspectRatioCompat, undefined, userId)
+            await processStyleGeneration(step.id, params.id, styleOptions, aspectRatioCompat, undefined, userId, {
+              userId,
+              billingSource: pointsCheck.billingSource,
+              billingGroupId: pointsCheck.billingGroupId,
+              unitCost: GENERATION_COSTS.STYLE_UNIFY,
+            })
             console.log(`[STYLE] waitUntil 回调成功完成（compat），stepId=${step.id}`)
           } catch (e: any) {
             // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED

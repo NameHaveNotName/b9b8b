@@ -8,6 +8,7 @@ import {
   getMinimaxVoiceCatalogPrompt,
 } from '@/lib/api-clients/minimax-tts'
 import { isValidMinimaxVoiceId } from '@/lib/voice-config'
+import { safeFetch } from '@/lib/ssrf-guard'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 
 /** 从 storyboard Step 读取 shots */
@@ -318,7 +319,14 @@ async function downloadAndUploadAudio(
   projectId: string,
   segmentId: string
 ): Promise<{ storageKey: string; url: string }> {
-  const audioRes = await fetch(audioUrl)
+  const audioRes = await safeFetch(
+    audioUrl,
+    {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(60_000),
+    },
+    { maxRedirects: 3 }
+  )
   if (!audioRes.ok) {
     throw new Error(`下载 MiniMax 音频失败: ${audioRes.status}`)
   }
@@ -334,20 +342,31 @@ async function downloadAndUploadAudio(
  *
  * @param segmentId 配音片段 ID
  * @param voiceId 音色 ID
+ * @param createdById 创建者用户 ID
+ * @param projectId 归属项目 ID；传入时会校验片段确实属于该项目（防跨项目越权调用）
  * @returns 更新后的配音片段
  */
-export async function generateVoiceoverAudio(segmentId: string, voiceId?: string, createdById?: string): Promise<any> {
-  const segment = await prisma.voiceoverSegment.findUnique({
-    where: { id: segmentId },
+export async function generateVoiceoverAudio(
+  segmentId: string,
+  voiceId?: string,
+  createdById?: string,
+  projectId?: string
+): Promise<any> {
+  const segment = await prisma.voiceoverSegment.findFirst({
+    where: projectId ? { id: segmentId, projectId } : { id: segmentId },
   })
   if (!segment) throw new Error('配音片段不存在')
-  if (segment.status === 'generating') throw new Error('该配音片段正在生成中')
   if (segment.status === 'completed') throw new Error('该配音片段已生成')
 
-  await prisma.voiceoverSegment.update({
-    where: { id: segmentId },
+  // 条件更新抢占：并发请求只有一个能把 pending/failed 翻成 generating，
+  // 单纯的 status 预检 + 无条件 update 会让双击产生两次 TTS 与两次扣费
+  const claim = await prisma.voiceoverSegment.updateMany({
+    where: { id: segmentId, status: { in: ['pending', 'failed'] } },
     data: { status: 'generating', errorMessage: null },
   })
+  if (claim.count !== 1) {
+    throw new Error('该配音片段正在生成中')
+  }
 
   try {
     const candidateVoiceId = voiceId || segment.voiceId || MINIMAX_DEFAULT_VOICE_ID
@@ -412,14 +431,14 @@ export async function generateVoiceoverAudio(segmentId: string, voiceId?: string
  * @param projectId 项目 ID
  * @param stepName 步骤名
  * @param voiceId 音色 ID
- * @returns 生成的 segmentId 列表
+ * @returns 成功与失败的 segmentId 列表（失败列表用于退款）
  */
 export async function generateAllVoiceoverAudio(
   projectId: string,
   stepName: string,
   voiceId?: string,
   createdById?: string,
-): Promise<string[]> {
+): Promise<{ succeeded: string[]; failed: { segmentId: string; error: string }[] }> {
   await resetStaleGeneratingVoiceovers(projectId)
 
   const pendingSegments = await prisma.voiceoverSegment.findMany({
@@ -428,19 +447,24 @@ export async function generateAllVoiceoverAudio(
   })
 
   if (pendingSegments.length === 0) {
-    return []
+    return { succeeded: [], failed: [] }
   }
 
-  const segmentIds: string[] = []
+  const succeeded: string[] = []
+  const failed: { segmentId: string; error: string }[] = []
   for (const segment of pendingSegments) {
     try {
-      await generateVoiceoverAudio(segment.id, voiceId, createdById)
-      segmentIds.push(segment.id)
+      await generateVoiceoverAudio(segment.id, voiceId, createdById, projectId)
+      succeeded.push(segment.id)
     } catch (e: any) {
+      // 失败信息必须回传，调用方要按失败条数退款，否则用户为没生成的音频付费
       console.warn(`[VOICEOVER-AUDIO-BATCH] segment ${segment.id} 失败:`, e?.message)
-      // 继续生成下一个，不中断批量流程
+      failed.push({
+        segmentId: segment.id,
+        error: (e?.message || '生成失败').slice(0, 200),
+      })
     }
   }
 
-  return segmentIds
+  return { succeeded, failed }
 }

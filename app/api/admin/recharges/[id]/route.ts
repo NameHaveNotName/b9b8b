@@ -41,25 +41,37 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
 
     // 通过：给用户加点数
     if (status === 'approved') {
-      await prisma.$transaction([
-        prisma.rechargeOrder.update({
-          where: { id: params.id },
-          data: { status: 'approved', adminNote: adminNote || null },
-        }),
-        prisma.user.update({
-          where: { id: order.userId },
-          data: { points: { increment: order.points } },
-        }),
-      ])
+      // 条件更新做 CAS：并发审批时只有一个事务能把 pending 抢到 approved，
+      // 靠上面的 status 预检 + 无条件 update 会导致双击/多管理员重复加钱
+      const claimed = await prisma.rechargeOrder.updateMany({
+        where: { id: params.id, status: 'pending' },
+        data: { status: 'approved', adminNote: adminNote || null },
+      })
+      if (claimed.count !== 1) {
+        return NextResponse.json(
+          { error: 'VALID_002', message: '订单已处理，无法重复审核' },
+          { status: 400 }
+        )
+      }
+      await prisma.user.update({
+        where: { id: order.userId },
+        data: { points: { increment: order.points } },
+      })
       console.log(
         `[ADMIN-RECHARGE] 通过订单 ${params.id}, 用户 ${order.userId} +${order.points} 点`
       )
     } else {
       // 拒绝
-      await prisma.rechargeOrder.update({
-        where: { id: params.id },
+      const claimed = await prisma.rechargeOrder.updateMany({
+        where: { id: params.id, status: 'pending' },
         data: { status: 'rejected', adminNote: adminNote || null },
       })
+      if (claimed.count !== 1) {
+        return NextResponse.json(
+          { error: 'VALID_002', message: '订单已处理，无法重复审核' },
+          { status: 400 }
+        )
+      }
       console.log(`[ADMIN-RECHARGE] 拒绝订单 ${params.id}, 备注: ${adminNote}`)
     }
 

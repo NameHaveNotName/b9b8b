@@ -9,7 +9,8 @@ import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
-import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
+import { mergeStepOutputData } from '@/lib/workflow-executor'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
@@ -85,13 +86,6 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   try {
-    await prisma.asset.delete({ where: { id: assetId } })
-    console.log('[CHARACTER-REGENERATE] 旧 Asset 已删除:', assetId)
-  } catch (e: any) {
-    console.warn('[CHARACTER-REGENERATE] 删除旧 Asset 失败:', e?.message)
-  }
-
-  try {
     const refs = await getProjectReferences(params.id).catch(() => [])
     const userRefUrls = refs.filter(r => r.url).map(r => r.url)
 
@@ -105,6 +99,19 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       newModel,
       userRefUrls
     )
+
+    // 旧 Asset 必须等新图生成成功后再删：先删再生成的话，一次失败或 Serverless
+    // 被杀就会永久丢失用户原本的角色图，且不退款
+    try {
+      const deleted = await prisma.asset.deleteMany({
+        where: { id: assetId, projectId: params.id },
+      })
+      if (deleted.count > 0) {
+        console.log('[CHARACTER-REGENERATE] 旧 Asset 已删除:', assetId)
+      }
+    } catch (delErr: any) {
+      console.warn('[CHARACTER-REGENERATE] 删除旧 Asset 失败（保留旧图）:', delErr?.message)
+    }
 
     const newAsset = await prisma.asset.create({
       data: {
@@ -132,22 +139,43 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       },
     })
 
-    const newPortraits = [...portraits]
-    newPortraits[targetIndex] = {
-      ...targetPortrait,
-      assetId: newAsset.id,
-      url: result.url,
-      regeneratedAt: new Date().toISOString(),
-    }
-
-    await prisma.workflowStep.update({
-      where: { id: step.id },
-      data: { outputData: { ...outputData, portraits: newPortraits } },
+    // 乐观锁局部合并：portraits 来自 30~240s 生成前的快照，整块写回会覆盖
+    // 并发重生成的其他角色
+    const mergedOutput = await mergeStepOutputData(step.id, (fresh) => {
+      const freshPortraits: any[] = Array.isArray(fresh.portraits) ? fresh.portraits : portraits
+      const next = [...freshPortraits]
+      const idx = next.findIndex((p: any) => p.assetId === assetId)
+      const at = idx >= 0 ? idx : targetIndex
+      next[at] = {
+        ...next[at],
+        assetId: newAsset.id,
+        url: result.url,
+        regeneratedAt: new Date().toISOString(),
+      }
+      return { ...fresh, portraits: next }
     })
+    const updatedPortrait = (mergedOutput.portraits || [])[targetIndex]
+
+    // 真实模型全失败时回退到占位图，不按正常产出收费
+    if (result.isMock) {
+      await refundPointsAndLog(userId, pointsCheck.cost, {
+        projectId: params.id,
+        workflowStepId: step.id,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+        errorMessage: `AI 生图模型全部失败，已回退为占位预览图：${result.lastError || '未知原因'}`,
+      })
+      return NextResponse.json({
+        success: true,
+        portrait: updatedPortrait,
+        isMock: true,
+        warning: '当前生图服务不可用，返回的是占位预览图，点数未扣除，请稍后重试',
+      })
+    }
 
     await deductPointsAndLog(userId, pointsCheck.cost, 'regenerate', { projectId: params.id, workflowStepId: step.id, success: true })
     console.log('[CHARACTER-REGENERATE] 重新生成成功:', newAsset.id)
-    return NextResponse.json({ success: true, portrait: newPortraits[targetIndex] })
+    return NextResponse.json({ success: true, portrait: updatedPortrait })
   } catch (e: any) {
     await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     console.error('[CHARACTER-REGENERATE] 重新生成失败:', e?.message)

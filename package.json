@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint app components lib middleware.ts",
+    "test": "node --experimental-strip-types --no-warnings scripts/selftest.mts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

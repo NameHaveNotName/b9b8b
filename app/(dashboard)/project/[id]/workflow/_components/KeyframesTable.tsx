@@ -18,7 +18,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, Image as ImageIcon, Play, Loader2, Check, RefreshCw } from 'lucide-react'
+import { GripVertical, Image as ImageIcon, Play, Loader2, Check, RefreshCw, AlertCircle } from 'lucide-react'
 import ImageLightbox from '@/components/generation/ImageLightbox'
 import type { Shot } from '@/app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable'
 
@@ -34,6 +34,11 @@ interface KeyframesTableProps {
 const CAMERA_MOVES = ['推镜头', '拉镜头', '摇镜头', '移镜头', '跟镜头', '升镜头', '降镜头', '固定']
 const DURATIONS = [3, 5, 7]
 
+/** 尾帧生成状态在 shots 里必须用复合键区分：不同幕可能有同名 shotId */
+function keyOf(shotId: string, actNumber: number | null | undefined) {
+  return `${actNumber ?? 0}_${shotId}`
+}
+
 /* ============================================================
    可排序卡片（纵向卡片视图，按幕分组）
    ============================================================ */
@@ -45,6 +50,7 @@ function KeyframeCard({
   onUpdate,
   onGenerate,
   generatingShotId,
+  errorMessage,
   onActionChange,
 }: {
   shot: Shot
@@ -53,6 +59,7 @@ function KeyframeCard({
   onUpdate: (updated: Shot) => void
   onGenerate: (shotId: string, actNumber: number) => void
   generatingShotId: string | null
+  errorMessage?: string
   onActionChange?: (shotId: string, actionChange: string) => void
 }) {
   const {
@@ -111,9 +118,17 @@ function KeyframeCard({
           <span className="font-mono text-xs text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded">
             {shot.shotId}
           </span>
-          {shot.lastFrameUrl && (
+          {shot.lastFrameUrl && !errorMessage && (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
               <Check className="h-3 w-3" /> 尾帧已生成
+            </span>
+          )}
+          {errorMessage && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700"
+              title={errorMessage}
+            >
+              <AlertCircle className="h-3 w-3" /> 生成失败
             </span>
           )}
         </div>
@@ -328,6 +343,9 @@ export default function KeyframesTable({
   onActionChange,
 }: KeyframesTableProps) {
   const [generatingShotId, setGeneratingShotId] = useState<string | null>(null)
+  // 每个镜头的生成失败原因，key = `${actNumber}_${shotId}`。
+  // 失败后卡片上要有可见痕迹，否则刷新一次就分不清"失败过"和"没生成过"
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -383,9 +401,18 @@ export default function KeyframesTable({
       onShotsChange(next)
       await saveShots(next)
       console.log('[KEYFRAMES-GENERATE] 尾帧生成成功:', result.lastFrameUrl?.slice(0, 80))
+      setErrors((prev) => {
+        const next = { ...prev }
+        delete next[keyOf(shotId, actNumber)]
+        return next
+      })
     } catch (err: any) {
-      console.error('[KEYFRAMES-GENERATE] 尾帧生成失败:', err?.message || err)
-      alert('尾帧生成失败：' + (err?.message || '未知错误'))
+      const message = err?.message || '未知错误'
+      console.error('[KEYFRAMES-GENERATE] 尾帧生成失败:', message)
+      // 原实现用 alert() 阻塞弹窗，且卡片上没有任何失败痕迹，
+      // 刷新后无法区分「生成失败过」和「从来没生成过」
+      setErrors((prev) => ({ ...prev, [keyOf(shotId, actNumber)]: message }))
+      ;(window as any).__showToast?.({ kind: 'error', message: '尾帧生成失败：' + message })
     } finally {
       setGeneratingShotId(null)
     }
@@ -475,6 +502,7 @@ export default function KeyframesTable({
                       onUpdate={handleUpdateShot}
                       onGenerate={handleGenerateLastFrame}
                       generatingShotId={generatingShotId}
+                      errorMessage={errors[keyOf(shot.shotId, actNumber)]}
                       onActionChange={onActionChange}
                     />
                   ))}

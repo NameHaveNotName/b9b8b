@@ -114,7 +114,7 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
         {completedCount === 0 && (
           <div className="mb-6 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             <Sparkles className="h-4 w-4 shrink-0" />
-            项目已创建，点击"继续工作流"开始创作
+            项目已创建，点击 &ldquo;继续工作流&rdquo; 开始创作
           </div>
         )}
 

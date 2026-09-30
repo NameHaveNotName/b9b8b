@@ -8,29 +8,40 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { startStep, canExecuteStep } from '@/lib/workflow-executor'
+import { canExecuteStep } from '@/lib/workflow-executor'
+import { mergeStepOutputData } from '@/lib/workflow-executor'
+import { startHeartbeat } from '@/lib/generation-heartbeat'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { attachOperationResults, finalizeCurrentSupplierOperation, getCurrentOperationId } from '@/lib/supplier-observability'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
+import { refreshShotsUrls } from '@/lib/resolve-media-url'
 
 /** 获取 storyboard shots 和 keyframes */
 async function getStoryboardAndKeyframes(projectId: string) {
   const storyboardStep = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId, stepType: 'STORYBOARD' } },
   })
-  const shots = (storyboardStep?.outputData as any)?.shots || []
+  const rawShots = (storyboardStep?.outputData as any)?.shots || []
+  const { shots } = await refreshShotsUrls(rawShots)
 
   const keyframeStep = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId, stepType: 'KEYFRAMES' } },
   })
   const keyframesData = keyframeStep?.outputData as any || {}
-  const keyframes = keyframesData.keyframes || keyframesData.results || []
+  const rawKeyframes = keyframesData.keyframes || keyframesData.results || []
+  const { shots: keyframes } = await refreshShotsUrls(rawKeyframes)
 
   return { shots, keyframes }
 }
 
-/** 清理因上次服务器超时而卡在 generating 的片段 */
+/**
+ * 清理因上次服务器超时而卡在 generating 的片段
+ *
+ * 只有真正死掉的任务才会被清：活着的任务由 startHeartbeat 持续刷新 updatedAt，
+ * 不会满足 updatedAt < 阈值 的条件。阈值需明显大于单次生成最长耗时
+ * （视频轮询 300s + 下载 + 上传）。
+ */
 async function resetStaleGeneratingSegments(projectId: string, staleMinutes = 15) {
   const staleThreshold = new Date(Date.now() - staleMinutes * 60 * 1000)
   const result = await prisma.videoSegment.updateMany({
@@ -59,7 +70,11 @@ async function backgroundGenerateDirectSegment(
   videoModel?: string,
   aspectRatio?: string,
   createdById?: string,
-): Promise<{ success: boolean; resultId?: string; errorMessage?: string }> {
+): Promise<{ success: boolean; resultId?: string; errorMessage?: string; isMock?: boolean }> {
+  // 心跳让 updateAt 保持新鲜，避免长耗时任务被 resetStaleGeneratingSegments 误判为卡死
+  const stopHeartbeat = startHeartbeat(() =>
+    prisma.videoSegment.updateMany({ where: { id: segmentId }, data: { updatedAt: new Date() } })
+  )
   try {
     console.log(`[DIRECT-SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
     const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
@@ -103,7 +118,7 @@ async function backgroundGenerateDirectSegment(
     })
 
     console.log(`[DIRECT-SEGMENT-BG] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
-    return { success: true, resultId: asset.id }
+    return { success: true, resultId: asset.id, isMock: result.isMock }
   } catch (e: any) {
     console.error(`[DIRECT-SEGMENT-BG] 失败 segmentId=${segmentId}:`, e?.message)
     await prisma.videoSegment.update({
@@ -114,6 +129,8 @@ async function backgroundGenerateDirectSegment(
       },
     })
     return { success: false, errorMessage: (e?.message || '生成失败').slice(0, 500) }
+  } finally {
+    stopHeartbeat()
   }
 }
 
@@ -180,7 +197,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return NextResponse.json({ error: 'WORKFLOW_002' }, { status: 400 })
   }
 
-  let step = await prisma.workflowStep.findUnique({
+  const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'VIDEO_DIRECT' } }
   })
   if (!step) {
@@ -241,16 +258,13 @@ async function handleGenerateDirectPrompts(projectId: string, stepId: string, us
     const { generateSegmentPrompts } = await import('@/lib/video-segment-utils')
     const segments = await generateSegmentPrompts(projectId, 'VIDEO_DIRECT', shots, userId)
 
-    await prisma.workflowStep.update({
-      where: { id: stepId },
-      data: {
-        status: 'PENDING' as any,
-        outputData: {
-          ...((await prisma.workflowStep.findUnique({ where: { id: stepId } }))?.outputData as any || {}),
-          segmentPromptsGenerated: true,
-          segmentCount: segments.length,
-        },
-      },
+    await mergeStepOutputData(stepId, {
+      segmentPromptsGenerated: true,
+      segmentCount: segments.length,
+    })
+    await prisma.workflowStep.updateMany({
+      where: { id: stepId, status: { in: ['PENDING', 'FAILED', 'PROCESSING'] } },
+      data: { status: 'PENDING' as any },
     })
 
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
@@ -278,15 +292,15 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
     return NextResponse.json({ error: 'MISSING_SEGMENT_ID' }, { status: 400 })
   }
 
-  const segment = await prisma.videoSegment.findUnique({
-    where: { id: segmentId },
+  const segment = await prisma.videoSegment.findFirst({
+    where: { id: segmentId, projectId },
   })
-  if (!segment || segment.projectId !== projectId) {
+  if (!segment) {
     return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
   }
 
   if (segment.status === 'generating') {
-    return NextResponse.json({ success: true, message: '该片段正在生成中', status: 'generating' })
+    return NextResponse.json({ success: true, message: '该片段正在生成中，请等待当前任务完成', status: 'generating', alreadyRunning: true })
   }
   if (segment.status === 'completed') {
     return NextResponse.json({ success: true, message: '该片段已生成', status: 'completed' })
@@ -305,10 +319,15 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
   const kf = keyframes[segment.sequence] || keyframes.find((k: any) => k.shotId === segment.shotId)
   const lastFrameUrl = kf?.lastFrameUrl || null
 
-  await prisma.videoSegment.update({
-    where: { id: segmentId },
+  // 条件更新抢占：并发请求只有一个能把 pending/failed 翻成 generating。
+  // 仅靠上面的 status 预检 + 无条件 update，双击会产生两次并行供应商生成和两次扣费
+  const claim = await prisma.videoSegment.updateMany({
+    where: { id: segmentId, status: { in: ['pending', 'failed'] } },
     data: { status: 'generating', errorMessage: null },
   })
+  if (claim.count !== 1) {
+    return NextResponse.json({ success: true, message: '该片段正在生成中，请等待当前任务完成', status: 'generating', alreadyRunning: true })
+  }
 
   // 异步视频生成：先扣点，再启动后台任务
   await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, assetId: segmentId, success: true })
@@ -320,14 +339,18 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
       segment.duration || 5, body?.videoModel, defaultAspectRatio,
       userId,
     )
-    if (outcome.success) {
+    // isMock 表示真实模型全部失败后回落到了本地 Ken Burns 渲染，
+    // 不能按正常生成全额收费（与 BGM 的处理保持一致）
+    if (outcome.success && !outcome.isMock) {
       await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId, resultId: outcome.resultId })
     } else {
       await refundPointsAndLog(userId, pointsCheck.cost, {
         projectId, workflowStepId: stepId,
         billingSource: pointsCheck.billingSource,
         billingGroupId: pointsCheck.billingGroupId,
-        errorMessage: outcome.errorMessage,
+        errorMessage: outcome.isMock
+          ? 'AI 视频模型全部失败，已回退为本地占位视频，点数已退回'
+          : outcome.errorMessage,
       })
     }
   })())
@@ -365,7 +388,31 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+  // 必须在扣费之前原子抢占：先读 pending 集合再扣整批、再在后台循环里逐个标 generating，
+  // 两个并发的"全部生成"会读到同一批片段并各自扣一次费
+  const claim = await prisma.videoSegment.updateMany({
+    where: { id: { in: pendingSegments.map((s: any) => s.id) }, status: 'pending' },
+    data: { status: 'generating', errorMessage: null },
+  })
+  if (claim.count === 0) {
+    return NextResponse.json({
+      success: true,
+      message: resetCount > 0 ? `已清理 ${resetCount} 个超时片段，当前没有待生成片段` : '没有待生成的片段',
+      count: 0,
+      resetCount,
+    })
+  }
+
+  const claimedIds = new Set(
+    (await prisma.videoSegment.findMany({
+      where: { id: { in: pendingSegments.map((s: any) => s.id) }, status: 'generating' },
+      select: { id: true },
+    })).map((s: any) => s.id)
+  )
+  const segmentsToRun = pendingSegments.filter((s: any) => claimedIds.has(s.id))
+
+  const claimedCost = calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segmentsToRun.length)
+  await deductPointsAndLog(userId, claimedCost, 'generate', { projectId, workflowStepId: stepId, success: true })
 
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
   const defaultAspectRatio = await getProjectDefaultAspectRatio(projectId)
@@ -374,7 +421,8 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
   waitUntil((async () => {
     let succeeded = 0
     let failed = 0
-    for (const segment of pendingSegments) {
+    let mockCount = 0
+    for (const segment of segmentsToRun) {
       const shot = shots.find((s: any) => s.shotId === segment.shotId)
       const firstFrameUrl = shot?.firstFrameUrl || ''
       if (!firstFrameUrl) {
@@ -385,12 +433,6 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
         failed += 1
         continue
       }
-
-      // 逐段标记为生成中，避免服务器超时导致剩余片段全部卡 generating
-      await prisma.videoSegment.update({
-        where: { id: segment.id },
-        data: { status: 'generating', errorMessage: null },
-      })
 
       const kf = keyframes.find((k: any) => k.shotId === segment.shotId)
       const lastFrameUrl = kf?.lastFrameUrl || null
@@ -405,20 +447,27 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
         defaultAspectRatio,
         userId,
       )
-      if (outcome.success) {
+      if (outcome.success && !outcome.isMock) {
         succeeded += 1
         if (operationId && outcome.resultId) await attachOperationResults(operationId, outcome.resultId)
+      } else if (outcome.success) {
+        // 本地 Ken Burns 占位，不计费
+        mockCount += 1
       } else {
         failed += 1
       }
     }
-    if (failed > 0) {
-      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, failed), {
+    // failed 与 mockCount 都不产生有效成果，按单价退回
+    const unbilled = failed + mockCount
+    if (unbilled > 0) {
+      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, unbilled), {
         projectId, workflowStepId: stepId,
         billingSource: pointsCheck.billingSource,
         billingGroupId: pointsCheck.billingGroupId,
         finalStatus: succeeded > 0 ? 'PARTIAL' : 'FAILED',
-        errorMessage: `${failed}/${pendingSegments.length} 个视频片段生成失败，失败部分点数已退回`,
+        errorMessage: mockCount > 0
+          ? `${unbilled}/${segmentsToRun.length} 个视频片段未使用 AI 模型生成（失败或回退为本地占位），对应点数已退回`
+          : `${unbilled}/${segmentsToRun.length} 个视频片段生成失败，失败部分点数已退回`,
       })
     } else {
       await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId })
@@ -427,11 +476,11 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
 
   return NextResponse.json({
     success: true,
-    count: pendingSegments.length,
+    count: segmentsToRun.length,
     resetCount,
-    segmentIds: pendingSegments.map((s: any) => s.id),
+    segmentIds: segmentsToRun.map((s: any) => s.id),
     status: 'generating',
-    message: `已启动 ${pendingSegments.length} 个片段的批量生成${resetCount > 0 ? `（已清理 ${resetCount} 个超时片段）` : ''}`,
+    message: `已启动 ${segmentsToRun.length} 个片段的批量生成${resetCount > 0 ? `（已清理 ${resetCount} 个超时片段）` : ''}`,
   })
 }
 

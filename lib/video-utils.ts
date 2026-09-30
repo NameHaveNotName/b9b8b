@@ -131,6 +131,8 @@ function resolveFfmpegPath(): string {
 
   // 6. 尝试 require('ffmpeg-static') 的 CJS 导出（有时和 ESM import 不同）
   try {
+    // 运行时惰性加载：静态 import 会在模块加载时就解析二进制路径
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const cjsStatic = require('ffmpeg-static')
     console.log('[FFMPEG] require(ffmpeg-static)=', cjsStatic)
     if (cjsStatic && fsSync.existsSync(cjsStatic)) {
@@ -197,6 +199,7 @@ async function runFfmpeg(stage: string, cmd: string, maxBuffer = 64 * 1024 * 102
 }
 
 import { makeTempDir } from './temp-utils'
+import { safeFetch } from './ssrf-guard'
 export { makeTempDir }
 
 export async function ensureDir(dir: string): Promise<void> {
@@ -213,8 +216,7 @@ export async function removeDir(dir: string): Promise<void> {
 /**
  * 把远程 URL（http/https/data:）下载到 outputPath。
  * - 对 data:URL 自动解码 base64
- * - 对 http(s) 走 fetch
- * - 工作指令.txt（Round 14 修复三）：localhost/127.0.0.1 URL 不走 fetch，直接读文件
+ * - 对 http(s) 走带 SSRF 校验的 fetch
  */
 export async function downloadUrlToTemp(url: string, outputPath: string): Promise<string> {
   if (url.startsWith('data:')) {
@@ -225,22 +227,14 @@ export async function downloadUrlToTemp(url: string, outputPath: string): Promis
     return outputPath
   }
 
-  // 工作指令.txt（Round 14 修复三）：localhost URL 不走 fetch，直接读文件
-  if (url.includes('localhost') || url.includes('127.0.0.1')) {
-    let localPath: string
-    try {
-      const urlObj = new URL(url)
-      localPath = path.join(process.cwd(), 'public', urlObj.pathname)
-    } catch {
-      throw new Error(`downloadUrlToTemp: 无法解析本地 URL: ${url.slice(0, 120)}`)
-    }
-    console.log(`[DOWNLOAD] 本地直读: ${localPath}`)
-    const buf = await fs.readFile(localPath)
-    await fs.writeFile(outputPath, buf)
-    return outputPath
-  }
-
-  const res = await fetch(url)
+  // 曾经这里对 localhost/127.0.0.1 直接 path.join(cwd,'public',pathname) 读文件：
+  // 镜头首帧 URL 可由项目成员写入任意值，这条分支等于任意文件读取 + 上传到 R2。
+  // 现在统一走 SSRF 校验的出站请求。
+  const res = await safeFetch(
+    url,
+    { signal: AbortSignal.timeout(60_000) },
+    { maxRedirects: 3 }
+  )
   if (!res.ok) throw new Error(`downloadUrlToTemp: ${url.slice(0, 80)} → ${res.status}`)
   const buf = Buffer.from(await res.arrayBuffer())
   await fs.writeFile(outputPath, buf)

@@ -14,7 +14,8 @@ import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
-import { setCurrentOperationTarget } from '@/lib/supplier-observability'
+import { setCurrentOperationTarget, finalizeCurrentSupplierOperation } from '@/lib/supplier-observability'
+import { mergeStepOutputData } from '@/lib/workflow-executor'
 
 const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 
@@ -168,20 +169,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   console.log(`[STORYBOARD-REGENERATE] 重新生成分镜草图: shotId=${shotId}, actNumber=${targetActNumber}`)
   const generationKey = `${targetActNumber}_${shotId}`
   const markShotGeneration = async (next: Record<string, any>) => {
-    const latest = await prisma.workflowStep.findUnique({ where: { id: step.id } })
-    const latestOutput = ((latest?.outputData as any) || outputData) as any
-    await prisma.workflowStep.update({
-      where: { id: step.id },
-      data: {
-        outputData: {
-          ...latestOutput,
-          generatingShots: {
-            ...(latestOutput.generatingShots || {}),
-            ...next,
-          },
-        },
+    // 乐观锁局部合并：不能用请求开始时的 outputData 快照整块写回
+    return mergeStepOutputData(step.id, (latestOutput) => ({
+      ...latestOutput,
+      generatingShots: {
+        ...(latestOutput.generatingShots || {}),
+        ...next,
       },
-    })
+    }))
   }
 
   // 从 outputData.shotExtraRefs 读取持久化的"最高优先级参考"
@@ -463,6 +458,26 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         message: imgErr.message || '生成失败',
       },
     }).catch(() => {})
+    // 必须终结本次 OperationLog：否则账本永远停在 RUNNING，
+    // 同一 clientActionId 的重试会被 checkPoints 判为"已在处理中"并返回成功，
+    // 用户看到一个从未真正执行过的生成的成功提示
+    try {
+      await finalizeCurrentSupplierOperation({
+        status: 'FAILED',
+        projectId: params.id,
+        workflowStepId: step.id,
+        errorMessage: imgErr?.message || '生成失败',
+      })
+    } catch (finalizeErr: any) {
+      console.error('[STORYBOARD-REGENERATE] 终结 OperationLog 失败:', finalizeErr?.message)
+    }
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', {
+      projectId: params.id,
+      workflowStepId: step.id,
+      success: false,
+      errorMessage: imgErr?.message,
+      target: operationTarget,
+    })
     console.error('[STORYBOARD-REGENERATE] 生图失败:', imgErr?.message)
     return NextResponse.json({ error: 'API_001', message: imgErr.message }, { status: 500 })
   }
@@ -492,42 +507,52 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     }
   }
 
-  // 先获取旧 Asset 的 storageKey（用于删除文件）
+  // 先获取旧 Asset 的 storageKey（用于稍后删除文件）
   const oldAssetsToDelete = await prisma.asset.findMany({
     where: { id: { in: Array.from(oldAssetIdsToDelete) } },
   })
 
-  // 删除旧文件（storageKey 和 thumbnailKey）
-  for (const asset of oldAssetsToDelete) {
-    try {
-      // 删除原图
-      if (asset.storageKey) {
-        await deleteFile(asset.storageKey)
-        console.log(`[STORYBOARD-REGENERATE] 删除旧文件: ${asset.storageKey}`)
-      }
-      // 删除缩略图（如果存在）
-      const meta = (asset.metadata || {}) as any
-      if (meta.thumbnailKey) {
-        await deleteFile(meta.thumbnailKey)
-        console.log(`[STORYBOARD-REGENERATE] 删除旧缩略图: ${meta.thumbnailKey}`)
-      }
-    } catch (e: any) {
-      console.warn(`[STORYBOARD-REGENERATE] 删除旧文件失败:`, e?.message)
-    }
-  }
-
-  // 删除旧 Asset 数据库记录
-  for (const id of Array.from(oldAssetIdsToDelete)) {
-    try {
-      await prisma.asset.delete({ where: { id } })
-      console.log(`[STORYBOARD-REGENERATE] 删除旧 Asset: ${id}`)
-    } catch (e: any) {
-      console.warn(`[STORYBOARD-REGENERATE] 删除旧 Asset ${id} 失败:`, e?.message)
-    }
-  }
-
   const storageKey = `projects/${params.id}/storyboard/${targetActNumber}_${shotId}_${Date.now()}.png`
   const { thumbnailKey, thumbnailUrl, originalUrl } = await uploadThumbnail(storageKey, buffer, 'image/png')
+
+  // ⚠️ 旧文件与旧 Asset 记录都必须在「新图已成功上传」之后才删。
+  // 原实现先删文件再生成：一旦 generateImage 回退到 Mock 占位图、或请求中途被杀，
+  // 用户原本的首帧就永久消失了 —— 只剩一句 3 秒 toast。
+  // 现在顺序是：生成 → 上传 → 删旧 → 建新记录。
+  const isRealGeneration = !isMock
+
+  if (isRealGeneration) {
+    for (const asset of oldAssetsToDelete) {
+      try {
+        if (asset.storageKey) {
+          await deleteFile(asset.storageKey)
+          console.log(`[STORYBOARD-REGENERATE] 删除旧文件: ${asset.storageKey}`)
+        }
+        const meta = (asset.metadata || {}) as any
+        if (meta.thumbnailKey) {
+          await deleteFile(meta.thumbnailKey)
+          console.log(`[STORYBOARD-REGENERATE] 删除旧缩略图: ${meta.thumbnailKey}`)
+        }
+      } catch (e: any) {
+        console.warn(`[STORYBOARD-REGENERATE] 删除旧文件失败:`, e?.message)
+      }
+    }
+
+    for (const id of Array.from(oldAssetIdsToDelete)) {
+      try {
+        const deleted = await prisma.asset.deleteMany({ where: { id, projectId: params.id } })
+        if (deleted.count > 0) {
+          console.log(`[STORYBOARD-REGENERATE] 删除旧 Asset: ${id}`)
+        }
+      } catch (e: any) {
+        console.warn(`[STORYBOARD-REGENERATE] 删除旧 Asset ${id} 失败:`, e?.message)
+      }
+    }
+  } else {
+    console.warn(
+      `[STORYBOARD-REGENERATE] 生成返回 Mock 占位图，保留原图与旧 Asset（shotId=${shotId} act=${targetActNumber}）`
+    )
+  }
 
   const newAsset = await prisma.asset.create({
     data: {
@@ -561,47 +586,70 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     },
   })
 
-  const newShotAssets = shotAssets.filter((a: any) => !(a.shotId === shotId && sameActNumber(a.actNumber, targetActNumber)))
-  newShotAssets.push({ shotId, assetId: newAsset.id, url: originalUrl, actNumber: targetActNumber, thumbnailUrl })
+  // 乐观锁合并：shots / shotAssets 是 30~240s 生成前读到的快照，整块写回会覆盖
+  // 并发完成的其他镜头（表现为卡片永远卡在"生成中"）。以最新值为基底局部叠加。
+  const isTargetShot = (s: any) => s.shotId === shotId && sameActNumber(s.actNumber, targetActNumber)
 
-  // 调试：打印 shots 数组的内容，确认 targetIndex 找对了
-  console.log(`[STORYBOARD-REGENERATE] shots 数组现状（共 ${shots.length} 个）:`)
-  shots.forEach((s, i) => {
-    const matches = s.shotId === shotId && sameActNumber(s.actNumber, targetActNumber)
-    console.log(`  [${i}] shotId=${s.shotId} actNumber=${s.actNumber} firstFrameUrl前40=${(s.firstFrameUrl || '').slice(0, 40)} ${matches ? '← MATCH' : ''}`)
-  })
+  // Mock 占位图不是有效产出：不建 Asset、不写 shotAssets、不覆盖首帧。
+  // 否则资产表和贡献度统计会持续膨胀（这正是"某用户资产 300+"的来源之一）。
+  let effectiveUrl = originalUrl
+  let effectiveAssetId: string | null = newAsset.id
+  if (isMock) {
+    await prisma.asset.deleteMany({ where: { id: newAsset.id, projectId: params.id } }).catch(() => {})
+    await deleteFile(storageKey).catch(() => {})
+    if (thumbnailKey) await deleteFile(thumbnailKey).catch(() => {})
+    const kept = (await prisma.workflowStep.findUnique({ where: { id: step.id } }) as any)
+    const keptShot = ((kept?.outputData as any)?.shots || shots).find(isTargetShot)
+    effectiveUrl = keptShot?.firstFrameUrl || targetShot.firstFrameUrl || ''
+    effectiveAssetId = targetShot.firstFrameAssetId || null
+    console.log(`[STORYBOARD-REGENERATE] Mock 占位图已丢弃，沿用原首帧: ${effectiveUrl ? '有' : '无'}`)
+  } else {
+    await mergeStepOutputData(step.id, (fresh) => {
+      const freshShots: any[] = Array.isArray(fresh.shots) && fresh.shots.length > 0
+        ? fresh.shots
+        : shots
+      const freshShotAssets: any[] = Array.isArray(fresh.shotAssets)
+        ? fresh.shotAssets
+        : shotAssets
+      const generatingShots = { ...(fresh.generatingShots || {}) }
+      delete generatingShots[generationKey]
 
-  // 如果生成结果是 mock 且该 shot 已有真实首帧，不覆盖
-  const newShots = shots.map((s: any) => {
-    if (s.shotId === shotId && sameActNumber(s.actNumber, targetActNumber)) {
-      if (isMock && s.firstFrameUrl) {
-        console.log(`[STORYBOARD-REGENERATE] shot ${s.shotId} 生成返回 mock，保留原有首帧`)
-        return s
+      return {
+        ...fresh,
+        shots: freshShots.map((s: any) =>
+          isTargetShot(s) ? { ...s, firstFrameUrl: originalUrl, firstFrameStorageKey: storageKey } : s
+        ),
+        shotAssets: [
+          ...freshShotAssets.filter((a: any) => !isTargetShot(a)),
+          { shotId, assetId: newAsset.id, url: originalUrl, storageKey, actNumber: targetActNumber, thumbnailUrl },
+        ],
+        generatingShots,
       }
-      return { ...s, firstFrameUrl: originalUrl }
-    }
-    return s
+    })
+
+    console.log(`[STORYBOARD-REGENERATE] DB update 完成, outputData 已写入`)
+  }
+
+  // 无论成功还是 Mock，都要清掉 generatingShots 里的 processing 标记，
+  // 否则卡片会一直显示"正在生成"，直到 12 分钟后的 stale 兜底才翻转
+  await mergeStepOutputData(step.id, (fresh) => {
+    const generatingShots = { ...(fresh.generatingShots || {}) }
+    delete generatingShots[generationKey]
+    return { ...fresh, generatingShots }
   })
 
-  console.log(`[STORYBOARD-REGENERATE] 更新 shots[].firstFrameUrl: shotId=${shotId}, actNo=${actNo}, 找到匹配数=${newShots.filter((s: any) => s.shotId === shotId && sameActNumber(s.actNumber, targetActNumber)).length}, 新URL前80=${originalUrl.slice(0, 80)}`)
-  console.log(`[STORYBOARD-REGENERATE] 更新 shotAssets: 新增 ${newShotAssets.length} 条（原本 ${shotAssets.length} 条）`)
-
-  const nextGeneratingShots = { ...(outputData.generatingShots || {}) }
-  delete nextGeneratingShots[generationKey]
-
-  await prisma.workflowStep.update({
-    where: { id: step.id },
-    data: {
-      outputData: {
-        ...outputData,
-        shots: newShots,
-        shotAssets: newShotAssets,
-        generatingShots: nextGeneratingShots,
+  if (isMock) {
+    // 只更新镜头状态为失败，让用户看到明确反馈
+    await markShotGeneration({
+      [generationKey]: {
+        status: 'failed',
+        actNumber: targetActNumber,
+        shotId,
+        failedAt: new Date().toISOString(),
+        message: lastError || '生图服务暂不可用，原图已保留',
       },
-    },
-  })
-
-  console.log(`[STORYBOARD-REGENERATE] DB update 完成, outputData 已写入`)
+    }).catch(() => {})
+  }
 
   await prisma.project.update({
     where: { id: params.id },
@@ -616,18 +664,18 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     {
       projectId: params.id,
       workflowStepId: step.id,
-      assetId: newAsset.id,
+      assetId: effectiveAssetId || undefined,
       success: !isMockResult,
       errorMessage: isMockResult ? (lastError || '返回 Mock 图') : undefined,
       target: operationTarget,
     }
   )
 
-  console.log(`[STORYBOARD-REGENERATE] 重新生成${isMockResult ? '（Mock 兜底）' : '成功'}:`, newAsset.id)
+  console.log(`[STORYBOARD-REGENERATE] 重新生成${isMockResult ? '（Mock 兜底，保留原图）' : '成功'}:`, effectiveAssetId)
 
   return NextResponse.json({
     success: true,
-    asset: { shotId, assetId: newAsset.id, url: originalUrl, actNumber: targetActNumber, thumbnailUrl },
+    asset: { shotId, assetId: effectiveAssetId, url: effectiveUrl, actNumber: targetActNumber, thumbnailUrl: isMock ? null : thumbnailUrl },
     isMock: isMockResult,
     warning: isMockResult ? '当前模型繁忙或暂不可用，返回了占位预览图。建议切换其他模型后重新生成。' : undefined,
   })

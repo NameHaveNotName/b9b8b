@@ -43,14 +43,23 @@ export interface ExportStoryboardOptions {
 }
 
 const imageCache = new Map<string, ArrayBuffer>()
+const IMAGE_CACHE_MAX_ENTRIES = 100
 
 async function fetchImageBuffer(url: string): Promise<ArrayBuffer> {
   const cached = imageCache.get(url)
   if (cached) return cached
 
-  const response = await fetch(url)
+  // 浏览器端导出：fetch 由浏览器发起并受同源策略约束，不存在服务端 SSRF 风险，
+  // 因此不能引入仅服务端可用的 ssrf-guard（会把 node 内置模块打进客户端包）
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
   if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
   const buffer = await response.arrayBuffer()
+
+  // 导出一次会拉几十张图，无上限的 Map 会把整个报告的字节都留在内存里
+  if (imageCache.size >= IMAGE_CACHE_MAX_ENTRIES) {
+    const oldest = imageCache.keys().next().value
+    if (oldest !== undefined) imageCache.delete(oldest)
+  }
   imageCache.set(url, buffer)
   return buffer
 }

@@ -10,7 +10,7 @@ import { generateImage } from '@/lib/api-clients/openlux'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { uploadFile, uploadThumbnail, getSignedFileUrl, deleteFile } from '@/lib/r2'
-import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { claimStepForGeneration, completeStep, failStep, canExecuteStep, mergeStepOutputData } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import sharp from 'sharp'
 import { IMAGE_MODELS } from '@/lib/models-config'
@@ -18,6 +18,7 @@ import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { setCurrentOperationTarget } from '@/lib/supplier-observability'
+import { refreshShotsUrls } from '@/lib/resolve-media-url'
 
 const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 const STORYBOARD_MIN_TOTAL_SHOTS = 20
@@ -44,7 +45,7 @@ function distributeStoryboardShotBudget(acts: any[]): number[] {
 
   const minimumPerAct = 1
   const weightsTotal = rawTotal || raw.length
-  let allocated = raw.map((value) => Math.max(minimumPerAct, Math.floor((value / weightsTotal) * targetTotal)))
+  const allocated = raw.map((value) => Math.max(minimumPerAct, Math.floor((value / weightsTotal) * targetTotal)))
   let currentTotal = allocated.reduce((sum, value) => sum + value, 0)
 
   const order = raw
@@ -393,7 +394,11 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       })
     }
 
-    await startStep(step.id)
+    if (!(await claimStepForGeneration(step.id))) {
+      return NextResponse.json(
+        { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+      )
+    }
 
     try {
       // 比例映射为 SVG 尺寸
@@ -464,8 +469,13 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
             metadata: { shotId: promptItem.shotId, type: 'storyboard', characters: promptItem.characters, duration: promptItem.duration, actNumber: promptItem.actNumber, aspectRatio, thumbnailKey, thumbnailUrl },
           }
         })
-        shotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url: originalUrl, actNumber: promptItem.actNumber, thumbnailUrl })
-      shotsWithFirstFrame.push({ ...shot, firstFrameUrl: shot.firstFrameUrl || originalUrl, thumbnailUrl: shot.thumbnailUrl || thumbnailUrl })
+        shotAssets.push({ shotId: promptItem.shotId, assetId: asset.id, url: originalUrl, storageKey, actNumber: promptItem.actNumber, thumbnailUrl })
+      shotsWithFirstFrame.push({
+        ...shot,
+        firstFrameUrl: shot.firstFrameUrl || originalUrl,
+        firstFrameStorageKey: shot.firstFrameStorageKey || storageKey,
+        thumbnailUrl: shot.thumbnailUrl || thumbnailUrl,
+      })
       }
 
       // 从 project.framework 读取 acts 用于动态 actsSummary
@@ -567,20 +577,15 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
     let activeShotId: string | undefined = shotId
     const markShotGeneration = async (next: Record<string, any>) => {
-      const latest = await prisma.workflowStep.findUnique({ where: { id: step.id } })
-      const latestOutput = ((latest?.outputData as any) || existingOutput) as any
-      await prisma.workflowStep.update({
-        where: { id: step.id },
-        data: {
-          outputData: {
-            ...latestOutput,
-            generatingShots: {
-              ...(latestOutput.generatingShots || {}),
-              ...next,
-            },
-          },
+      // 乐观锁局部合并：不能用请求开始时的 existingOutput 快照整块写回，
+      // 并发生成不同镜头时会互相覆盖 generatingShots / shots
+      return mergeStepOutputData(step.id, (latestOutput) => ({
+        ...latestOutput,
+        generatingShots: {
+          ...(latestOutput.generatingShots || {}),
+          ...next,
         },
-      })
+      }))
     }
 
     try {
@@ -956,11 +961,7 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
       })
 
       // 合并 shotAssets 并回写对应 shot 的 firstFrameUrl
-      const newShotAsset = { shotId: shotPrompt.shotId, assetId: asset.id, url: originalUrl, actNumber, thumbnailUrl }
-      const mergedShotAssets = [
-        ...cleanedShotAssets.filter((s: any) => !(s.shotId === shotPrompt.shotId && s.actNumber === actNumber)),
-        newShotAsset,
-      ]
+      const newShotAsset = { shotId: shotPrompt.shotId, assetId: asset.id, url: originalUrl, storageKey, actNumber, thumbnailUrl }
       // 如果生成结果是 mock 且该 shot 已有真实首帧（如从 xlsx 导入），不覆盖
       const mergedShots = allShots.map((s: any) => {
         if (s.shotId === shotPrompt.shotId && s.actNumber === actNumber) {
@@ -968,38 +969,65 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
             console.log(`[STORYBOARD] shot ${s.shotId} 生成返回 mock，保留原有首帧`)
             return s
           }
-          return { ...s, firstFrameUrl: originalUrl, thumbnailUrl }
+          return { ...s, firstFrameUrl: originalUrl, firstFrameStorageKey: storageKey, thumbnailUrl }
         }
         return s
       })
 
-      const processedCount = mergedShotAssets.filter((s: any) => s.actNumber === actNumber && actShotIds.has(s.shotId)).length
-      const remainingCount = actPrompts.length - processedCount
+      const processedCount = cleanedShotAssets
+        .filter((s: any) => s.actNumber === actNumber && actShotIds.has(s.shotId)).length + 1
+      const remainingCount = Math.max(0, actPrompts.length - processedCount)
 
-      const nextOutput = {
-        ...existingOutput,
-        prompts,
-        shots: mergedShots,
-        shotAssets: mergedShotAssets,
-        shotPrompts: currentShotPrompts,
-        aspectRatio,
-        imageModel: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
-        generatingShots: {
-          ...(existingOutput.generatingShots || {}),
-          [generationKey]: undefined,
-        },
+      // 乐观锁合并：allShots / cleanedShotAssets 是 30~240s 生成前读到的快照，
+      // 整块写回会覆盖并发完成的其他镜头结果。这里以最新值为基底，
+      // 只把本镜头的新首帧与新 asset 叠上去。
+      const targetShot: any = mergedShots.find(
+        (s: any) => s.shotId === shotPrompt.shotId && s.actNumber === actNumber
+      )
+      const keepOriginalFirstFrame = !!(isMock && targetShot && !targetShot.firstFrameUrl)
+
+      const mergedShotsFrom = (fresh: Record<string, any>) => {
+        const freshShots: any[] = Array.isArray(fresh.shots) && fresh.shots.length > 0
+          ? fresh.shots
+          : allShots
+        return freshShots.map((s: any) => {
+          if (s.shotId === shotPrompt.shotId && s.actNumber === actNumber) {
+            if (keepOriginalFirstFrame) return s
+            return { ...s, firstFrameUrl: originalUrl, firstFrameStorageKey: storageKey, thumbnailUrl }
+          }
+          return s
+        })
       }
-      Object.keys(nextOutput.generatingShots || {}).forEach((key) => {
-        if (nextOutput.generatingShots[key] === undefined) delete nextOutput.generatingShots[key]
+
+      await mergeStepOutputData(step.id, (fresh) => {
+        const generatingShots = { ...(fresh.generatingShots || {}) }
+        delete generatingShots[generationKey]
+        const freshShotAssets: any[] = Array.isArray(fresh.shotAssets) ? fresh.shotAssets : cleanedShotAssets
+        return {
+          ...fresh,
+          prompts,
+          shots: mergedShotsFrom(fresh),
+          shotAssets: [
+            ...freshShotAssets.filter(
+              (s: any) => !(s.shotId === shotPrompt.shotId && s.actNumber === actNumber)
+            ),
+            newShotAsset,
+          ],
+          shotPrompts: currentShotPrompts,
+          aspectRatio,
+          imageModel: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
+          generatingShots,
+        }
       })
 
-      await prisma.workflowStep.update({
-        where: { id: step.id },
-        data: {
-          status: remainingCount === 0 && step.status === 'PENDING' ? 'COMPLETED' as any : step.status,
-          outputData: nextOutput,
-        },
-      })
+      // 状态单独按条件更新：不能用请求开始时的 step.status 快照写回，
+      // 否则会把其他并发流程刚设的 PROCESSING 覆盖成旧状态
+      if (remainingCount === 0) {
+        await prisma.workflowStep.updateMany({
+          where: { id: step.id, status: 'PENDING' },
+          data: { status: 'COMPLETED' as any, completedAt: new Date() },
+        })
+      }
 
       // 只要生成过任一真实首帧，就解锁尾帧/直生视频步骤
       await prisma.project.update({
@@ -1007,11 +1035,12 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
         data: { stepStoryboardFirstframeDone: true },
       })
 
-      await deductPointsAndLog(userId, pointsCheck.cost, 'generate', {
+      await deductPointsAndLog(userId, pointsCheck.cost, isMock ? 'error' : 'generate', {
         projectId: params.id,
         workflowStepId: step.id,
         assetId: asset.id,
-        success: true,
+        success: !isMock,
+        errorMessage: isMock ? `AI 生图模型全部失败，已回退为占位预览图：${lastError || '未知原因'}` : undefined,
         target: operationTarget,
       })
 
@@ -1076,7 +1105,11 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  await startStep(step.id)
+  if (!(await claimStepForGeneration(step.id))) {
+    return NextResponse.json(
+      { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+    )
+  }
 
   try {
     const framework = project.framework as any
@@ -1158,8 +1191,13 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
           metadata: { shotId: shot.shotId, type: 'storyboard', characters: shot.characters, duration: shot.duration, actNumber: shot.actNumber, thumbnailKey, thumbnailUrl },
         }
       })
-      shotAssets.push({ shotId: shot.shotId, assetId: asset.id, url: originalUrl, actNumber: shot.actNumber, thumbnailUrl })
-      shotsWithFirstFrame.push({ ...shot, firstFrameUrl: shot.firstFrameUrl || originalUrl, thumbnailUrl: shot.thumbnailUrl || thumbnailUrl })
+      shotAssets.push({ shotId: shot.shotId, assetId: asset.id, url: originalUrl, storageKey, actNumber: shot.actNumber, thumbnailUrl })
+      shotsWithFirstFrame.push({
+        ...shot,
+        firstFrameUrl: shot.firstFrameUrl || originalUrl,
+        firstFrameStorageKey: shot.firstFrameStorageKey || storageKey,
+        thumbnailUrl: shot.thumbnailUrl || thumbnailUrl,
+      })
     }
 
     const outputData = {
@@ -1200,7 +1238,13 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
     include: { resultAssets: true }
   })
   if (!step) return NextResponse.json({ status: 'not_found' })
-  return NextResponse.json({ status: step.status, outputData: step.outputData, assets: step.resultAssets })
+  const outputData = (step.outputData as any) || {}
+  const refreshed = await refreshShotsUrls(Array.isArray(outputData.shots) ? outputData.shots : [])
+  return NextResponse.json({
+    status: step.status,
+    outputData: { ...outputData, shots: refreshed.shots },
+    assets: step.resultAssets,
+  })
 }
 
 export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {

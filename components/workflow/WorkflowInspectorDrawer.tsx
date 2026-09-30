@@ -55,7 +55,7 @@ interface WorkflowInspectorDrawerProps {
   onViewChange: (view: InspectorView) => void
   // Generation confirm
   confirmData?: GenerationConfirmData | null
-  onConfirmGenerate?: (data: GenerationConfirmData) => void
+  onConfirmGenerate?: (data: GenerationConfirmData) => void | Promise<void>
   onSaveDraft?: (data: GenerationConfirmData) => void
   // Result feedback
   feedbackData?: ResultFeedbackData | null
@@ -214,13 +214,13 @@ function TaskQueueView({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 pb-2 border-b border-stone-100">
-        <Clock className="h-4 w-4 text-stone-400" />
+        <Clock className="h-4 w-4 text-stone-500" />
         <span className="text-sm font-medium text-stone-700">任务队列</span>
-        <span className="ml-auto text-xs text-stone-400">{tasks.length} 个任务</span>
+        <span className="ml-auto text-xs text-stone-500">{tasks.length} 个任务</span>
       </div>
 
       {tasks.length === 0 && (
-        <div className="py-8 text-center text-sm text-stone-400">
+        <div className="py-8 text-center text-sm text-stone-500">
           暂无待处理任务
         </div>
       )}
@@ -239,11 +239,11 @@ function TaskQueueView({
               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${TASK_CATEGORY_COLORS[cat].replace('bg-', 'text-').replace('-50', '-700')}`}>
                 {TASK_CATEGORY_LABELS[cat]}
               </span>
-              <span className="text-xs text-stone-400">{catTasks.length} 个</span>
+              <span className="text-xs text-stone-500">{catTasks.length} 个</span>
               {collapsed ? (
-                <ChevronRight className="ml-auto h-3 w-3 text-stone-400" />
+                <ChevronRight className="ml-auto h-3 w-3 text-stone-500" />
               ) : (
-                <ChevronRight className="ml-auto h-3 w-3 text-stone-400 rotate-90" />
+                <ChevronRight className="ml-auto h-3 w-3 text-stone-500 rotate-90" />
               )}
             </button>
 
@@ -355,16 +355,23 @@ function GenerationConfirmView({
   onClose,
 }: {
   data: GenerationConfirmData
-  onConfirm: (data: GenerationConfirmData) => void
+  onConfirm: (data: GenerationConfirmData) => void | Promise<void>
   onSaveDraft?: (data: GenerationConfirmData) => void
   onClose: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
 
+  // onConfirm 现在是 async（要等请求发出才关抽屉），
+  // 所以这里必须 await 到它结束，confirming 状态才有意义。
+  // 原实现 onConfirm 是同步函数，`await undefined` 立即 resolve，
+  // "生成中…" 的 spinner 闪现 0 帧就消失。
   async function handleConfirm() {
+    if (confirming) return
     setConfirming(true)
     try {
       await onConfirm(data)
+    } catch (err: any) {
+      console.error('[GENERATION-CONFIRM] 确认执行失败:', err)
     } finally {
       setConfirming(false)
     }
@@ -374,7 +381,7 @@ function GenerationConfirmView({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2 pb-2 border-b border-stone-100">
-        <FileText className="h-4 w-4 text-stone-400" />
+        <FileText className="h-4 w-4 text-stone-500" />
         <span className="text-sm font-medium text-stone-700">生成前确认</span>
         <span className="ml-auto rounded bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
           {STEP_LABELS[data.stepType] || data.stepType}
@@ -414,22 +421,22 @@ function GenerationConfirmView({
       {/* Parameters grid */}
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-lg border border-stone-200 bg-white p-3">
-          <p className="text-[10px] text-stone-400 mb-0.5">模型</p>
+          <p className="text-[10px] text-stone-600 mb-0.5">模型</p>
           <p className="text-sm font-medium text-stone-700">{data.model || '默认'}</p>
         </div>
         <div className="rounded-lg border border-stone-200 bg-white p-3">
-          <p className="text-[10px] text-stone-400 mb-0.5">画幅比例</p>
+          <p className="text-[10px] text-stone-600 mb-0.5">画幅比例</p>
           <p className="text-sm font-medium text-stone-700">{data.aspectRatio}</p>
         </div>
         {data.duration && (
           <div className="rounded-lg border border-stone-200 bg-white p-3">
-            <p className="text-[10px] text-stone-400 mb-0.5">片段时长</p>
+            <p className="text-[10px] text-stone-600 mb-0.5">片段时长</p>
             <p className="text-sm font-medium text-stone-700">{data.duration}s</p>
           </div>
         )}
         {data.bgmStrategy && (
           <div className="rounded-lg border border-stone-200 bg-white p-3">
-            <p className="text-[10px] text-stone-400 mb-0.5">BGM 策略</p>
+            <p className="text-[10px] text-stone-600 mb-0.5">BGM 策略</p>
             <p className="text-sm font-medium text-stone-700">{data.bgmStrategy}</p>
           </div>
         )}
@@ -455,7 +462,7 @@ function GenerationConfirmView({
 
       {/* Warning */}
       <div className="flex items-start gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5">
-        <Info className="h-4 w-4 shrink-0 text-stone-400 mt-0.5" />
+        <Info className="h-4 w-4 shrink-0 text-stone-500 mt-0.5" />
         <p className="text-xs text-stone-500">
           生成操作需要确认，不会自动重试。请确保参数无误后再点击「确认生成」。
         </p>
@@ -482,7 +489,7 @@ function GenerationConfirmView({
         <button
           onClick={handleConfirm}
           disabled={confirming}
-          className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg bg-amber-700 px-5 py-2 text-sm font-medium text-white transition hover:bg-amber-800 disabled:opacity-50"
         >
           {confirming ? (
             <><Loader2 className="h-4 w-4 animate-spin" /> 生成中...</>
@@ -553,7 +560,7 @@ function ResultFeedbackView({
                   stage.status === 'completed' ? 'bg-green-100 text-green-600' :
                   stage.status === 'processing' ? 'bg-blue-100 text-blue-600' :
                   stage.status === 'failed' ? 'bg-red-100 text-red-600' :
-                  'bg-stone-100 text-stone-400'
+                  'bg-stone-100 text-stone-500'
                 }`}>
                   {stage.status === 'completed' ? (
                     <CheckCircle2 className="h-3.5 w-3.5" />
@@ -596,7 +603,7 @@ function ResultFeedbackView({
       {partialSuccess && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
           <p className="text-sm font-medium text-amber-700">部分成功</p>
-          <p className="mt-1 text-xs text-amber-600">
+          <p className="mt-1 text-xs text-amber-800">
             部分内容生成成功，但有内容未能完成。
           </p>
         </div>
@@ -626,7 +633,7 @@ function ResultFeedbackView({
       {/* Retry cost info */}
       {retryWillConsume前置 && (
         <div className="flex items-start gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5">
-          <Info className="h-4 w-4 shrink-0 text-stone-400 mt-0.5" />
+          <Info className="h-4 w-4 shrink-0 text-stone-500 mt-0.5" />
           <p className="text-xs text-stone-500">
             重试会重新消耗前置已生成的资产，请确认后再操作。
           </p>
@@ -653,7 +660,7 @@ function ResultFeedbackView({
         </button>
         <button
           onClick={() => onRetry(step)}
-          className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-amber-700"
+          className="flex items-center gap-1.5 rounded-lg bg-amber-700 px-5 py-2 text-sm font-medium text-white transition hover:bg-amber-800"
         >
           <RotateCcw className="h-4 w-4" />
           重试
@@ -723,9 +730,20 @@ function RetryEditView({
           value={promptOverride}
           onChange={(event) => setPromptOverride(event.target.value)}
           rows={6}
+          placeholder="描述你想要的画面，例如：夜晚霓虹街道，人物背影，长焦"
           className="mt-1.5 w-full rounded-lg border border-stone-200 p-2 text-xs text-stone-700 outline-none focus:border-amber-400"
         />
       </label>
+
+      {/* 按钮 disabled 时必须说明原因。
+          原实现在 basePrompt 为空（导入分镜的项目就是这种情况）时
+          按钮恒灰、无任何说明，用户只能理解成"点了没反应"。 */}
+      {!promptOverride.trim() && (
+        <p className="rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
+          请先填写提示词。该镜头没有可用的历史提示词（可能来自分镜导入），
+          需要你描述一次才能重新生成。
+        </p>
+      )}
 
       {data.baseRefs.length > 0 && (
         <div>
@@ -775,7 +793,7 @@ function RetryEditView({
         <button
           disabled={Boolean(submitting) || !promptOverride.trim()}
           onClick={() => submit('regenerate')}
-          className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-lg bg-amber-700 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
           {submitting === 'regenerate' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
           {submitting === 'regenerate' ? '提交中' : '重新生成'}
@@ -853,12 +871,12 @@ export default function WorkflowInspectorDrawer({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-stone-100 px-4 py-3">
         <div className="flex items-center gap-2">
-          <LayoutGrid className="h-4 w-4 text-amber-600" />
+          <LayoutGrid className="h-4 w-4 text-amber-700" />
           <span className="text-sm font-semibold text-stone-800">副工作台</span>
         </div>
         <button
           onClick={onClose}
-          className="rounded p-1 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
+          className="rounded p-1 text-stone-500 transition hover:bg-stone-100 hover:text-stone-600"
         >
           <X className="h-4 w-4" />
         </button>
@@ -872,7 +890,7 @@ export default function WorkflowInspectorDrawer({
             onClick={() => { setLocalView(tab.id); onViewChange(tab.id) }}
             className={`flex-1 px-3 py-2 text-xs font-medium transition ${
               localView === tab.id
-                ? 'border-b-2 border-amber-500 text-amber-600'
+                ? 'border-b-2 border-amber-600 text-amber-800'
                 : 'text-stone-500 hover:text-stone-700'
             }`}
           >
@@ -905,7 +923,7 @@ export default function WorkflowInspectorDrawer({
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <FileText className="h-10 w-10 text-stone-300" />
             <p className="mt-3 text-sm text-stone-500">暂无生成确认信息</p>
-            <p className="mt-1 text-xs text-stone-400">点击资产卡片的「参数」按钮查看</p>
+            <p className="mt-1 text-xs text-stone-500">点击资产卡片的「参数」按钮查看</p>
           </div>
         )}
 
@@ -922,7 +940,7 @@ export default function WorkflowInspectorDrawer({
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Info className="h-10 w-10 text-stone-300" />
             <p className="mt-3 text-sm text-stone-500">暂无生成结果反馈</p>
-            <p className="mt-1 text-xs text-stone-400">点击任务面板的「详情」查看</p>
+            <p className="mt-1 text-xs text-stone-500">点击任务面板的「详情」查看</p>
           </div>
         )}
 

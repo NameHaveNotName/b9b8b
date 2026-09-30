@@ -295,6 +295,9 @@ model WorkflowStep {
   startedAt    DateTime?
   completedAt  DateTime?
   resultAssets Asset[] // 关联生成的资源
+  // 乐观锁 CAS 字段：并发局部更新 outputData 时用于检测期间是否有别的写入
+  // 见 lib/workflow-executor.mergeStepOutputData
+  updatedAt    DateTime         @updatedAt @map("updated_at")
   createdAt    DateTime         @default(now())
 
   @@unique([projectId, stepType]) // 一个项目同一步骤只能有一条记录

@@ -15,6 +15,7 @@ import { TEXT_MODELS, VIDEO_MODELS } from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
 import { generateTrailerBgm } from './bgm-generator'
 import { makeTempDir } from './temp-utils'
+import { safeFetch } from './ssrf-guard'
 import {
   ensureDir,
   removeDir,
@@ -560,7 +561,7 @@ export async function generateOneVideoSegment(args: {
           pollIntervalMs: 5000,
         })
         const tmpPath = path.join(tempDir, 'direct.mp4')
-        const res = await fetch(result.videoUrl)
+        const res = await safeFetch(result.videoUrl, { signal: AbortSignal.timeout(120_000) })
         if (!res.ok) throw new Error(`下载 AI 视频失败: ${res.status}`)
         const buf = Buffer.from(await res.arrayBuffer())
         await fsPromises.writeFile(tmpPath, buf)

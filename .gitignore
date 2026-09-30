@@ -25,6 +25,8 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# build 产物日志：build.log 记录的是一次失败的构建，会误导排查
+/build.log
 
 # local env files
 .env*.local
@@ -56,3 +58,17 @@ settings.local.json
 .claude/
 .cursor/
 .opencode/
+
+# 一次性排查脚本与模型对比产物，不属于源码
+/fix_*.py
+/test-7-models/
+/test-ui.html
+/test-story.txt
+/test-storyboard-shots.json
+/test-project.mjs
+/test-story-import.mjs
+/test-storyboard-import.mjs
+/test-oil*.mts
+/check-demo.js
+/test-fix.js
+/scripts/compare-keys.js

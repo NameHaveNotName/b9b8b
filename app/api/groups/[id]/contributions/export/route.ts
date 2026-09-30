@@ -26,8 +26,15 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     model: params.get('model')?.trim().slice(0, 160) || undefined,
     adoptionStatus: params.get('adoptionStatus')?.trim() || undefined,
     canViewProviderCost: access.user.isAdmin || access.membership?.role === 'ADMIN',
+    // CSV 导出需要全量 rows，但必须设上限：days=3650 且没有上限时
+    // 一次请求就能把整个时间窗的数据拉进内存
+    includeAllRows: true,
+    maxScan: 20000,
   })
   if ('error' in result) return NextResponse.json({ error: result.error }, { status: 400 })
+  if (result.scannedTruncated) {
+    console.warn(`[CONTRIBUTIONS-EXPORT] groupId=${groupId} days=${days} 数据量超过扫描上限，导出被截断`)
+  }
 
   const header = ['成员', '邮箱', '项目', '任务', '镜头', '模型', '来源', '生成请求数', '供应商调用数', '结果数', '生成时间', '耗时毫秒', '净点数', '供应商成本', '币种', '采用状态']
   const rows = result.allRows.map((row: any) => {

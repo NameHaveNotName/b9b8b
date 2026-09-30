@@ -111,6 +111,7 @@ import {
   trimVideo,
 } from '../video-utils'
 import { makeTempDir } from '../temp-utils'
+import { safeFetch } from '../ssrf-guard'
 
 /**
  * 工作指令.txt（Phase 2 修复）：ffmpeg 路径解析 + 兜底逻辑（与 video-utils.ts 一致）。
@@ -165,7 +166,7 @@ async function downloadKeyToTemp(key: string, outputPath: string): Promise<strin
     await fsPromises.writeFile(outputPath, buf)
     return outputPath
   }
-  const res = await fetch(url)
+  const res = await safeFetch(url, { signal: AbortSignal.timeout(60_000) })
   if (!res.ok) throw new Error(`Failed to download ${key}: ${res.status}`)
   const buffer = Buffer.from(await res.arrayBuffer())
   await fsPromises.writeFile(outputPath, buffer)
@@ -724,7 +725,7 @@ export const mockVideoClient: VideoClient = {
 
         // 下载视频到本地后上传到 R2
         const tmpVideoPath = path.join(makeTempDir('direct-'), `direct-${shotId}-ai.mp4`)
-        const res = await fetch(result.videoUrl)
+        const res = await safeFetch(result.videoUrl, { signal: AbortSignal.timeout(120_000) })
         if (!res.ok) throw new Error(`下载 AI 视频失败: ${res.status}`)
         const videoBuffer = Buffer.from(await res.arrayBuffer())
         await fsPromises.writeFile(tmpVideoPath, videoBuffer)

@@ -28,6 +28,8 @@ let _path: typeof import('path') | undefined
 
 function getFs() {
   if (!_fs && typeof require !== 'undefined') {
+    // 运行时惰性加载：静态 import fs 会把 Node 内置模块打进 Edge 运行时包
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     try { _fs = require('fs') } catch {}
   }
   return _fs
@@ -35,6 +37,7 @@ function getFs() {
 
 function getPath() {
   if (!_path && typeof require !== 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     try { _path = require('path') } catch {}
   }
   return _path
@@ -202,6 +205,13 @@ function matchWhere(record: any, where: any): boolean {
       continue
     }
     const recVal = record?.[key]
+    // Date 是 object，会掉进下面的「关系字段」分支被跳过，导致按时间戳精确匹配的
+    // 条件（例如乐观锁 CAS `updatedAt = <读到的值>`）永远命中。这里按时间值比较。
+    if (value instanceof Date) {
+      const recTime = recVal instanceof Date ? recVal.getTime() : recVal
+      if (recTime !== value.getTime()) return false
+      continue
+    }
     if (value === null || value === undefined || typeof value !== 'object') {
       if (recVal !== value) return false
       continue

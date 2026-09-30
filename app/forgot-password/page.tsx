@@ -32,17 +32,26 @@ export default function ForgotPasswordPage() {
     }
 
     const supabase = createClient()
+    const redirectTo = `${window.location.origin}/reset-password`
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      // 该地址已加入 Supabase Redirect URLs；重置页负责交换 PKCE code。
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo,
     })
 
     if (resetError) {
+      // 记录实际 origin 与错误，便于定位「生产打不开重置链接」这类问题：
+      // 最常见的成因是该 origin 没被加进 Supabase 的 Redirect URLs 白名单，
+      // 或部署开了 Vercel Authentication 把 /reset-password?code=… 拦在 edge。
+      console.error('[FORGOT-PASSWORD] 发送重置邮件失败', {
+        origin: window.location.origin,
+        redirectTo,
+        message: resetError.message,
+      })
       setError(resetErrorMessage(resetError))
       setIsLoading(false)
       return
     }
 
+    console.info('[FORGOT-PASSWORD] 重置邮件已发送', { origin: window.location.origin, redirectTo })
     setSuccess(true)
     setIsLoading(false)
   }

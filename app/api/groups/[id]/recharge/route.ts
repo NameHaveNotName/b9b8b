@@ -26,7 +26,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         where: { id: adminCheck.user.id },
         select: { id: true, points: true },
       })
-      if (!user || user.points < amount) {
+      if (!user) {
         throw new Error('POINTS_001: 个人点数不足')
       }
 
@@ -38,9 +38,19 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         throw new Error('GROUP_003: 小组不存在')
       }
 
-      const updatedUser = await tx.user.update({
-        where: { id: user.id },
+      // 带 gte 条件的原子扣减：仅靠上面读到的 user.points 判断，
+      // 并发转入会把个人余额扣成负数
+      const deduction = await tx.user.updateMany({
+        where: { id: user.id, points: { gte: amount } },
         data: { points: { decrement: amount } },
+      })
+      if (deduction.count !== 1) {
+        throw new Error('POINTS_001: 个人点数不足')
+      }
+
+      const updatedUser = await tx.user.findUniqueOrThrow({
+        where: { id: user.id },
+        select: { points: true },
       })
 
       const updatedGroup = await tx.group.update({

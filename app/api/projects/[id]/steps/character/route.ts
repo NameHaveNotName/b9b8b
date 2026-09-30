@@ -9,7 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
-import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
@@ -213,7 +213,11 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       workflowStepId: step.id,
       success: true,
     })
-    await startStep(step.id)
+    if (!(await claimStepForGeneration(step.id))) {
+      return NextResponse.json(
+        { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+      )
+    }
 
     // 异步后台生成：HTTP 立即返回，避免前端因生图耗时而超时
     waitUntil(
@@ -281,7 +285,11 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     workflowStepId: step.id,
     success: true,
   })
-  await startStep(step.id)
+  if (!(await claimStepForGeneration(step.id))) {
+    return NextResponse.json(
+      { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+    )
+  }
 
   // 异步后台生成：先生成 prompts，再串行生图
   waitUntil(
@@ -402,6 +410,7 @@ async function generateCharacterImagesBackground(
     const imageClient = await getImageClient()
     const portraits: any[] = []
     const failedCharacters: string[] = []
+    const mockCharacters: string[] = []
 
     for (const promptItem of resolvedPrompts) {
       try {
@@ -451,6 +460,11 @@ async function generateCharacterImagesBackground(
         })
         console.log(`[CHARACTER-BG] Asset 创建成功: assetId=${asset.id}, char=${promptItem.characterName}`)
         portraits.push({ character: enrichedCharacter, assetId: asset.id, url: result.url, llmPrompt: promptItem.englishPrompt })
+        // 真实模型全失败时供应商回退到占位图，产出不可用，按未计费处理
+        if (result.isMock) {
+          mockCharacters.push(promptItem.characterName)
+          console.warn(`[CHARACTER-BG] 角色 ${promptItem.characterName} 返回 Mock 占位图: ${result.lastError || '未知原因'}`)
+        }
       } catch (imgErr: any) {
         console.error(`[CHARACTER-BG] 角色 ${promptItem.characterName} 生图失败:`, imgErr?.message)
         failedCharacters.push(promptItem.characterName)
@@ -471,14 +485,18 @@ async function generateCharacterImagesBackground(
     }
 
     await completeStep(stepId, { portraits, characterCount: portraits.length, imageModel: imageModel || IMAGE_MODELS.primary, aspectRatio })
-    if (failedCharacters.length > 0) {
-      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.CHARACTER_DESIGN, failedCharacters.length), {
+    // 失败与 Mock 占位都不算有效产出，统一按条数退款
+    const unbilledCount = failedCharacters.length + mockCharacters.length
+    if (unbilledCount > 0) {
+      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.CHARACTER_DESIGN, unbilledCount), {
         projectId,
         workflowStepId: stepId,
         billingSource,
         billingGroupId,
         finalStatus: 'PARTIAL',
-        errorMessage: `${failedCharacters.length}/${resolvedPrompts.length} 个角色图片生成失败，失败部分点数已退回`,
+        errorMessage: mockCharacters.length > 0
+          ? `${unbilledCount}/${resolvedPrompts.length} 个角色未使用 AI 模型生成（${failedCharacters.length} 个失败、${mockCharacters.length} 个回退为占位图），对应点数已退回`
+          : `${unbilledCount}/${resolvedPrompts.length} 个角色图片生成失败，失败部分点数已退回`,
       })
     }
     const dbAssetCount = await prisma.asset.count({ where: { stepId } })

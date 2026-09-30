@@ -6,9 +6,9 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate } from '@/lib/prompts'
-import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { claimStepForGeneration, mergeStepOutputData, canExecuteStep } from '@/lib/workflow-executor'
 import { getStyleRefUrl } from '@/lib/style-ref'
-import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
@@ -38,7 +38,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     return NextResponse.json({ error: 'WORKFLOW_003' }, { status: 400 })
   }
 
-  let step = await prisma.workflowStep.findUnique({
+  const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'TRAILER' } }
   })
   if (!step) {
@@ -52,7 +52,27 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  await startStep(step.id)
+  // 代表帧存放在 TRAILER 步骤行上（资产需要一个 stepId 外键），但绝不能把
+  // TRAILER 步骤本身标记为 COMPLETED：trailer 路由见到 COMPLETED 会直接返回缓存，
+  // 用户就再也生成不了宣传片了。结果也要放在独立的 representativeFrames 键下，
+  // 避免和 trailer 自己的 results/segments/videoUrl 撞车。
+  const trailerStatusBefore = step.status as string
+  if (!(await claimStepForGeneration(step.id))) {
+    return NextResponse.json(
+      { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+    )
+  }
+
+  // 生成结束后把 TRAILER 步骤恢复成原来的状态
+  const restoreTrailerStatus = async () => {
+    await prisma.workflowStep
+      .updateMany({
+        where: { id: step.id, status: 'PROCESSING' },
+        data: { status: trailerStatusBefore as any, errorMessage: null },
+      })
+      .catch((e: any) => console.error('[REPRESENTATIVE] 恢复 TRAILER 步骤状态失败:', e?.message))
+  }
+
 
   try {
     const framework = project.framework as any
@@ -90,7 +110,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       }))
       .filter((c: any) => c.name)
 
-    const results = []
+    const results: any[] = []
+    let mockCount = 0
 
     for (const shot of shots) {
       const charNames = shot.characters
@@ -126,23 +147,49 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         data: {
           projectId: params.id,
           createdById: userId,
-          stepId: step.id,
           type: 'IMAGE',
           mimeType: 'image/png',
           storageKey: `projects/${params.id}/representative/${shot.shotId}.png`,
           url: result.url,
-          metadata: { shotId: shot.shotId, type: 'representative', sceneDesc: label, llmPrompt: promptText },
+          metadata: {
+            shotId: shot.shotId,
+            type: 'representative',
+            sceneDesc: label,
+            llmPrompt: promptText,
+            isMock: !!result.metadata?.isMock,
+          },
         }
       })
-      results.push({ shotId: shot.shotId, assetId: asset.id, url: result.url })
+      if (result.metadata?.isMock) {
+        mockCount += 1
+        console.warn(`[REPRESENTATIVE] ${shot.shotId} 返回 Mock 占位图: ${result.metadata?.mockReason || '未知原因'}`)
+      }
+      results.push({ shotId: shot.shotId, assetId: asset.id, url: result.url, isMock: !!result.metadata?.isMock })
     }
 
-    await completeStep(step.id, { results, count: results.length })
-    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
+    // 局部合并，不动 trailer 自己的 results/segments/videoUrl
+    await mergeStepOutputData(step.id, (fresh) => ({
+      ...fresh,
+      representativeFrames: { results, count: results.length, generatedAt: new Date().toISOString() },
+    }))
+    await restoreTrailerStatus()
+
+    const actualCost = calculateBatchCost(GENERATION_COSTS.KEYFRAME, results.length - mockCount)
+    await deductPointsAndLog(userId, actualCost, 'generate', { projectId: params.id, success: true })
+    // Mock 占位不是有效产出，不计费
+    if (mockCount > 0) {
+      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.KEYFRAME, mockCount), {
+        projectId: params.id,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+        finalStatus: mockCount < results.length ? 'PARTIAL' : 'FAILED',
+        errorMessage: `${mockCount}/${results.length} 张代表帧未使用 AI 模型生成（回退为占位图），对应点数已退回`,
+      })
+    }
     return NextResponse.json({ success: true, data: { results, count: results.length } })
   } catch (e: any) {
-    await failStep(step.id, e.message)
-    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
+    await restoreTrailerStatus()
+    await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, success: false, errorMessage: e.message })
     return NextResponse.json({ error: 'API_001', message: e.message }, { status: 500 })
   }
 }

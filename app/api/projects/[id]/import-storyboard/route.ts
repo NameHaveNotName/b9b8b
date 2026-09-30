@@ -133,7 +133,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       sceneName: '',
       visualDetail: shot.visualDetail || '',
       transition: shot.transition || '',
-      ...(firstFrame ? { firstFrameUrl: firstFrame.url, firstFrameAssetId: firstFrame.assetId } : {}),
+      ...(firstFrame ? {
+        firstFrameUrl: firstFrame.url,
+        firstFrameStorageKey: firstFrame.storageKey,
+        firstFrameAssetId: firstFrame.assetId,
+      } : {}),
     }
     })
     const hasFirstFrame = convertedShots.some((shot: any) => Boolean(shot.firstFrameUrl))
@@ -152,31 +156,57 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       sceneName: shot.sceneName,
     }))
 
+    // 2b. shotPrompts：重生成工作台（副工作台"重做"）只从 outputData.shotPrompts 取
+    // 基础提示词，不写它的话导入项目的「重新生成」按钮会因提示词为空而恒禁用。
+    // 字段名与生成路径保持一致（storyboard/route.ts 的 shotPrompts 用 prompt）。
+    const shotPrompts = convertedShots.map((shot: any, i: number) => ({
+      shotId: shot.shotId,
+      actNumber: shot.actNumber,
+      prompt: prompts[i].englishPrompt,
+      englishPrompt: prompts[i].englishPrompt,
+      caption: shot.description,
+    }))
+
+    // 2c. shotAssets：导入的图片也要登记，否则分镜表幕头部按 resultAssets 统计
+    // 时恒显示「未生成」（导入的 Asset 不挂在 stepId 上，见 upload-storyboard-image）。
+    const importedShotAssets = convertedShots
+      .filter((shot: any) => Boolean(shot.firstFrameUrl))
+      .map((shot: any) => ({
+        shotId: shot.shotId,
+        actNumber: shot.actNumber,
+        assetId: shot.firstFrameAssetId,
+        url: shot.firstFrameUrl,
+        storageKey: shot.firstFrameStorageKey,
+        imported: true,
+      }))
+
     // 3. 更新 STORYBOARD 步骤
+    // 已有首帧时直接置 COMPLETED：导入本身就是「分镜已完成」，
+    // 留 PENDING 会让 keyframes/generate-last 的 status 门把用户挡住。
+    const storyboardStatus = hasFirstFrame ? 'COMPLETED' : 'PENDING'
+    const storyboardOutput = {
+      prompts,
+      shotPrompts,
+      shots: convertedShots,
+      shotAssets: importedShotAssets,
+      mode: 'keyframe',
+      importedFrom: 'excel',
+      importMode: mode,
+    }
     const storyboardStep = await prisma.workflowStep.upsert({
       where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } },
       create: {
         projectId: params.id,
         stepType: 'STORYBOARD',
-        status: 'PENDING',
+        status: storyboardStatus,
         order: 6,
-        outputData: {
-          prompts,
-          shots: convertedShots,
-          mode: 'keyframe',
-          importedFrom: 'excel',
-          importMode: mode,
-        },
+        outputData: storyboardOutput,
+        completedAt: hasFirstFrame ? new Date() : null,
       },
       update: {
-        status: 'PENDING',
-        outputData: {
-          prompts,
-          shots: convertedShots,
-          mode: 'keyframe',
-          importedFrom: 'excel',
-          importMode: mode,
-        },
+        status: storyboardStatus,
+        outputData: storyboardOutput,
+        completedAt: hasFirstFrame ? new Date() : null,
         errorMessage: null,
       },
     })

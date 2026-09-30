@@ -17,6 +17,102 @@ export async function startStep(stepId: string) {
   });
 }
 
+/**
+ * 原子占用步骤用于新一轮生成。
+ *
+ * 与 tryStartStep 的区别：tryStartStep 只允许 PENDING/FAILED → PROCESSING，
+ * 会把「已完成后再点一次重新生成」的合法重跑也拒掉。这里允许从
+ * PENDING/FAILED/COMPLETED 抢占，但**拒绝已经 PROCESSING 的步骤** ——
+ * 双击（或前端重试）时第二个请求会被挡在生成与扣费之前。
+ *
+ * @returns true = 抢占成功（本次请求负责执行）
+ */
+export async function claimStepForGeneration(stepId: string): Promise<boolean> {
+  const result = await prisma.workflowStep.updateMany({
+    where: { id: stepId, status: { not: 'PROCESSING' } },
+    data: { status: 'PROCESSING' as StepStatus, startedAt: new Date(), errorMessage: null },
+  });
+  return result.count === 1;
+}
+
+/**
+ * 以乐观锁方式局部更新 WorkflowStep.outputData。
+ *
+ * 为什么需要它：outputData 是一个 JSON 列，生成流程普遍是
+ * “读快照 → 跑 30~240s 的生成 → 整块写回”。并发生成不同镜头时，
+ * 后写的那次会用旧快照覆盖前一次的结果，导致另一个镜头的
+ * firstFrameUrl / shotAssets / generatingShots 条目凭空消失，
+ * 卡片永远卡在“生成中”。
+ *
+ * 实现：读 (outputData, updatedAt) → 在内存里合并 → 用
+ * `updateMany where updatedAt = <读到的值>` 做 CAS。CAS 失败说明期间
+ * 有别的写入，重新读最新值重算，最多重试 maxRetries 次。
+ * Prisma 的 DateTime 默认精度是毫秒，updatedAt 可以安全用于比较。
+ */
+export async function mergeStepOutputData(
+  stepId: string,
+  patch: Record<string, any> | ((current: Record<string, any>) => Record<string, any>),
+  options: { maxRetries?: number } = {},
+): Promise<Record<string, any>> {
+  const maxRetries = options.maxRetries ?? 4
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const current = await prisma.workflowStep.findUnique({
+      where: { id: stepId },
+      select: { outputData: true, updatedAt: true },
+    });
+    if (!current) {
+      throw new Error('STEP_NOT_FOUND');
+    }
+
+    const base = (current.outputData as Record<string, any>) || {};
+    const next = typeof patch === 'function' ? patch(base) : { ...base, ...patch };
+
+    const cas = await prisma.workflowStep.updateMany({
+      where: { id: stepId, updatedAt: current.updatedAt },
+      data: { outputData: next },
+    });
+    if (cas.count === 1) {
+      return next;
+    }
+
+    // 有人并发写入了，退避后基于最新值重算
+    await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+  }
+
+  throw new Error('STEP_OUTPUT_CONFLICT');
+}
+
+/**
+ * mergeStepOutputData 的单次 CAS 版本：冲突时不重试，直接返回 ok:false。
+ *
+ * 用于「抢占式」写入 —— 例如把某一幕标记为 PROCESSING：如果期间有别的请求
+ * 已经抢到并写了同一个值，本请求必须放弃，而不是重读后把别人已占用的状态
+ * 再覆盖一次。
+ */
+export async function tryMergeStepOutputData(
+  stepId: string,
+  patch: (current: Record<string, any>) => Record<string, any> | null,
+): Promise<{ ok: true; outputData: Record<string, any> } | { ok: false; reason: 'CONFLICT' | 'NOT_FOUND' }> {
+  const current = await prisma.workflowStep.findUnique({
+    where: { id: stepId },
+    select: { outputData: true, updatedAt: true },
+  });
+  if (!current) return { ok: false, reason: 'NOT_FOUND' };
+
+  const base = (current.outputData as Record<string, any>) || {};
+  const next = patch(base);
+  if (!next) return { ok: false, reason: 'CONFLICT' };
+
+  const cas = await prisma.workflowStep.updateMany({
+    where: { id: stepId, updatedAt: current.updatedAt },
+    data: { outputData: next },
+  });
+  if (cas.count !== 1) return { ok: false, reason: 'CONFLICT' };
+
+  return { ok: true, outputData: next };
+}
+
 // 2026-05-18：原子化 PENDING/FAILED → PROCESSING,避免两个并发请求都抢到锁导致重复提交供应商任务。
 // 返回 true = 抢锁成功(本次请求负责执行),false = 已被并发请求抢先或处于不可启动状态。
 export async function tryStartStep(stepId: string): Promise<boolean> {
@@ -48,9 +144,15 @@ export async function markProjectStepDone(projectId: string, stepType: WorkflowS
 }
 
 export async function completeStep(stepId: string, outputData: any) {
-  const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
-  // 合并而非覆盖，保留原有的 prompts 等字段（避免重做时丢失提示词）
-  const mergedOutput = { ...(step?.outputData as any || {}), ...outputData }
+  const step = await prisma.workflowStep.findUnique({
+    where: { id: stepId },
+    select: { id: true, projectId: true, stepType: true },
+  })
+  if (!step) throw new Error('STEP_NOT_FOUND')
+
+  // 合并而非覆盖，保留原有的 prompts 等字段（避免重做时丢失提示词）。
+  // 用乐观锁合并而不是「读快照 → 整块写回」，否则并发生成会互相覆盖。
+  const mergedOutput = await mergeStepOutputData(stepId, outputData || {})
   const updated = await prisma.workflowStep.update({
     where: { id: stepId },
     data: {
@@ -59,14 +161,12 @@ export async function completeStep(stepId: string, outputData: any) {
       outputData: mergedOutput,
     },
   });
-  if (step) {
-    await markProjectStepDone(step.projectId, step.stepType as WorkflowStepType)
-    await finalizeCurrentSupplierOperation({
-      status: 'SUCCEEDED',
-      projectId: step.projectId,
-      workflowStepId: step.id,
-    })
-  }
+  await markProjectStepDone(step.projectId, step.stepType as WorkflowStepType)
+  await finalizeCurrentSupplierOperation({
+    status: 'SUCCEEDED',
+    projectId: step.projectId,
+    workflowStepId: step.id,
+  })
   return updated
 }
 
@@ -148,7 +248,7 @@ export async function canExecuteStep(projectId: string, targetStep: WorkflowStep
       if ((targetStep === 'KEYFRAMES' || targetStep === 'VIDEO_DIRECT') && !dagOk) {
         const storyboardStep = steps.find((s) => s.stepType === 'STORYBOARD');
         const shots = (storyboardStep?.outputData as any)?.shots || [];
-        const hasFirstFrame = shots.some((shot: any) => shot.firstFrameUrl);
+        const hasFirstFrame = shots.some((shot: any) => Boolean(shot?.firstFrameUrl || shot?.referenceImageUrl));
         if (hasFirstFrame) return true;
       }
 

@@ -4,6 +4,8 @@ import { generateImage } from './api-clients/openlux'
 import { IMAGE_MODELS, STYLE_MODEL_POOL } from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
 import { getProjectReferences } from './style-ref'
+import { refundPointsAndLog } from './points'
+import type { BillingSource } from './billing-policy'
 
 export interface StyleOption {
   id: string
@@ -14,6 +16,14 @@ export interface StyleOption {
   modelNo?: number
 }
 
+/** 退款所需的付款主体信息（style/route 在预扣点时确定） */
+export interface StyleBillingContext {
+  userId: string
+  billingSource: BillingSource
+  billingGroupId: string | null
+  unitCost: number
+}
+
 export async function processStyleGeneration(
   stepId: string,
   projectId: string,
@@ -21,6 +31,7 @@ export async function processStyleGeneration(
   aspectRatio: string = '16:9',
   imageModel?: string,
   createdById?: string,
+  billing?: StyleBillingContext
 ) {
   console.log(`[StyleProcessor-ENTER] stepId=${stepId}, projectId=${projectId}, styleOptions=${styleOptions.length}, ratio=${aspectRatio}, imageModel=${imageModel || '默认'}`)
   console.log(`[ASPECT-RATIO] [StyleProcessor] Starting for step ${stepId}, ratio: ${aspectRatio}`)
@@ -30,14 +41,12 @@ export async function processStyleGeneration(
   console.log(`[StyleProcessor] 用户参考图: ${userRefUrls.length} 张`)
 
   // 幂等检查：若 step 已 COMPLETED/FAILED，直接跳过（防止 BullMQ + setImmediate 双触发）
-  try {
-    const existing = await prisma.workflowStep.findUnique({ where: { id: stepId } })
-    if (existing && (existing.status === 'COMPLETED' || existing.status === 'FAILED')) {
-      console.log(`[StyleProcessor] step ${stepId} already in terminal state ${existing.status}, skip`)
-      return
-    }
-  } catch (e: any) {
-    console.warn('[StyleProcessor] idempotency check failed (continue anyway):', e.message)
+  // 这一步失败必须中断而不是继续：DB 不可用时继续执行，防重就失效了，
+  // 会重复生成并重复扣费
+  const existing = await prisma.workflowStep.findUnique({ where: { id: stepId } })
+  if (existing && (existing.status === 'COMPLETED' || existing.status === 'FAILED')) {
+    console.log(`[StyleProcessor] step ${stepId} already in terminal state ${existing.status}, skip`)
+    return
   }
 
   try {
@@ -45,6 +54,14 @@ export async function processStyleGeneration(
     // 每张图根据 styleOption.modelNo 查找对应模型，单独调用 API
     // 工作指令.txt（2026-06-07 卡死排查）：为每个 generateImage 调用添加 300s 超时，防止 Promise.all 永久挂起（官转渠道实测耗时 240s+）
     const generateWithTimeout = (opt: StyleOption, idx: number) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`STYLE_TIMEOUT: 风格 ${idx + 1} 生成超时（300s），可能卡在供应商调用`)),
+          300000
+        )
+        if (typeof (timer as any).unref === 'function') (timer as any).unref()
+      })
       return Promise.race([
         (async () => {
           // 确定模型：用户显式选择 imageModel 时优先使用，否则用 modelNo 映射，最后默认 primary
@@ -125,10 +142,11 @@ export async function processStyleGeneration(
             }
           }
         })(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`STYLE_TIMEOUT: 风格 ${idx + 1} 生成超时（300s），可能卡在供应商调用`)), 300000)
-        )
-      ])
+        timeoutPromise,
+      ]).finally(() => {
+        // 定时器必须在竞速结束后清理：否则每张图都会留下一个悬挂 300s 的定时器
+        if (timer) clearTimeout(timer)
+      })
     }
 
     const results = await Promise.all(
@@ -228,6 +246,24 @@ export async function processStyleGeneration(
       `[StyleProcessor] Completed step ${stepId}, assets: ${assets.length}/${results.length}, mockCount=${mockCount}`
     )
     console.log(`[StyleProcessor-EXIT-OK] stepId=${stepId}, successCount=${successCount}, mockCount=${mockCount}`)
+
+    // Mock 占位图不是有效产出，必须退款：预扣点是按全部风格图算的
+    if (billing && mockCount > 0) {
+      try {
+        await refundPointsAndLog(billing.userId, mockCount * billing.unitCost, {
+          projectId,
+          workflowStepId: stepId,
+          billingSource: billing.billingSource,
+          billingGroupId: billing.billingGroupId,
+          finalStatus: mockCount < results.length ? 'PARTIAL' : 'FAILED',
+          errorMessage: `${mockCount}/${results.length} 张风格图未使用 AI 模型生成（回退为占位图），对应点数已退回`,
+        })
+      } catch (refundErr: any) {
+        // 退款失败必须显式记录：账本与余额会不一致，需要人工对账
+        console.error('[StyleProcessor] 风格图退款失败:', refundErr?.message)
+        throw refundErr
+      }
+    }
   } catch (e: any) {
     // 工作指令.txt（2026-06-02 卡死修复）：即使 failStep 也失败，也要记录到日志并再次尝试
     console.error(`[StyleProcessor] Failed step ${stepId}:`, e)

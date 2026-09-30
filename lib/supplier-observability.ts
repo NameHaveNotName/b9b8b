@@ -213,7 +213,7 @@ export async function attachOperationResults(operationId: string, resultId?: str
         const normalizedTarget = normalizedResultTarget(result.metadata, target)
         const created = await prisma.operationResult.create({
           data: { operationId, ...result, ...normalizedTarget },
-        }).catch(() => undefined)
+        }).catch((err) => { console.error("[OPERATION_RESULT_WRITE_FAILED] operationId=" + operationId, safeMessage(err)) })
         if (created) await supersedePreviousResult(operationId, created.id, normalizedTarget)
         return
       }
@@ -246,7 +246,7 @@ export async function attachOperationResults(operationId: string, resultId?: str
             metadata: asset.metadata === null ? undefined : asset.metadata,
             ...normalizedTarget,
           },
-        }).catch(() => undefined)
+        }).catch((err) => { console.error("[OPERATION_RESULT_WRITE_FAILED] operationId=" + operationId, safeMessage(err)) })
         if (created) await supersedePreviousResult(operationId, created.id, normalizedTarget)
       }
     }
@@ -471,7 +471,9 @@ export async function trackedSupplierFetch(
           completedAt,
           durationMs: completedAt.getTime() - startedAt.getTime(),
         },
-      }).catch(() => undefined)
+      // 供应商调用已经花钱了，这次 attempt 记录写不进去会让对账页看不到成本，
+      // 必须留下显式告警而不是静默吞掉
+      }).catch((err) => { console.error("[PROVIDER_ATTEMPT_WRITE_FAILED] attemptId=" + attemptId, safeMessage(err)) })
     }
     throw error
   }

@@ -10,7 +10,7 @@ import { getProjectReferences } from '@/lib/style-ref'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { runDeepening } from '@/lib/framework-deepen'
-import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
@@ -140,7 +140,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   // 读取 storyLength，旧项目兼容默认 short
   const storyLength = ideationOutput.storyLength || 'short'
 
-  let step = await prisma.workflowStep.findUnique({
+  const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'FRAMEWORK' } }
   })
   if (!step) {
@@ -158,7 +158,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   try {
-    await startStep(step.id)
+    if (!(await claimStepForGeneration(step.id))) {
+      return NextResponse.json(
+        { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+      )
+    }
     // 优先使用 CreativeIteration 中当前版本的创意内容
   const currentIteration = await prisma.creativeIteration.findFirst({
     where: { projectId: params.id, isCurrent: true },

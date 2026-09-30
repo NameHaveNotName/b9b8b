@@ -15,7 +15,7 @@ import {
   FileJson,
   FileSpreadsheet,
 } from 'lucide-react'
-// @ts-ignore — xlsx 包类型定义不完整，运行时可用
+// xlsx 包类型定义不完整但运行时可用；此处无需抑制类型检查
 import * as XLSX from 'xlsx'
 import StoryboardTable, { type Shot, type Asset } from './_components/StoryboardTable'
 import StoryboardCanvas from './_components/StoryboardCanvas'

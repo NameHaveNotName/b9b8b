@@ -6,6 +6,8 @@ import CostBadge from '@/components/CostBadge'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 const SHOW_BATCH_VIDEO_GENERATION = false
+/** 合成看门狗：超过这个时间仍拿不到 combinedVideoUrl 就认为合成失败 */
+const COMPOSE_WATCHDOG_MS = 8 * 60 * 1000
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -78,9 +80,8 @@ function VoiceoverSplitView({
   onGenerateAllAudio,
   onUpdateText,
   onUpdateVoice,
-  isGeneratingVoice,
-  editingSegmentId,
-  editingText,
+  generatingVoiceId,
+  editingSegmentId,  editingText,
   editingVoiceSegmentId,
   editingVoiceId,
   onStartEditing,
@@ -101,7 +102,10 @@ function VoiceoverSplitView({
   onGenerateAllAudio: () => void
   onUpdateText: (id: string, text: string) => void
   onUpdateVoice: (id: string, voiceId: string) => void
-  isGeneratingVoice: boolean
+  /** 当前正在生成配音的条目 ID（null = 无）。
+   * 原实现是一个全表共享的 boolean：点任意一行会把全表所有行的按钮一起禁用，
+   * 而已在生成的其他行又能点，导致状态不一致。 */
+  generatingVoiceId: string | null
   editingSegmentId: string | null
   editingText: string
   editingVoiceSegmentId: string | null
@@ -175,10 +179,10 @@ function VoiceoverSplitView({
           <div className="relative inline-block">
             <button
               onClick={onGenerateAllAudio}
-              disabled={isGeneratingVoice || (summary?.pending || 0) === 0}
+              disabled={generatingVoiceId === '__batch__' || (summary?.pending || 0) === 0}
               className="flex items-center gap-1 rounded-md bg-stone-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-700 disabled:opacity-50"
             >
-              {isGeneratingVoice ? (
+              {generatingVoiceId === '__batch__' ? (
                 <LoaderCircle className="h-3 w-3 animate-spin" />
               ) : (
                 <Volume2 className="h-3 w-3" />
@@ -334,7 +338,7 @@ function VoiceoverSplitView({
                               {vo.status === 'pending' && (
                                 <button
                                   onClick={() => onGenerateAudio(vo.id)}
-                                  disabled={isGeneratingVoice}
+                                  disabled={generatingVoiceId === vo.id}
                                   className="flex items-center gap-1 rounded bg-stone-700 px-2 py-1 text-[10px] text-white transition hover:bg-stone-600 disabled:opacity-50"
                                 >
                                   <Volume2 className="h-3 w-3" /> 生成音频
@@ -343,15 +347,20 @@ function VoiceoverSplitView({
                               {vo.status === 'failed' && (
                                 <button
                                   onClick={() => onGenerateAudio(vo.id)}
-                                  disabled={isGeneratingVoice}
+                                  disabled={generatingVoiceId === vo.id}
                                   className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] text-white transition hover:bg-red-700 disabled:opacity-50"
                                 >
                                   <RefreshCw className="h-3 w-3" /> 重试
                                 </button>
                               )}
                               {vo.status === 'generating' && (
-                                <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+                                <span className="inline-flex items-center gap-1 text-xs text-amber-700">
                                   <LoaderCircle className="h-3 w-3 animate-spin" /> 生成中
+                                </span>
+                              )}
+                              {generatingVoiceId === vo.id && vo.status !== 'generating' && (
+                                <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+                                  <LoaderCircle className="h-3 w-3 animate-spin" /> 提交中
                                 </span>
                               )}
                               {editingSegmentId !== vo.id && (
@@ -392,7 +401,11 @@ export default function VideoDirectPanel({
   const videoRef = useRef<HTMLVideoElement>(null)
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null)
   const [isComposing, setIsComposing] = useState(false)
+  const [composeStartedAt, setComposeStartedAt] = useState<number | null>(null)
   const [isGeneratingBgm, setIsGeneratingBgm] = useState(false)
+  // 面板内的错误提示。原先所有失败只写 console.error，
+  // 用户点完按钮看到界面毫无变化，以为没点到，于是反复点击。
+  const [localError, setLocalError] = useState<string | null>(null)
   const [expandedPromptIds, setExpandedPromptIds] = useState<Set<string>>(new Set())
 
   function togglePromptExpand(id: string) {
@@ -406,7 +419,9 @@ export default function VideoDirectPanel({
   // 配音相关状态
   const [voiceoverMode, setVoiceoverMode] = useState(false)
   const [isGeneratingScripts, setIsGeneratingScripts] = useState(false)
-  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
+  // 逐行生成态：用一个全表共享的 boolean 会让“点一行禁用全表”
+  const [generatingVoiceId, setGeneratingVoiceId] = useState<string | null>(null)
+  const isGeneratingVoice = generatingVoiceId !== null
   const [selectedVoice, setSelectedVoice] = useState(MINIMAX_DEFAULT_VOICE_ID)
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null)
   const [editingText, setEditingText] = useState('')
@@ -489,6 +504,9 @@ export default function VideoDirectPanel({
       await mutateDirectStep()
     } catch (e: any) {
       console.error('[BGM] 生成失败:', e)
+      // 原实现只 console.error：用户只看到按钮恢复正常，完全不知道失败了
+      setLocalError('音乐生成失败：' + (e?.message || '未知错误'))
+      ;(window as any).__showToast?.({ kind: 'error', message: '音乐生成失败：' + (e?.message || '未知错误') })
     } finally {
       setIsGeneratingBgm(false)
     }
@@ -509,13 +527,15 @@ export default function VideoDirectPanel({
       setVoiceoverMode(true)
     } catch (e: any) {
       console.error('[VOICEOVER] 生成文案失败:', e)
+      setLocalError('配音文案生成失败：' + (e?.message || '未知错误'))
+      ;(window as any).__showToast?.({ kind: 'error', message: '配音文案生成失败：' + (e?.message || '未知错误') })
     } finally {
       setIsGeneratingScripts(false)
     }
   }, [projectId, mutateVoiceover])
 
   const handleGenerateVoiceoverAudio = useCallback(async (segmentId: string) => {
-    setIsGeneratingVoice(true)
+    setGeneratingVoiceId(segmentId)
     try {
       const res = await fetch(`/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`, {
         method: 'POST',
@@ -527,13 +547,16 @@ export default function VideoDirectPanel({
       await mutateVoiceover()
     } catch (e: any) {
       console.error('[VOICEOVER] 生成音频失败:', e)
+      setLocalError('配音生成失败：' + (e?.message || '未知错误'))
+      ;(window as any).__showToast?.({ kind: 'error', message: '配音生成失败：' + (e?.message || '未知错误') })
     } finally {
-      setIsGeneratingVoice(false)
+      setGeneratingVoiceId(null)
     }
   }, [projectId, mutateVoiceover])
 
   const handleGenerateAllVoiceoverAudio = useCallback(async () => {
-    setIsGeneratingVoice(true)
+    // 批量生成用一个伪特键，既不与单行互相干扰，也能让全表行看到「提交中」
+    setGeneratingVoiceId('__batch__')
     try {
       const res = await fetch(`/api/projects/${projectId}/voiceover?stepName=VIDEO_DIRECT`, {
         method: 'POST',
@@ -542,11 +565,21 @@ export default function VideoDirectPanel({
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || '生成失败')
+      // 服务端已返回 failedCount / message，前端原本从不读，
+      // 导致“全部生成音频”失败时用户什么都看不到
+      if (data.failedCount > 0) {
+        setLocalError(`部分配音生成失败：成功 ${data.count} 条，失败 ${data.failedCount} 条（失败部分未计费）`)
+        ;(window as any).__showToast?.({ kind: 'error', message: data.message || `部分配音生成失败（${data.failedCount} 条）` })
+      } else if (data.message) {
+        ;(window as any).__showToast?.({ kind: 'success', message: data.message })
+      }
       await mutateVoiceover()
     } catch (e: any) {
       console.error('[VOICEOVER] 批量生成音频失败:', e)
+      setLocalError('批量生成配音失败：' + (e?.message || '未知错误'))
+      ;(window as any).__showToast?.({ kind: 'error', message: '批量生成配音失败：' + (e?.message || '未知错误') })
     } finally {
-      setIsGeneratingVoice(false)
+      setGeneratingVoiceId(null)
     }
   }, [projectId, selectedVoice, mutateVoiceover])
 
@@ -636,7 +669,32 @@ export default function VideoDirectPanel({
 
   const hasSegments = segments.length > 0
   const allCompleted = summary?.allCompleted || false
-  const isProcessing = combinedVideoStatus === 'processing' || isComposing
+  // isComposing 只表示「已点过合成按钮」，它自身不会复位。
+  // 服务端一旦合成失败（combinedVideoUrl 始终为空），面板就会永久卡在
+  // 「视频拼接中」，没有错误也没有退出按钮。
+  // 这里加一个兜底：合成请求发出后若超过 COMPOSE_WATCHDOG_MS 仍无结果，
+  // 就解除本地锁定并提示用户重试。
+  const composeStuck = isComposing && !combinedVideoUrl && composeStartedAt !== null
+    && Date.now() - composeStartedAt > COMPOSE_WATCHDOG_MS
+  const isProcessing = combinedVideoStatus === 'processing' || (isComposing && !composeStuck)
+
+  // 合成成功 → 解除本地锁定
+  useEffect(() => {
+    if (combinedVideoUrl) {
+      setIsComposing(false)
+      setComposeStartedAt(null)
+    }
+  }, [combinedVideoUrl])
+
+  // 合成失败（看门狗超时）→ 解除锁定并给出可重试的出口
+  useEffect(() => {
+    if (!composeStuck) return
+    console.warn('[VIDEO-DIRECT] 合成超时，解除本地锁定并提示重试')
+    setIsComposing(false)
+    setComposeStartedAt(null)
+    setLocalError('视频合成超时或失败，请重新点击「合成视频」重试')
+    ;(window as any).__showToast?.({ kind: 'error', message: '视频合成超时或失败，请重试' })
+  }, [composeStuck])
 
   const handleGeneratePrompts = () => {
     onExecute('VIDEO_DIRECT', { action: 'generate-segment-prompts' })
@@ -652,6 +710,8 @@ export default function VideoDirectPanel({
 
   const handleCompose = () => {
     setIsComposing(true)
+    setComposeStartedAt(Date.now())
+    setLocalError(null)
     onExecute('VIDEO_DIRECT', { action: 'compose-video' })
   }
 
@@ -825,13 +885,34 @@ export default function VideoDirectPanel({
 
   // 合成中
   if (isProcessing) {
-    return <ProcessingBlock message="视频拼接中，请稍后..." />
+    return (
+      <div className="space-y-4">
+        <ProcessingBlock message="视频拼接中，请稍后..." />
+        <p className="text-center text-xs text-stone-500">
+          合成在后台进行，可以离开本页面；完成后回来刷新即可看到结果。
+        </p>
+      </div>
+    )
   }
+
+  const errorBanner = localError ? (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+      <span className="min-w-0 break-words">{localError}</span>
+      <button
+        onClick={() => setLocalError(null)}
+        className="shrink-0 rounded px-1 text-red-500 hover:text-red-700"
+        aria-label="关闭提示"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  ) : null
 
   // 有 segments
   if (hasSegments) {
     return (
       <div className="space-y-6">
+        {errorBanner}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-semibold text-stone-700">
@@ -951,7 +1032,7 @@ export default function VideoDirectPanel({
             onGenerateAllAudio={handleGenerateAllVoiceoverAudio}
             onUpdateText={handleUpdateVoiceoverText}
             onUpdateVoice={handleUpdateVoiceoverVoice}
-            isGeneratingVoice={isGeneratingVoice}
+            generatingVoiceId={generatingVoiceId}
             editingSegmentId={editingSegmentId}
             editingText={editingText}
             editingVoiceSegmentId={editingVoiceSegmentId}

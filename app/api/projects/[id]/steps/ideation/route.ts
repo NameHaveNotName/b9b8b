@@ -2,13 +2,14 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
+import { claimStepForGeneration } from '@/lib/workflow-executor'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
-import { createStep, startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { createStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
@@ -84,7 +85,11 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     })
   }
 
-  await startStep(step.id)
+  if (!(await claimStepForGeneration(step.id))) {
+    return NextResponse.json(
+      { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+    )
+  }
 
   try {
     const textClient = await getTextClient()

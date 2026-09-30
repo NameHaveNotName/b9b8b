@@ -4,7 +4,10 @@ import { getSignedFileUrl } from '@/lib/r2'
 function resolveLocalFileToDataUrl(relativePath: string): string | null {
   if (!relativePath.startsWith('/')) return null
   try {
+    // 运行时惰性加载：静态 import 会把 Node 内置模块打进 Edge 运行时包
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fs = require('fs')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const path = require('path')
     const filePath = path.join(process.cwd(), 'public', relativePath)
     if (!fs.existsSync(filePath)) return null

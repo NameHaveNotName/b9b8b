@@ -8,7 +8,37 @@ import path from 'path'
 const BASE_URL = (process.env.OPENLUX_BASE_URL || 'https://api.openlux.ai').replace(/\/+$/, '')
 
 const BASE64_CACHE_TTL_MS = 5 * 60 * 1000
+const BASE64_CACHE_MAX_ENTRIES = 200
 const base64Cache = new Map<string, { result: string; cachedAt: number }>()
+
+/** 严格判断是否为回环地址 URL（避免子串匹配被外部 URL 伪装） */
+function isLoopbackUrl(candidate: string): boolean {
+  if (!/^https?:\/\//i.test(candidate)) return false
+  try {
+    const host = new URL(candidate).hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.localhost')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 淘汰 base64 缓存：先删过期项，仍超量时按插入序淘汰最旧的。
+ * Map 保持插入顺序，因此不需要额外的排序结构。
+ */
+function pruneBase64Cache(now: number) {
+  if (base64Cache.size <= BASE64_CACHE_MAX_ENTRIES) return
+
+  for (const [key, val] of base64Cache) {
+    if (base64Cache.size <= BASE64_CACHE_MAX_ENTRIES) break
+    if (now - val.cachedAt > BASE64_CACHE_TTL_MS) base64Cache.delete(key)
+  }
+  while (base64Cache.size > BASE64_CACHE_MAX_ENTRIES) {
+    const oldest = base64Cache.keys().next().value
+    if (oldest === undefined) break
+    base64Cache.delete(oldest)
+  }
+}
 // OpenLux 聚合网关密钥；不再回退旧供应商密钥，避免把凭据发往错误域名。
 const API_KEY = process.env.OPENLUX_API_KEY
 
@@ -73,10 +103,18 @@ export async function resolveImageToBase64(urlOrPath: string): Promise<string> {
   }
 
   // localhost/127.0.0.1 URL：直接从 public/ 目录读取（避免对 dev server 自身 fetch）
-  if (urlOrPath.includes('localhost') || urlOrPath.includes('127.0.0.1')) {
+  // 必须严格判断 host，而不是 urlOrPath.includes('localhost') —— 子串匹配会被
+  // `http://evil.com/?x=localhost` 这类 URL 命中，从而把本地文件当成"远程图片"
+  // 读出来发给外部模型。
+  if (isLoopbackUrl(urlOrPath)) {
     try {
-      const pathname = new URL(urlOrPath).pathname
-      const localPath = path.join(process.cwd(), 'public', pathname)
+      const { pathname } = new URL(urlOrPath)
+      const publicRoot = path.resolve(process.cwd(), 'public')
+      const localPath = path.resolve(publicRoot, `.${path.posix.resolve('/', decodeURIComponent(pathname))}`)
+      // 解析后必须仍在 public/ 内
+      if (localPath !== publicRoot && !localPath.startsWith(publicRoot + path.sep)) {
+        throw new Error('[BASE64] 非法本地路径')
+      }
       console.log('[BASE64] localhost URL → 本地直读:', localPath.slice(0, 120))
       if (!fs.existsSync(localPath)) {
         throw new Error(`[BASE64] 本地图片不存在: ${localPath}`)
@@ -115,13 +153,9 @@ export async function resolveImageToBase64(urlOrPath: string): Promise<string> {
     const mime = res.headers.get('content-type') || 'image/jpeg'
     const result = `data:${mime};base64,${buffer.toString('base64')}`
 
-    if (base64Cache.size > 200) {
-      const keysToDelete: string[] = []
-      for (const [key, val] of base64Cache) {
-        if (now - val.cachedAt > BASE64_CACHE_TTL_MS) keysToDelete.push(key)
-      }
-      keysToDelete.forEach((k) => base64Cache.delete(k))
-    }
+    // 缓存必须有界：base64 图片约为原图的 1.33 倍，只淘汰已过期条目的话，
+    // 满 200 条新鲜数据后就再也不淘汰，长驻实例会一路涨到 OOM
+    pruneBase64Cache(now)
     base64Cache.set(urlOrPath, { result, cachedAt: now })
 
     return result
@@ -1197,6 +1231,8 @@ async function rawToBuffer(raw: OpenLuxImageRaw): Promise<Buffer> {
  * 默认带 `isMock: true` 标记，前端必须显式展示"Mock 预览图"角标，避免误导。
  */
 export async function generateMockImage(prompt: string): Promise<GenerateImageResult> {
+  // 惰性加载 sharp：它是原生模块，静态 import 会拖慢冷启动
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const sharp = require('sharp')
   const safePrompt = (prompt || '').slice(0, 50).replace(/[<>&]/g, '')
   const svg = `

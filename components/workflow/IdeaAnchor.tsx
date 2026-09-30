@@ -14,9 +14,9 @@ export default function IdeaAnchor({ text }: IdeaAnchorProps) {
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-amber-700">原始灵感锚点</p>
           <p className="mt-1 text-sm leading-relaxed text-amber-800">
-            <span className="text-amber-400">"</span>
+            <span className="text-amber-400">&ldquo;</span>
             {text}
-            <span className="text-amber-400">"</span>
+            <span className="text-amber-400">&rdquo;</span>
           </p>
           <p className="mt-2 text-[11px] text-amber-600/70">
             系统将始终保留你的原始灵感，所有扩展都基于此锚点

@@ -70,24 +70,6 @@ export default function LoginForm() {
       }
 
       if (data.user) {
-        // 创建 Prisma User 记录
-        try {
-          const res = await fetch('/api/auth/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: data.user.id,
-              email: data.user.email,
-              name: name || data.user.email?.split('@')[0] || '',
-            }),
-          })
-          if (!res.ok) {
-            console.warn('[Register] Prisma User creation failed:', await res.text())
-          }
-        } catch (err) {
-          console.warn('[Register] Prisma User creation error:', err)
-        }
-
         // 注册成功后自动登录
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email,
@@ -99,6 +81,24 @@ export default function LoginForm() {
           setIsRegister(false)
           setIsLoading(false)
           return
+        }
+
+        // 登录成功后再同步 Prisma User 记录（该接口要求会话已建立）
+        try {
+          const res = await fetch('/api/user/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: data.user.id,
+              email: data.user.email,
+              name: name || data.user.email?.split('@')[0] || '',
+            }),
+          })
+          if (!res.ok) {
+            console.warn('[Register] Prisma User sync failed:', await res.text())
+          }
+        } catch (err) {
+          console.warn('[Register] Prisma User sync error:', err)
         }
 
         router.push(redirectUrl)

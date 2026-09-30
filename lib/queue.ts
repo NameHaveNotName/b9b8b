@@ -81,10 +81,40 @@ export const redisConnection = new Proxy({} as IORedis, {
   },
 });
 
+// 队列实例缓存：createQueue 若每次调用都 new，会在每个请求里新建一个 Queue
+// 及其内部 Redis 连接副本，且从不 close()，长驻实例下会累积到耗尽连接数。
+const _queueCache = new Map<string, Queue>();
+
 export function createQueue(name: string) {
-  return isDemoMode ? createMockQueue(name) : new Queue(name, { connection: getRedisConnection() });
+  const cached = _queueCache.get(name);
+  if (cached) return cached;
+  const queue = isDemoMode ? createMockQueue(name) : new Queue(name, { connection: getRedisConnection() });
+  _queueCache.set(name, queue);
+  return queue;
 }
 
 export function createWorker(name: string, processor: any) {
   return isDemoMode ? createMockWorker(name, processor) : new Worker(name, processor, { connection: getRedisConnection() });
+}
+
+/**
+ * 入队并带去重键。
+ *
+ * BullMQ 的 `jobId` 会让同一 id 的任务在队列中唯一：重试/重复请求不会产生第二个任务。
+ * 生成任务普遍带 `attempts` 重试，被 Vercel 杀掉后重试时如果能与仍在写的首次任务并存，
+ * 会重复上传资产并污染账本，因此所有生成类入队都必须传 jobId。
+ */
+export async function addJob(
+  queue: Queue,
+  name: string,
+  data: any,
+  opts: {
+    jobId?: string
+    attempts?: number
+    backoff?: any
+    removeOnComplete?: boolean | number | { count?: number; age?: number }
+    removeOnFail?: boolean | number | { count?: number; age?: number }
+  } = {}
+) {
+  return queue.add(name, data, opts as any)
 }

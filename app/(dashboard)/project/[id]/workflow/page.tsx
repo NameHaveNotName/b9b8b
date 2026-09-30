@@ -141,12 +141,23 @@ function formatFrameworkText(value: unknown): string {
 /**
  * 简单 fetch 重试：对 5xx / 网络错误做指数退避重试，最多 2 次。
  * 用于处理供应商 API 偶发的 503/504 等临时性故障。
+ *
+ * 每次尝试都带独立的超时：原先所有 fetch 都没有 signal，
+ * 上游挂住时前端既不放弃也不提示，只能等浏览器/反代断开，
+ * 用户看到的是一个永远转圈的按钮，于是反复点击。
  */
-async function fetchWithRetry(url: string, init: RequestInit, maxRetries = 2): Promise<Response> {
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  maxRetries = 2,
+  timeoutMs = 300_000
+): Promise<Response> {
   let lastErr: any = null
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(new Error('请求超时')), timeoutMs)
     try {
-      const res = await fetch(url, init)
+      const res = await fetch(url, { ...init, signal: controller.signal })
       // 2xx 直接返回
       if (res.ok) return res
       // 5xx 重试（除了 501 Not Implemented）
@@ -158,12 +169,20 @@ async function fetchWithRetry(url: string, init: RequestInit, maxRetries = 2): P
       return res
     } catch (err: any) {
       lastErr = err
+      const aborted = err?.name === 'AbortError' || controller.signal.aborted
+      if (aborted) {
+        // 超时不重试：整体预算已经耗尽，再重试只会让用户多等
+        throw new Error(`请求超时（${Math.round(timeoutMs / 1000)}s），请稍后重试`)
+      }
       if (attempt < maxRetries) {
         console.warn(`[fetchWithRetry] ${url} → network error, attempt ${attempt + 1}/${maxRetries + 1}, retrying...`, err?.message)
         await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt)))
         continue
       }
       throw err
+    } finally {
+      // 定时器必须清理，否则每次请求都会留下一个悬挂的 5 分钟定时器
+      clearTimeout(timer)
     }
   }
   throw lastErr ?? new Error('fetch failed after retries')
@@ -249,7 +268,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         if ((stepType === 'KEYFRAMES' || stepType === 'VIDEO_DIRECT') && !isAvailable) {
           const storyboardStep = steps.find((s: any) => s.stepType === 'STORYBOARD')
           const shots = storyboardStep?.outputData?.shots || []
-          isAvailable = shots.some((shot: any) => shot.firstFrameUrl)
+          isAvailable = shots.some((shot: any) => Boolean(shot?.firstFrameUrl || shot?.referenceImageUrl))
         }
 
         // 兼容：若 STYLE 步骤已有 selectedStyleId / selectedRef 但 stepStyleDone 未被写入（旧数据/迁移遗漏），也视为可用
@@ -324,13 +343,40 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
             setLastError('点数不足，请联系管理员充值')
             return
           }
-          const errorMsg = `执行失败：${result.error || '未知错误'}${result.message ? ' — ' + result.message.slice(0, 100) : ''}`
+          // 裸错误码对用户无意义，补上映射
+          const errorLabel: Record<string, string> = {
+            WORKFLOW_002: '前置步骤尚未完成',
+            WORKFLOW_003: '请先完成分镜设计',
+            WORKFLOW_004: '步骤尚未初始化',
+            WORKFLOW_005: '步骤未在执行中',
+            VALIDATION_001: '参数不完整',
+            VALIDATION_002: '参数无效',
+            AUTH_001: '登录状态已失效，请刷新页面',
+            AUTH_002: '没有访问权限',
+            STORAGE_001: '未找到可用的风格参考图',
+            ALREADY_RUNNING: '该任务已在进行中',
+          }
+          const code = String(result.error || '未知错误')
+          const friendly = errorLabel[code] || code
+          const errorMsg = `执行失败：${friendly}${result.message ? ' — ' + result.message.slice(0, 100) : ''}`
           setLastError(errorMsg)
+          setToast({ kind: 'error', message: friendly + (result.message ? `：${result.message.slice(0, 80)}` : '') })
+          return
+        }
+
+        // 抢占被拒：服务端返回 success + alreadyRunning。
+        // 不做提示的话前端会判成功，用户看到「点了完全没反应」。
+        if (result.alreadyRunning) {
+          setToast({ kind: 'error', message: result.message || '该任务已在进行中，请等待完成' })
+          await mutate()
           return
         }
 
         // 调试日志：成功
         console.log(`[executeStep] ${stepType} completed successfully`)
+        if (result.message) {
+          setToast({ kind: 'success', message: String(result.message).slice(0, 120) })
+        }
         await mutate()
       } catch (e: any) {
         console.error(`[executeStep] ${stepType} error:`, e)
@@ -851,17 +897,47 @@ function WorkflowInspectorDrawerWrapper({
     openInspector('retry-edit')
   }, [openInspector])
 
+  /**
+   * 生成一个稳定的 clientActionId。
+   *
+   * 幂等键是 storyboard-retry:<user>:<project>:<act>:<shot>:<clientActionId>，
+   * 所以 id 必须「一次用户意图一个」：如果每次点击都新生成 UUID，
+   * 用户等不了再点一次就会绕过幂等，真实调用供应商并重复扣点。
+   * 另外 crypto.randomUUID 只在 secure context 可用，
+   * 非 https / 非 localhost 会抛 TypeError —— 抛在 try 之外会让
+   * retryActionsRef 的 key 永远不解锁，此后该镜头点多少次都没反应。
+   */
+  const retryActionIdsRef = useRef<Record<string, string>>({})
+  const nextRetryActionId = useCallback((key: string) => {
+    const existing = retryActionIdsRef.current[key]
+    if (existing) return existing
+    let id: string
+    try {
+      id = crypto.randomUUID()
+    } catch {
+      id = `fallback-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+    }
+    retryActionIdsRef.current[key] = id
+    return id
+  }, [])
+  const clearRetryActionId = useCallback((key: string) => {
+    delete retryActionIdsRef.current[key]
+  }, [])
+
   // 重试副工作台的"重新生成"按钮实际执行
   const executeRetryRegenerate = useCallback(async (data: any, options: { promptOverride: string; refs: string[] }) => {
     const targetKey = `${data.actNumber ?? 0}_${data.targetId}`
-    if (retryActionsRef.current.has(targetKey)) return
+    if (retryActionsRef.current.has(targetKey)) {
+      // 原实现是静默 return：请求进行中（最长 180s+）再点一次，看到的就是「点了完全没反应」
+      ;(window as any).__showToast?.({ kind: 'error', message: '该镜头正在重新生成中，请等待当前任务完成' })
+      return
+    }
     retryActionsRef.current.add(targetKey)
-    const clientActionId = crypto.randomUUID()
+    const clientActionId = nextRetryActionId(targetKey)
     window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
       key: targetKey,
       state: { status: 'processing', shotId: data.targetId, actNumber: data.actNumber, startedAt: new Date().toISOString(), message: '请求已受理，正在准备生成' },
     } }))
-    setIsOpen(false)
     try {
       const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
         method: 'POST',
@@ -878,17 +954,19 @@ function WorkflowInspectorDrawerWrapper({
         }),
       })
       const result = await res.json()
-      if (!res.ok || !result.success) throw new Error(result.message || `HTTP ${res.status}`)
-      if (result.duplicate && result.operationStatus !== 'SUCCEEDED') {
+      // 服务端对重复的 clientActionId 返回 409 { success:false, duplicate:true }，
+      // 必须在 !res.ok 之前先处理，否则正确的去重会被报成"重新生成失败"
+      if (result?.duplicate && result.operationStatus !== 'SUCCEEDED') {
         if ((window as any).__refreshProject) (window as any).__refreshProject()
         ;(window as any).__showToast?.({ kind: 'success', message: result.message || '任务已受理，正在处理中' })
         return
       }
+      if (!res.ok || !result?.success) throw new Error(result?.message || `HTTP ${res.status}`)
       // 触发项目数据刷新（主页面 useSWR）
       if ((window as any).__refreshProject) (window as any).__refreshProject()
       window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: { key: targetKey, state: { status: 'completed' } } }))
       if (result.isMock) {
-        ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，请切换模型重试' })
+        ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，点数未扣除，请切换模型重试' })
       } else {
         ;(window as any).__showToast?.({ kind: 'success', message: '分镜草图已重新生成' })
       }
@@ -900,20 +978,27 @@ function WorkflowInspectorDrawerWrapper({
       ;(window as any).__showToast?.({ kind: 'error', message: '重新生成失败：' + e?.message })
     } finally {
       retryActionsRef.current.delete(targetKey)
+      clearRetryActionId(targetKey)
+      // 请求真正结束后才关抽屉：提前关闭会销毁 RetryEditView 的 submitting 状态，
+      // 用户点下去看不到任何“生成中”反馈，就会反复点击
+      setIsOpen(false)
     }
-  }, [projectId])
+  }, [projectId, nextRetryActionId, clearRetryActionId])
 
   // 重试副工作台的"修改原图"按钮实际执行
   const executeRetryEditOriginal = useCallback(async (data: any, options: { editInstruction: string; refs: string[] }) => {
     const targetKey = `${data.actNumber ?? 0}_${data.targetId}`
-    if (retryActionsRef.current.has(targetKey)) return
+    if (retryActionsRef.current.has(targetKey)) {
+      // 原实现是静默 return：请求进行中（最长 180s+）再点一次，看到的就是「点了完全没反应」
+      ;(window as any).__showToast?.({ kind: 'error', message: '该镜头正在重新生成中，请等待当前任务完成' })
+      return
+    }
     retryActionsRef.current.add(targetKey)
-    const clientActionId = crypto.randomUUID()
+    const clientActionId = nextRetryActionId(targetKey)
     window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
       key: targetKey,
       state: { status: 'processing', shotId: data.targetId, actNumber: data.actNumber, startedAt: new Date().toISOString(), message: '请求已受理，正在修改原图' },
     } }))
-    setIsOpen(false)
     try {
       const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
         method: 'POST',
@@ -930,16 +1015,17 @@ function WorkflowInspectorDrawerWrapper({
         }),
       })
       const result = await res.json()
-      if (!res.ok || !result.success) throw new Error(result.message || `HTTP ${res.status}`)
-      if (result.duplicate && result.operationStatus !== 'SUCCEEDED') {
+      // 先处理 duplicate（服务端返回 409 + success:false），再判失败
+      if (result?.duplicate && result.operationStatus !== 'SUCCEEDED') {
         if ((window as any).__refreshProject) (window as any).__refreshProject()
         ;(window as any).__showToast?.({ kind: 'success', message: result.message || '任务已受理，正在处理中' })
         return
       }
+      if (!res.ok || !result?.success) throw new Error(result?.message || `HTTP ${res.status}`)
       if ((window as any).__refreshProject) (window as any).__refreshProject()
       window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: { key: targetKey, state: { status: 'completed' } } }))
       if (result.isMock) {
-        ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，请切换模型重试' })
+        ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，点数未扣除，请切换模型重试' })
       } else {
         ;(window as any).__showToast?.({ kind: 'success', message: '修改完成' })
       }
@@ -951,8 +1037,12 @@ function WorkflowInspectorDrawerWrapper({
       ;(window as any).__showToast?.({ kind: 'error', message: '修改失败：' + e?.message })
     } finally {
       retryActionsRef.current.delete(targetKey)
+      clearRetryActionId(targetKey)
+      // 请求真正结束后才关抽屉：提前关闭会销毁 RetryEditView 的 submitting 状态，
+      // 用户点下去看不到任何“生成中”反馈，就会反复点击
+      setIsOpen(false)
     }
-  }, [projectId])
+  }, [projectId, nextRetryActionId, clearRetryActionId])
 
   useEffect(() => {
     ;(window as any).__openInspector = openInspector
@@ -976,10 +1066,12 @@ function WorkflowInspectorDrawerWrapper({
 
   return (
     <>
-      {/* 副工作台入口按钮 — 始终可见 */}
+      {/* 副工作台入口按钮 — 始终可见
+          对比度：amber-600(#d97706) on white/90 只有约 3.1:1，低于 WCAG AA 的 4.5:1，
+          加上竖排文字后在亮屏上会"发白看不清"。改用 amber-800 + 不透明底 + 深色边框。 */}
       <button
         onClick={() => openInspector('task-queue')}
-        className="fixed right-0 top-1/3 z-40 rounded-l-xl border border-r-0 border-stone-200 bg-white/90 px-3 py-4 text-xs font-bold text-amber-600 shadow-md backdrop-blur transition hover:bg-white hover:pr-4"
+        className="fixed right-0 top-1/3 z-40 rounded-l-xl border border-r-0 border-amber-300 bg-white px-3 py-4 text-xs font-bold text-amber-800 shadow-md transition hover:bg-amber-50 hover:pr-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
         style={{ writingMode: 'vertical-rl' }}
         title="打开副工作台"
       >
@@ -999,11 +1091,26 @@ function WorkflowInspectorDrawerWrapper({
         onRetryEditOriginal={executeRetryEditOriginal}
         onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
         onLocateTaskStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
-        onConfirmGenerate={() => {
-          // 关闭副工作台,触发实际执行
-          setIsOpen(false)
-          if (confirmData && (window as any).__executeStep) {
-            ;(window as any).__executeStep(confirmData.stepType, pendingBody || undefined)
+        onConfirmGenerate={async () => {
+          // 必须在请求真正发出之后再关抽屉。
+          // 原实现第一行就 setIsOpen(false) 且不 await：
+          // 抽屉里 GenerationConfirmView 的 `confirming` 状态只存在 1 帧就随卸载销毁，
+          // 用户点下去完全看不到"生成中"，于是反复点击。
+          if (!confirmData) {
+            setIsOpen(false)
+            return
+          }
+          if (!(window as any).__executeStep) {
+            setIsOpen(false)
+            ;(window as any).__showToast?.({ kind: 'error', message: '执行入口未就绪，请刷新页面后重试' })
+            return
+          }
+          try {
+            await (window as any).__executeStep(confirmData.stepType, pendingBody || undefined)
+          } finally {
+            // executeStep 内部已经维护 executing / toast / lastError，
+            // 这里只在它结束后收起抽屉
+            setIsOpen(false)
           }
         }}
       />
@@ -1295,11 +1402,12 @@ function StepContent({
   const displayState = stepId ? getStepDisplayState(stepId, project) : null
 
   // 兼容旧项目/状态未同步：实际分镜已有首帧时也视为可用
+  // （导入分镜的项目 stepStoryboardFirstframeDone 可能未同步，但 shots 里已有图）
   let isAvailable = displayState?.isAvailable ?? false
   if ((step.stepType === 'KEYFRAMES' || step.stepType === 'VIDEO_DIRECT') && !isAvailable) {
     const storyboardStep = project?.steps?.find((s: any) => s.stepType === 'STORYBOARD')
     const shots = storyboardStep?.outputData?.shots || []
-    isAvailable = shots.some((shot: any) => shot.firstFrameUrl)
+    isAvailable = shots.some((shot: any) => Boolean(shot?.firstFrameUrl || shot?.referenceImageUrl))
   }
 
   switch (step.stepType) {
@@ -1414,7 +1522,10 @@ function StepContent({
           projectId={project.id}
           executing={executing}
           onExecute={onExecute}
-          isAvailable={displayState?.isAvailable ?? false}
+          // 必须传上面算好的 isAvailable（含 shots.some(firstFrameUrl) 兜底），
+          // 直接用 displayState.isAvailable 会把兜底丢掉：
+          // 导入分镜的项目会在 KEYFRAMES 已解锁、VIDEO_DIRECT 却显示锁定
+          isAvailable={isAvailable}
           readOnly={readOnly}
         />
       )
@@ -2050,7 +2161,7 @@ function IdeationPanel({
     setImporting(true)
     try {
       // 先上传图片（逐张），收集 asset 引用
-      let firstFrameMap: Record<string, { url: string; assetId: string }> = {}
+      const firstFrameMap: Record<string, { url: string; assetId: string }> = {}
       if (xlsxImageFiles.length > 0) {
         console.log(`[IMPORT] 开始上传 ${xlsxImageFiles.length} 张图片`)
         for (let i = 0; i < xlsxImageFiles.length; i++) {
@@ -2944,8 +3055,9 @@ function FrameworkPanel({
   mutate: () => Promise<any>
   readOnly?: boolean
 }) {
+  // 所有 Hook 必须在任何提前 return 之前调用：
+  // 提前 return 后再调 Hook 会让 React 认为 Hook 顺序变了，条件渲染时直接崩状态。
   const output = step.outputData
-  if (!output) return <ProcessingBlock message="暂无框架数据" />
 
   const [localOutput, setLocalOutput] = useState(output)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -2984,6 +3096,9 @@ function FrameworkPanel({
     }
     return map
   }, [project])
+
+  // Hook 全部调用完毕之后才能提前 return
+  if (!output) return <ProcessingBlock message="暂无框架数据" />
 
   async function handleDeepen(type: string) {
     setDeepeningType(type)
@@ -3607,6 +3722,26 @@ function StylePanel({
   const styleOptions: any[] = outputData.styleOptions || []
   const errorMessage = step.errorMessage || ''
 
+  // 这些必须在下面所有条件 return 之前调用：
+  // 提前 return 后再调 Hook 会让 React 认为 Hook 顺序变了，条件渲染时直接崩状态
+  const assets = step.resultAssets || []
+  const optionsWithImages = styleOptions.map((opt: any) => {
+    const asset = assets.find((a: any) => a.metadata?.styleId === opt.id)
+    return { ...opt, imageUrl: opt.imageUrl || asset?.url, assetId: asset?.id }
+  })
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+  const [showConfirmAll, setShowConfirmAll] = useState(false)
+  // Phase 5: 每个卡片独立的模型选择状态
+  const [cardModels, setCardModels] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {}
+    optionsWithImages.forEach((opt: any) => {
+      const modelNo = opt.modelNo || opt.metadata?.modelNo
+      const poolModel = modelNo ? STYLE_MODEL_POOL.find(m => m.no === modelNo) : null
+      initial[opt.id] = poolModel?.id || opt.metadata?.imageModel || IMAGE_MODELS.primary
+    })
+    return initial
+  })
+
   // PROMPT_READY：提示词预览（必须在 PENDING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
     console.log('[PROMPT-BUGFIX] StylePanel PROMPT_READY detected, prompts:', step.outputData.prompts.length)
@@ -3733,25 +3868,6 @@ function StylePanel({
   }
 
   // COMPLETED：展示与选择
-  const assets = step.resultAssets || []
-  const optionsWithImages = styleOptions.map((opt: any) => {
-    const asset = assets.find((a: any) => a.metadata?.styleId === opt.id)
-    return { ...opt, imageUrl: opt.imageUrl || asset?.url, assetId: asset?.id }
-  })
-
-  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
-  const [showConfirmAll, setShowConfirmAll] = useState(false)
-  // Phase 5: 每个卡片独立的模型选择状态
-  const [cardModels, setCardModels] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {}
-    optionsWithImages.forEach((opt: any) => {
-      const modelNo = opt.modelNo || opt.metadata?.modelNo
-      const poolModel = modelNo ? STYLE_MODEL_POOL.find(m => m.no === modelNo) : null
-      initial[opt.id] = poolModel?.id || opt.metadata?.imageModel || IMAGE_MODELS.primary
-    })
-    return initial
-  })
-
   async function handleRegenerate(styleId: string, aspectRatio?: string, _imageModel?: string) {
     setRegeneratingId(styleId)
     try {
@@ -5597,17 +5713,40 @@ function StoryboardPanel({
       } catch {}
 
       // 3) 镜头当前 prompt
+      // 多级兜底：shotPrompts 只有「分镜生成」路径会写，
+      // 而 xlsx 导入路径（import-storyboard）不写它 —— 只看 shotPrompts 会让
+      // 导入项目的 basePrompt 为空，副工作台的确认按钮
+      // (disabled={!promptOverride.trim()}) 恒为 true，用户看到的就是"点了没反应"。
       const stepOutput = step.outputData || {}
       const shotPrompts: any[] = stepOutput.shotPrompts || []
-      const currentShotPrompt = shotPrompts.find((p: any) => p.shotId === shotId && (actNumber == null || p.actNumber == null || p.actNumber === actNumber))
-      const basePrompt = currentShotPrompt?.prompt || ''
+      const actPrompts: any[] = stepOutput.prompts || []
+      const shot = (stepOutput.shots || []).find(
+        (s: any) => s.shotId === shotId && (actNumber == null || s.actNumber == null || s.actNumber === actNumber)
+      )
+      const matchesAct = (p: any) =>
+        p?.shotId === shotId && (actNumber == null || p?.actNumber == null || p?.actNumber === actNumber)
+
+      const currentShotPrompt = shotPrompts.find(matchesAct)
+      const basePrompt =
+        currentShotPrompt?.prompt
+        || currentShotPrompt?.englishPrompt
+        // 兜底 1：幕级 prompts（注意字段名是 englishPrompt，不是 prompt）
+        || actPrompts.find(matchesAct)?.englishPrompt
+        || actPrompts.find(matchesAct)?.prompt
+        // 兜底 2：shot 自身的描述/提示词
+        || shot?.imagePrompt
+        || shot?.prompt
+        || shot?.description
+        || ''
 
       // 4) 镜头当前原图（修改原图模式用）
+      // 导入的图片 Asset 不挂在 stepId 上，resultAssets 里取不到，
+      // 必须回退到 shot.firstFrameUrl
       const asset = (step.resultAssets || []).find((a: any) => {
         const m = (a.metadata || {}) as any
         return m.shotId === shotId && (m.actNumber === actNumber || (!actNumber && !m.actNumber))
       })
-      const originalImageUrl = asset?.url || null
+      const originalImageUrl = asset?.url || shot?.firstFrameUrl || null
 
       ;(window as any).__openRetryEditForStoryboard?.({
         shotId,

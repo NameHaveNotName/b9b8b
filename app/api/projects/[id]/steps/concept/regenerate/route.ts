@@ -8,7 +8,8 @@ import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
-import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
+import { mergeStepOutputData } from '@/lib/workflow-executor'
 import { GENERATION_COSTS } from '@/lib/points-config'
 
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
@@ -121,14 +122,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   console.log('[REGENERATE-POSITION] 替换前数组顺序:', scenes.map((s: any) => `Act${s.actNumber}-Scene${s.sceneIndex} (idx=${scenes.indexOf(s)})`))
   console.log('[REGENERATE-POSITION] targetIndex:', targetIndex, '目标场景:', { act: targetScene.actNumber, scene: targetScene.sceneIndex, assetId: targetScene.assetId })
 
-  // 删除旧 Asset
-  try {
-    await prisma.asset.delete({ where: { id: assetId } })
-    console.log('[CONCEPT-REGENERATE] 旧 Asset 已删除:', assetId)
-  } catch (e: any) {
-    console.warn('[CONCEPT-REGENERATE] 删除旧 Asset 失败:', e?.message)
-  }
-
+  // 旧 Asset 改为生成成功后再删：先删再生成的话，一次失败或 Serverless 被杀
+  // 就会永久丢失用户原本的概念图，且不退款
   try {
     const imageClient = await getImageClient()
     const sceneDesc = originalPrompt
@@ -148,6 +143,17 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       undefined,
       userRefUrls
     )
+
+    try {
+      const deleted = await prisma.asset.deleteMany({
+        where: { id: assetId, projectId: params.id },
+      })
+      if (deleted.count > 0) {
+        console.log('[CONCEPT-REGENERATE] 旧 Asset 已删除:', assetId)
+      }
+    } catch (delErr: any) {
+      console.warn('[CONCEPT-REGENERATE] 删除旧 Asset 失败（保留旧图）:', delErr?.message)
+    }
 
     const newAsset = await prisma.asset.create({
       data: {
@@ -176,31 +182,52 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     })
 
     // 更新 outputData，替换该条
-    const newScenes = [...scenes]
-    newScenes[targetIndex] = {
-      ...targetScene,
-      assetId: newAsset.id,
-      url: result.url,
-      prompt: originalPrompt,
-      size: originalSize,
-      isMock: false,
-      mockReason: null,
-      errorMessage: null,
-      regeneratedAt: new Date().toISOString(),
-    }
-
-    await prisma.workflowStep.update({
-      where: { id: step.id },
-      data: { outputData: { ...outputData, scenes: newScenes } },
+    // 乐观锁局部合并：scenes 来自 30~240s 生成前的快照，整块写回会覆盖
+    // 并发重生成的其他场景
+    const mergedOutput = await mergeStepOutputData(step.id, (fresh) => {
+      const freshScenes: any[] = Array.isArray(fresh.scenes) ? fresh.scenes : scenes
+      const next = [...freshScenes]
+      const idx = next.findIndex((s: any) => s.assetId === assetId)
+      const at = idx >= 0 ? idx : targetIndex
+      next[at] = {
+        ...next[at],
+        assetId: newAsset.id,
+        url: result.url,
+        prompt: originalPrompt,
+        size: originalSize,
+        isMock: !!result.metadata?.isMock,
+        mockReason: result.metadata?.mockReason || null,
+        errorMessage: null,
+        regeneratedAt: new Date().toISOString(),
+      }
+      return { ...fresh, scenes: next }
     })
+    const updatedScene = (mergedOutput.scenes || [])[targetIndex]
 
     // 工作指令.txt（Phase 2）：替换后数组顺序诊断日志
-    console.log('[REGENERATE-POSITION] 替换后数组顺序:', newScenes.map((s: any) => `Act${s.actNumber}-Scene${s.sceneIndex} (assetId=${s.assetId?.slice(-8)})`))
-    console.log('[REGENERATE-POSITION] 验证: 数组长度不变=', newScenes.length === scenes.length, '原index=', targetIndex, '新场景act=', newScenes[targetIndex].actNumber, 'scene=', newScenes[targetIndex].sceneIndex)
+    console.log('[REGENERATE-POSITION] 替换后数组顺序:', (mergedOutput.scenes || []).map((s: any) => `Act${s.actNumber}-Scene${s.sceneIndex} (assetId=${s.assetId?.slice(-8)})`))
+    console.log('[REGENERATE-POSITION] 验证: 数组长度不变=', (mergedOutput.scenes || []).length === scenes.length, '原index=', targetIndex, '新场景act=', updatedScene?.actNumber, 'scene=', updatedScene?.sceneIndex)
+
+    // 真实模型全失败时回退到占位图，不按正常产出收费
+    if (result.metadata?.isMock) {
+      await refundPointsAndLog(userId, pointsCheck.cost, {
+        projectId: params.id,
+        workflowStepId: step.id,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+        errorMessage: `AI 生图模型全部失败，已回退为占位预览图：${result.metadata?.mockReason || '未知原因'}`,
+      })
+      return NextResponse.json({
+        success: true,
+        scene: updatedScene,
+        isMock: true,
+        warning: '当前生图服务不可用，返回的是占位预览图，点数未扣除，请稍后重试',
+      })
+    }
 
     await deductPointsAndLog(userId, pointsCheck.cost, 'regenerate', { projectId: params.id, workflowStepId: step.id, success: true })
     console.log('[CONCEPT-REGENERATE] 重新生成成功:', newAsset.id)
-    return NextResponse.json({ success: true, scene: newScenes[targetIndex] })
+    return NextResponse.json({ success: true, scene: updatedScene })
   } catch (e: any) {
     await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId: params.id, workflowStepId: step.id, success: false, errorMessage: e.message })
     console.error('[CONCEPT-REGENERATE] 重新生成失败:', e?.message)

@@ -8,11 +8,13 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { startStep, completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled } from '@/lib/workflow-executor'
+import { completeStep, failStep, canExecuteStep, tryStartStep, isStepCancelled, mergeStepOutputData } from '@/lib/workflow-executor'
+import { startHeartbeat } from '@/lib/generation-heartbeat'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { attachOperationResults, finalizeCurrentSupplierOperation, getCurrentOperationId } from '@/lib/supplier-observability'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
+import { resolveMediaUrl } from '@/lib/resolve-media-url'
 
 // ============================================================
 // 向后兼容：旧版一键生成宣传片
@@ -88,7 +90,12 @@ async function getConceptImages(projectId: string) {
     where: { projectId, stepId: conceptStep.id, type: 'IMAGE' },
     orderBy: [{ metadata: 'asc' }, { createdAt: 'asc' }],
   })
-  return conceptAssets.slice(0, 6)
+  return Promise.all(
+    conceptAssets.slice(0, 6).map(async (asset: any) => ({
+      ...asset,
+      url: await resolveMediaUrl(asset.url, asset.storageKey),
+    }))
+  )
 }
 
 /** 后台生成单个 segment */
@@ -102,7 +109,11 @@ async function backgroundGenerateSegment(
   videoModel?: string,
   aspectRatio?: string,
   createdById?: string,
-): Promise<{ success: boolean; resultId?: string; errorMessage?: string }> {
+): Promise<{ success: boolean; resultId?: string; errorMessage?: string; isMock?: boolean }> {
+  // 心跳刷新 updatedAt，避免长耗时任务被超时清理误判为卡死后被重复生成
+  const stopHeartbeat = startHeartbeat(() =>
+    prisma.videoSegment.updateMany({ where: { id: segmentId }, data: { updatedAt: new Date() } })
+  )
   try {
     console.log(`[SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
     const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
@@ -149,7 +160,7 @@ async function backgroundGenerateSegment(
     })
 
     console.log(`[SEGMENT-BG] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
-    return { success: true, resultId: asset.id }
+    return { success: true, resultId: asset.id, isMock: result.isMock }
   } catch (e: any) {
     console.error(`[SEGMENT-BG] 失败 segmentId=${segmentId}:`, e?.message)
     await prisma.videoSegment.update({
@@ -160,6 +171,8 @@ async function backgroundGenerateSegment(
       },
     })
     return { success: false, errorMessage: (e?.message || '生成失败').slice(0, 500) }
+  } finally {
+    stopHeartbeat()
   }
 }
 
@@ -302,7 +315,7 @@ async function handleLegacyTrailer(
 
   if (!force && step.status === 'PROCESSING') {
     console.log('[TRAILER-POST] step is PROCESSING, return early')
-    return NextResponse.json({ success: true, message: '宣传片生成任务已在进行中', status: 'PROCESSING' })
+    return NextResponse.json({ success: true, message: '宣传片生成任务已在进行中，请等待当前任务完成', status: 'PROCESSING', alreadyRunning: true })
   }
 
   if (force) {
@@ -319,7 +332,7 @@ async function handleLegacyTrailer(
   const claimed = await tryStartStep(step.id)
   if (!claimed) {
     console.log('[TRAILER-POST] 抢锁失败(并发请求已抢先),返回 PROCESSING')
-    return NextResponse.json({ success: true, message: '宣传片生成任务已在进行中', status: 'PROCESSING' })
+    return NextResponse.json({ success: true, message: '宣传片生成任务已在进行中，请等待当前任务完成', status: 'PROCESSING', alreadyRunning: true })
   }
 
   const pointsCheck = await checkPoints(GENERATION_COSTS.TRAILER, projectId, 'generation.trailer', 'VIDEO')
@@ -353,15 +366,27 @@ async function handleLegacyTrailer(
   let queued = false
   if (process.env.TRAILER_USE_QUEUE === '1') {
     try {
-      const { createQueue } = await import('@/lib/queue')
+      const { createQueue, addJob } = await import('@/lib/queue')
       const videoQueue = createQueue('video-generation')
-      const job = await videoQueue.add('generate-trailer', {
-        stepId: step.id,
-        projectId,
-        conceptImageKeys,
-        operationId: getCurrentOperationId(),
-        operationUserId: userId,
-      })
+      // jobId 以 step 维度去重：同一 step 只会存在一个排队/执行中的宣传片任务，
+      // 避免 attempts 重试与被 Vercel 杀掉后的重投产生并行的第二个渲染
+      const job = await addJob(
+        videoQueue,
+        'generate-trailer',
+        {
+          stepId: step.id,
+          projectId,
+          conceptImageKeys,
+          operationId: getCurrentOperationId(),
+          operationUserId: userId,
+        },
+        {
+          jobId: `trailer:${step.id}`,
+          attempts: 1,
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 100 },
+        }
+      )
       queued = true
       console.log(`[TRAILER-POST] 入队成功 job.id=${job.id}`)
     } catch (queueErr: any) {
@@ -404,16 +429,13 @@ async function handleGeneratePrompts(projectId: string, stepId: string, callerUs
     const segments = await generateConceptSegmentPrompts(projectId, 'TRAILER', conceptImages, userId)
 
     // 更新 step 状态为 PENDING
-    await prisma.workflowStep.update({
-      where: { id: stepId },
-      data: {
-        status: 'PENDING' as any,
-        outputData: {
-          ...((await prisma.workflowStep.findUnique({ where: { id: stepId } }))?.outputData as any || {}),
-          segmentPromptsGenerated: true,
-          segmentCount: segments.length,
-        },
-      },
+    await mergeStepOutputData(stepId, {
+      segmentPromptsGenerated: true,
+      segmentCount: segments.length,
+    })
+    await prisma.workflowStep.updateMany({
+      where: { id: stepId, status: { in: ['PENDING', 'FAILED', 'PROCESSING'] } },
+      data: { status: 'PENDING' as any },
     })
 
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
@@ -443,15 +465,15 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
     return NextResponse.json({ error: 'MISSING_SEGMENT_ID' }, { status: 400 })
   }
 
-  const segment = await prisma.videoSegment.findUnique({
-    where: { id: segmentId },
+  const segment = await prisma.videoSegment.findFirst({
+    where: { id: segmentId, projectId },
   })
-  if (!segment || segment.projectId !== projectId) {
+  if (!segment) {
     return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
   }
 
   if (segment.status === 'generating') {
-    return NextResponse.json({ success: true, message: '该片段正在生成中', status: 'generating' })
+    return NextResponse.json({ success: true, message: '该片段正在生成中，请等待当前任务完成', status: 'generating', alreadyRunning: true })
   }
 
   if (segment.status === 'completed') {
@@ -480,7 +502,7 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
   })
 
   if (updated.count === 0) {
-    return NextResponse.json({ success: true, message: '该片段正在生成中或已完成', status: 'generating' })
+    return NextResponse.json({ success: true, message: '该片段正在生成中或已完成', status: 'generating', alreadyRunning: true })
   }
 
   // 异步视频生成：先扣点，再启动后台任务
@@ -493,14 +515,17 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
       segment.duration || 5, body?.videoModel, body?.aspectRatio,
       userId,
     )
-    if (outcome.success) {
+    if (outcome.success && !outcome.isMock) {
       await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId, resultId: outcome.resultId })
     } else {
+      // isMock = 真实模型全失败后回退到本地 Ken Burns 占位，不按正常生成收费
       await refundPointsAndLog(userId, pointsCheck.cost, {
         projectId, workflowStepId: stepId,
         billingSource: pointsCheck.billingSource,
         billingGroupId: pointsCheck.billingGroupId,
-        errorMessage: outcome.errorMessage,
+        errorMessage: outcome.isMock
+          ? 'AI 视频模型全部失败，已回退为本地占位视频，点数已退回'
+          : outcome.errorMessage,
       })
     }
   })())
@@ -530,26 +555,40 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
 
-  await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, success: true })
+  // 扣费前先原子抢占：先读 pending 再扣整批、之后才逐个标 generating，
+  // 并发的"全部生成"会读到同一批片段并各自扣一次费
+  const claim = await prisma.videoSegment.updateMany({
+    where: { id: { in: pendingSegments.map((s: any) => s.id) }, status: 'pending' },
+    data: { status: 'generating', errorMessage: null },
+  })
+  if (claim.count === 0) {
+    return NextResponse.json({ success: true, message: '没有待生成的片段', count: 0 })
+  }
+
+  const claimedIds = new Set(
+    (await prisma.videoSegment.findMany({
+      where: { id: { in: pendingSegments.map((s: any) => s.id) }, status: 'generating' },
+      select: { id: true },
+    })).map((s: any) => s.id)
+  )
+  const segmentsToRun = pendingSegments.filter((s: any) => claimedIds.has(s.id))
+
+  await deductPointsAndLog(
+    userId,
+    calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, segmentsToRun.length),
+    'generate',
+    { projectId, workflowStepId: stepId, success: true }
+  )
 
   const conceptImages = await getConceptImages(projectId)
-
-  // 批量更新为 generating
-  await Promise.all(
-    pendingSegments.map((seg: any) =>
-      prisma.videoSegment.update({
-        where: { id: seg.id },
-        data: { status: 'generating', errorMessage: null },
-      })
-    )
-  )
 
   // 后台逐个生成
   const operationId = getCurrentOperationId()
   waitUntil((async () => {
     let succeeded = 0
     let failed = 0
-    for (const segment of pendingSegments) {
+    let mockCount = 0
+    for (const segment of segmentsToRun) {
       const conceptImage = conceptImages.find((img: any) => img.id === segment.shotId)
       const imageUrl = conceptImage?.url || ''
       if (!imageUrl) {
@@ -571,20 +610,25 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
         body?.aspectRatio,
         userId,
       )
-      if (outcome.success) {
+      if (outcome.success && !outcome.isMock) {
         succeeded += 1
         if (operationId && outcome.resultId) await attachOperationResults(operationId, outcome.resultId)
+      } else if (outcome.success) {
+        mockCount += 1
       } else {
         failed += 1
       }
     }
-    if (failed > 0) {
-      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, failed), {
+    const unbilled = failed + mockCount
+    if (unbilled > 0) {
+      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.VIDEO_DIRECT_SEGMENT, unbilled), {
         projectId, workflowStepId: stepId,
         billingSource: pointsCheck.billingSource,
         billingGroupId: pointsCheck.billingGroupId,
         finalStatus: succeeded > 0 ? 'PARTIAL' : 'FAILED',
-        errorMessage: `${failed}/${pendingSegments.length} 个视频片段生成失败，失败部分点数已退回`,
+        errorMessage: mockCount > 0
+          ? `${unbilled}/${segmentsToRun.length} 个视频片段未使用 AI 模型生成（失败或回退为本地占位），对应点数已退回`
+          : `${unbilled}/${segmentsToRun.length} 个视频片段生成失败，失败部分点数已退回`,
       })
     } else {
       await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId })
@@ -593,10 +637,10 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
 
   return NextResponse.json({
     success: true,
-    count: pendingSegments.length,
-    segmentIds: pendingSegments.map((s: any) => s.id),
+    count: segmentsToRun.length,
+    segmentIds: segmentsToRun.map((s: any) => s.id),
     status: 'generating',
-    message: `已启动 ${pendingSegments.length} 个片段的批量生成`,
+    message: `已启动 ${segmentsToRun.length} 个片段的批量生成`,
   })
 }
 

@@ -287,7 +287,7 @@ function detectImageColByCount(images: Array<{ row: number; col: number }>): { c
 function extractImages(worksheet: ExcelJS.Worksheet): Array<{ row: number; col: number; buffer: Buffer; mimeType: string; fileName: string }> {
   const results: Array<{ row: number; col: number; buffer: Buffer; mimeType: string; fileName: string }> = []
 
-  // @ts-ignore - exceljs 的 getImages() 返回图片信息
+  // @ts-expect-error - exceljs 的 getImages() 返回图片信息
   const imageMetas = worksheet.getImages() as Array<{
     imageId: number
     range: {

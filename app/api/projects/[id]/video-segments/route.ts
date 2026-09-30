@@ -45,7 +45,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     throw err
   }
 
-  let conceptImageMap = new Map<string, string>()
+  const conceptImageMap = new Map<string, string>()
   if (stepName === 'TRAILER') {
     try {
       const conceptStep = await prisma.workflowStep.findUnique({

@@ -1,4 +1,8 @@
 export const dynamic = 'force-dynamic'
+// 批量配音是同步串行执行的（generate-all-audio 会一条条跑 TTS），
+// 不声明 maxDuration 会走平台默认值，被提前切断时前端只会看到请求失败、
+// 且已生成的段落拿不到结果
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
@@ -119,7 +123,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   if (action === 'generate-audio') {
-    return handleGenerateAudio(body, userId)
+    return handleGenerateAudio(params.id, body, userId)
   }
 
   if (action === 'generate-all-audio') {
@@ -127,11 +131,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   if (action === 'update-text') {
-    return handleUpdateText(body)
+    return handleUpdateText(params.id, body)
   }
 
   if (action === 'update-voice') {
-    return handleUpdateVoice(body)
+    return handleUpdateVoice(params.id, body)
   }
 
   return NextResponse.json({ error: 'UNKNOWN_ACTION', message: `未知 action: ${action}` }, { status: 400 })
@@ -167,14 +171,16 @@ async function handleGenerateScripts(projectId: string, stepName: string, userId
   }
 }
 
-async function handleGenerateAudio(body: any, userId: string) {
+async function handleGenerateAudio(projectId: string, body: any, userId: string) {
   const segmentId = body?.segmentId
   if (!segmentId) {
     return NextResponse.json({ error: 'MISSING_SEGMENT_ID' }, { status: 400 })
   }
 
-  const segment = await prisma.voiceoverSegment.findUnique({
-    where: { id: segmentId },
+  // 必须按 projectId 限定查询：只校验 URL 上的项目权限、再拿 body 里的 segmentId
+  // 去查，会让他人项目的配音片段可被任意成员改写/生成
+  const segment = await prisma.voiceoverSegment.findFirst({
+    where: { id: segmentId, projectId },
   })
   if (!segment) {
     return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
@@ -187,7 +193,7 @@ async function handleGenerateAudio(body: any, userId: string) {
 
   try {
     await resetStaleGeneratingVoiceovers(segment.projectId)
-    const updated = await generateVoiceoverAudio(segmentId, body?.voiceId, userId)
+    const updated = await generateVoiceoverAudio(segmentId, body?.voiceId, userId, projectId)
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: segment.projectId, assetId: segmentId, success: true })
     return NextResponse.json({
       success: true,
@@ -219,13 +225,28 @@ async function handleGenerateAllAudio(projectId: string, stepName: string, body:
   }
 
   try {
-    await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, success: true })
-    const segmentIds = await generateAllVoiceoverAudio(projectId, stepName, body?.voiceId, userId)
+    const { succeeded, failed } = await generateAllVoiceoverAudio(projectId, stepName, body?.voiceId, userId)
+
+    // 只对真正成功的片段计费：预扣整批再"失败就吞掉"会让用户为没生成的音频付费
+    const actualCost = succeeded.length * GENERATION_COSTS.VOICEOVER_AUDIO_SEGMENT
+    await deductPointsAndLog(userId, actualCost, 'generate', {
+      projectId,
+      success: true,
+      errorMessage: failed.length
+        ? `${failed.length}/${pendingSegments.length} 条配音生成失败，未计费: ${failed
+            .slice(0, 3)
+            .map((f) => f.error)
+            .join('; ')}`
+        : undefined,
+    })
+
     return NextResponse.json({
       success: true,
-      segmentIds,
-      count: segmentIds.length,
-      message: `已生成 ${segmentIds.length} 条配音音频`,
+      segmentIds: succeeded,
+      count: succeeded.length,
+      failedCount: failed.length,
+      failedSegments: failed,
+      message: `已生成 ${succeeded.length} 条配音音频${failed.length ? `，${failed.length} 条失败（未计费）` : ''}`,
     })
   } catch (e: any) {
     await deductPointsAndLog(userId, pointsCheck.cost, 'error', { projectId, success: false, errorMessage: e.message })
@@ -233,16 +254,25 @@ async function handleGenerateAllAudio(projectId: string, stepName: string, body:
   }
 }
 
-async function handleUpdateText(body: any) {
+async function handleUpdateText(projectId: string, body: any) {
   const segmentId = body?.segmentId
   const text = body?.text
   if (!segmentId || typeof text !== 'string' || text.trim().length === 0) {
     return NextResponse.json({ error: 'MISSING_PARAMS', message: '缺少 segmentId 或 text' }, { status: 400 })
   }
 
+  // 限定在已鉴权的项目内更新，避免越权改写他人配音文案
+  const target = await prisma.voiceoverSegment.findFirst({
+    where: { id: segmentId, projectId },
+    select: { id: true },
+  })
+  if (!target) {
+    return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
+  }
+
   try {
     const segment = await prisma.voiceoverSegment.update({
-      where: { id: segmentId },
+      where: { id: target.id },
       data: { text: text.trim() },
     })
     return NextResponse.json({ success: true, segment, message: '文案已更新' })
@@ -251,16 +281,24 @@ async function handleUpdateText(body: any) {
   }
 }
 
-async function handleUpdateVoice(body: any) {
+async function handleUpdateVoice(projectId: string, body: any) {
   const segmentId = body?.segmentId
   const voiceId = body?.voiceId
   if (!segmentId || typeof voiceId !== 'string' || voiceId.trim().length === 0) {
     return NextResponse.json({ error: 'MISSING_PARAMS', message: '缺少 segmentId 或 voiceId' }, { status: 400 })
   }
 
+  const target = await prisma.voiceoverSegment.findFirst({
+    where: { id: segmentId, projectId },
+    select: { id: true },
+  })
+  if (!target) {
+    return NextResponse.json({ error: 'SEGMENT_NOT_FOUND' }, { status: 404 })
+  }
+
   try {
     const segment = await prisma.voiceoverSegment.update({
-      where: { id: segmentId },
+      where: { id: target.id },
       data: { voiceId: voiceId.trim() },
     })
     return NextResponse.json({ success: true, segment, message: '音色已更新' })

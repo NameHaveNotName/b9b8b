@@ -102,6 +102,9 @@ export interface ConceptSceneResult {
 export interface KeyframeResult {
   url: string
   storageKey: string
+  /** 真实模型全部失败时供应商会回退到占位图，调用方据此决定是否退款 */
+  isMock?: boolean
+  lastError?: string
   metadata: {
     seed: number
     prompt: string
@@ -301,7 +304,7 @@ export async function getImageClient(): Promise<ImageClient> {
         const primaryRef = previousImageUrl
         const secondaryRefs = otherRefs.length > 0 ? otherRefs : undefined
         console.log(`[KEYFRAME-REF] primary=${!!primaryRef}${primaryRef ? ` (${primaryRef.slice(0, 60)})` : ''}, secondary=${secondaryRefs?.length || 0}`)
-        const { buffer } = await generateImage({
+        const { buffer, isMock, lastError } = await generateImage({
           model,
           prompt,
           quality: 'medium',
@@ -315,6 +318,10 @@ export async function getImageClient(): Promise<ImageClient> {
         return {
           url,
           storageKey,
+          // isMock 必须透传：真实模型全失败时供应商会回退到占位图，
+          // 上层要靠这个标记决定是否退款
+          isMock: !!isMock,
+          ...(lastError ? { lastError } : {}),
           metadata: {
             seed: Math.floor(Math.random() * 999999),
             prompt: sceneDesc,

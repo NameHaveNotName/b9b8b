@@ -7,11 +7,11 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
-import { startStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
+import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
-import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 
 /**
@@ -209,7 +209,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       })
     }
 
-    await startStep(step.id)
+    if (!(await claimStepForGeneration(step.id))) {
+      return NextResponse.json(
+        { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+      )
+    }
 
     try {
       let styleRefUrl: string
@@ -248,6 +252,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       const imageClient = await getImageClient()
       const scenes = []
       const failedScenes: string[] = []
+      const mockScenes: string[] = []
 
       for (const promptItem of resolvedPrompts) {
         try {
@@ -293,6 +298,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
             isMock: !!result.metadata?.isMock,
             mockReason: result.metadata?.mockReason || null,
           })
+          if (result.metadata?.isMock) {
+            mockScenes.push(`幕${promptItem.actNumber}-场景${promptItem.sceneIndex + 1}`)
+          }
         } catch (imgErr: any) {
           const sceneLabel = `幕${promptItem.actNumber}-场景${promptItem.sceneIndex + 1}`
           console.error(`[CONCEPT-IMAGE] ${sceneLabel} 生图失败:`, imgErr?.message)
@@ -309,7 +317,19 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
       await completeStep(step.id, { scenes, totalScenes: scenes.length, imageModel: imageModel || 'gpt-image-1', aspectRatio })
       await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
-      console.log(`[CONCEPT-IMAGE] 完成: 成功 ${scenes.length}/${resolvedPrompts.length} 条，失败: ${failedScenes.join(', ') || '无'}`)
+      // 失败与 Mock 占位都不算有效产出，按条退款
+      const unbilledCount = failedScenes.length + mockScenes.length
+      if (unbilledCount > 0) {
+        await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.CONCEPT_ART, unbilledCount), {
+          projectId: params.id,
+          workflowStepId: step.id,
+          billingSource: pointsCheck.billingSource,
+          billingGroupId: pointsCheck.billingGroupId,
+          finalStatus: 'PARTIAL',
+          errorMessage: `${unbilledCount}/${resolvedPrompts.length} 张概念图未使用 AI 模型生成（${failedScenes.length} 张失败、${mockScenes.length} 张回退为占位图），对应点数已退回`,
+        })
+      }
+      console.log(`[CONCEPT-IMAGE] 完成: 成功 ${scenes.length}/${resolvedPrompts.length} 条，失败: ${failedScenes.join(', ') || '无'}，Mock: ${mockScenes.join(', ') || '无'}`)
       return NextResponse.json({ success: true, data: { scenes, totalScenes: scenes.length } })
     } catch (e: any) {
       await failStep(step.id, e.message)
@@ -355,7 +375,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
-  await startStep(step.id)
+  if (!(await claimStepForGeneration(step.id))) {
+    return NextResponse.json(
+      { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
+    )
+  }
 
   try {
     const synopsis: string = framework?.synopsis || ''
@@ -413,6 +437,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const imageClient = await getImageClient()
     const scenes = []
     const failedScenes: string[] = []
+    const mockScenes: string[] = []
 
     for (const act of acts) {
       const actNo = act.actNo || act.actNumber || 1
@@ -477,6 +502,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
             isMock: !!result.metadata?.isMock,
             mockReason: result.metadata?.mockReason || null,
           })
+          if (result.metadata?.isMock) {
+            mockScenes.push(`幕${actNo}-场景${i + 1}`)
+          }
         } catch (imgErr: any) {
           const sceneLabel = `幕${actNo}-场景${i + 1}`
           console.error(`[CONCEPT] ${sceneLabel} 生图失败:`, imgErr?.message)
@@ -494,6 +522,18 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
     await completeStep(step.id, { scenes, totalScenes: scenes.length, aspectRatio: defaultAspectRatio })
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
+    // 失败与 Mock 占位都不算有效产出，按条退款
+    const unbilledCount = failedScenes.length + mockScenes.length
+    if (unbilledCount > 0) {
+      await refundPointsAndLog(userId, calculateBatchCost(GENERATION_COSTS.CONCEPT_ART, unbilledCount), {
+        projectId: params.id,
+        workflowStepId: step.id,
+        billingSource: pointsCheck.billingSource,
+        billingGroupId: pointsCheck.billingGroupId,
+        finalStatus: 'PARTIAL',
+        errorMessage: `${unbilledCount}/${scenes.length + unbilledCount} 张概念图未使用 AI 模型生成（${failedScenes.length} 张失败、${mockScenes.length} 张回退为占位图），对应点数已退回`,
+      })
+    }
     return NextResponse.json({ success: true, data: { scenes, totalScenes: scenes.length } })
   } catch (e: any) {
     await failStep(step.id, e.message)

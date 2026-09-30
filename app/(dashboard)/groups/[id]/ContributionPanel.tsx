@@ -8,7 +8,11 @@ type ContributionData = {
   summary: {
     requestCount: number
     providerCallCount: number
+    /** 资产总数（含被替换的历史版本） */
     outputCount: number
+    /** 去重后的业务目标数（项目/步骤/镜头或风格/角色/帧角色） */
+    distinctTargetCount: number
+    /** 当前有效贡献：去重目标里仍被项目采用的数量 */
     adoptedCount: number
     adoptionRate: number
     netPointsCost: number
@@ -20,11 +24,14 @@ type ContributionData = {
     user: { id: string; name: string | null; email: string }
     requestCount: number
     outputCount: number
+    distinctTargetCount: number
     adoptedCount: number
     adoptionRate: number
     netPointsCost: number
   }>
   projects: Array<{ id: string; title: string }>
+  truncatedSummary?: boolean
+  maxScan?: number
   rows: Array<{
     id: string
     actionKey: string
@@ -79,7 +86,8 @@ export default function ContributionPanel({ groupId }: { groupId: string }) {
   const cards = [
     ['生成请求', data.summary.requestCount],
     ['供应商调用', data.summary.providerCallCount],
-    ['生成产出总量', data.summary.outputCount],
+    ['产出资产总数', data.summary.outputCount],
+    ['去重目标数', data.summary.distinctTargetCount],
     ['当前有效贡献', data.summary.adoptedCount],
     ['当前采用率', `${(data.summary.adoptionRate * 100).toFixed(1)}%`],
     ['净消耗点数', data.summary.netPointsCost],
@@ -88,7 +96,24 @@ export default function ContributionPanel({ groupId }: { groupId: string }) {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-stone-500">生成产出包含历史版本；当前有效贡献按项目、步骤、镜头与帧角色去重。无法追溯操作者的旧数据标记为“未知”，不归给项目所有者。</p>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-stone-600">
+            <strong className="font-semibold text-stone-800">三个数字的区别：</strong>
+            「产出资产总数」是数据库里的资产行数，
+            <em className="not-italic">同一个镜头重生成几次就会 +几</em>；
+            「去重目标数」按项目 / 步骤 / 镜头（风格、角色、帧角色同理）合并，
+            代表<em className="not-italic">实际动过多少个目标</em>；
+            「当前有效贡献」只统计去重后<em className="not-italic">仍被项目采用</em>的目标。
+          </p>
+          <p className="mt-1 text-xs text-stone-500">
+            采用率 = 有效贡献 ÷ 去重目标数。无法追溯操作者的旧数据标记为“未知”，不归给项目所有者。
+          </p>
+          {data.truncatedSummary && (
+            <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+              数据量超过单次扫描上限（{data.maxScan} 条/表），本次统计已截断。请缩小时间范围或分项目查看。
+            </p>
+          )}
+        </div>
         <div className="flex gap-2">
           <a href={`/api/groups/${groupId}/contributions/export?days=${days}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`} className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600 hover:bg-stone-50">导出 CSV</a>
           <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm">
@@ -101,16 +126,16 @@ export default function ContributionPanel({ groupId }: { groupId: string }) {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map(([label, value]) => <div key={label} className="rounded-lg border border-stone-200 bg-white p-4"><p className="text-xs text-stone-500">{label}</p><p className="mt-1 text-xl font-semibold text-stone-800">{value}</p></div>)}
       </div>
 
       <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
         <div className="border-b px-4 py-3 text-sm font-medium text-stone-700">成员汇总</div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="bg-stone-50 text-xs text-stone-500"><tr>{['成员', '生成请求', '生成产出', '有效贡献', '当前采用率', '净点数'].map((item) => <th key={item} className="px-4 py-3 font-medium">{item}</th>)}</tr></thead>
-            <tbody className="divide-y">{data.members.map((member) => <tr key={member.user.id}><td className="px-4 py-3"><div>{member.user.name || '未命名'}</div><div className="text-xs text-stone-400">{member.user.email}</div></td><td className="px-4 py-3">{member.requestCount}</td><td className="px-4 py-3">{member.outputCount}</td><td className="px-4 py-3">{member.adoptedCount}</td><td className="px-4 py-3">{(member.adoptionRate * 100).toFixed(1)}%</td><td className="px-4 py-3">{member.netPointsCost}</td></tr>)}</tbody>
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="bg-stone-50 text-xs text-stone-600"><tr>{['成员', '生成请求', '资产总数', '去重目标数', '有效贡献', '采用率', '净点数'].map((item) => <th key={item} className="px-4 py-3 font-medium">{item}</th>)}</tr></thead>
+            <tbody className="divide-y">{data.members.map((member) => <tr key={member.user.id}><td className="px-4 py-3"><div>{member.user.name || '未命名'}</div><div className="text-xs text-stone-500">{member.user.email}</div></td><td className="px-4 py-3">{member.requestCount}</td><td className="px-4 py-3 text-stone-500">{member.outputCount}</td><td className="px-4 py-3 font-medium">{member.distinctTargetCount}</td><td className="px-4 py-3">{member.adoptedCount}</td><td className="px-4 py-3">{(member.adoptionRate * 100).toFixed(1)}%</td><td className="px-4 py-3">{member.netPointsCost}</td></tr>)}</tbody>
           </table>
         </div>
       </div>

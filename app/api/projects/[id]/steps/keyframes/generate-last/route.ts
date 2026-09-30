@@ -1,4 +1,7 @@
 export const dynamic = 'force-dynamic'
+// 尾帧生成 = 一次文本调用 + 一次生图 + 落库，生图上游超时是 180s，
+// 不声明 maxDuration 会走平台默认值被提前切断
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
@@ -9,7 +12,9 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
+import { mergeStepOutputData } from '@/lib/workflow-executor'
 import { GENERATION_COSTS } from '@/lib/points-config'
+import { refreshShotsUrls } from '@/lib/resolve-media-url'
 
 /**
  * 单条尾帧生成 API
@@ -42,14 +47,18 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   const actNumber = typeof body.actNumber === 'number' ? body.actNumber : null
 
   // 从 STORYBOARD 步骤读取 shots
+  // 判据是「分镜表里有没有可用首帧」，不是步骤 status === 'COMPLETED'：
+  // xlsx 导入的项目步骤可能是 PENDING，但图片已经在了，不该把用户挡住。
   const storyboardStep = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } }
   })
-  if (!storyboardStep || storyboardStep.status !== 'COMPLETED') {
-    return NextResponse.json({ error: '请先完成分镜设计' }, { status: 400 })
+  if (!storyboardStep) {
+    return NextResponse.json({ error: '请先完成分镜设计或导入分镜表' }, { status: 400 })
   }
 
-  const storyboardShots = (storyboardStep.outputData as any)?.shots || []
+  const rawStoryboardShots = (storyboardStep.outputData as any)?.shots || []
+  const refreshed = await refreshShotsUrls(rawStoryboardShots)
+  const storyboardShots = refreshed.shots
   // 使用 composite key (actNumber, shotId) 查找对应镜头
   const shot = storyboardShots.find((s: any) =>
     s.shotId === body.shotId && (actNumber == null || s.actNumber === actNumber)
@@ -57,19 +66,26 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!shot) {
     return NextResponse.json({ error: `未找到 shot: ${body.shotId} (act ${actNumber})` }, { status: 404 })
   }
+  if (!shot.firstFrameUrl && !shot.referenceImageUrl) {
+    return NextResponse.json(
+      { error: '该镜头还没有可用首帧，请先生成或导入分镜图' },
+      { status: 400 }
+    )
+  }
 
   // 获取 KEYFRAMES 步骤（用于创建 Asset 记录）
   let keyframesStep = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'KEYFRAMES' } }
   })
   if (!keyframesStep) {
-    // 如果 KEYFRAMES 步骤不存在，创建一个 PENDING 状态的空步骤
+    // 按工作流定义取 order，避免硬编码 8 与规范顺序不一致而产生错序/重复步骤行
+    const { getStepOrder } = await import('@/lib/workflow')
     keyframesStep = await prisma.workflowStep.create({
       data: {
         projectId: params.id,
         stepType: 'KEYFRAMES',
         status: 'PENDING',
-        order: 8,
+        order: getStepOrder('KEYFRAMES'),
         outputData: {},
       }
     })
@@ -148,42 +164,72 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         stepId: keyframesStep.id,
         type: 'IMAGE',
         mimeType: 'image/png',
-        storageKey: `projects/${params.id}/keyframes/${shot.shotId}_last.png`,
+        storageKey: result.storageKey,
         url: result.url,
-        metadata: { pairId: shot.shotId, frameType: 'last', quality: 'medium', sceneDesc: shot.description, llmPrompt: generatedPrompt },
+        metadata: {
+          pairId: shot.shotId,
+          frameType: 'last',
+          quality: 'medium',
+          sceneDesc: shot.description,
+          llmPrompt: generatedPrompt,
+          isMock: !!result.isMock,
+          ...(result.lastError ? { mockReason: result.lastError } : {}),
+        },
       }
     })
 
     // 将 lastFrameUrl 写回 STORYBOARD 步骤的 shots 数组（使用 composite key）
-    const updatedShots = storyboardShots.map((s: any) =>
-      s.shotId === body.shotId && (actNumber == null || s.actNumber === actNumber)
-        ? { ...s, lastFrameUrl: result.url }
-        : s
-    )
-    await prisma.workflowStep.update({
-      where: { id: storyboardStep.id },
-      data: { outputData: { ...(storyboardStep.outputData as any), shots: updatedShots } }
+    // 必须乐观锁局部合并：storyboardStep.outputData 是请求开始时的快照，
+    // 整块写回会抹掉并发生成完成的其他镜头结果
+    await mergeStepOutputData(storyboardStep.id, (fresh) => {
+      const freshShots: any[] = Array.isArray(fresh.shots) ? fresh.shots : storyboardShots
+      return {
+        ...fresh,
+        shots: freshShots.map((s: any) =>
+          s.shotId === body.shotId && (actNumber == null || s.actNumber === actNumber)
+            ? { ...s, lastFrameUrl: result.url, lastFrameStorageKey: result.storageKey }
+            : s
+        ),
+      }
     })
 
     // 同步更新 KEYFRAMES 步骤的 outputData（使用 composite key）
-    const kfOutputData = (keyframesStep.outputData as any) || {}
-    const kfResults = (kfOutputData.results || []).filter((r: any) =>
-      !(r.shotId === body.shotId && (actNumber == null || r.actNumber === actNumber))
-    )
-    kfResults.push({
-      shotId: body.shotId,
-      actNumber: shot.actNumber,
-      firstFrameUrl: shot.firstFrameUrl || shot.referenceImageUrl || '',
-      lastFrameUrl: result.url,
-      description: shot.description,
-      actionChange: '',
-    })
-    await prisma.workflowStep.update({
-      where: { id: keyframesStep.id },
-      data: { outputData: { ...kfOutputData, results: kfResults, keyframes: kfResults } }
+    await mergeStepOutputData(keyframesStep.id, (kfFresh) => {
+      const kfResults: any[] = (kfFresh.results || kfFresh.keyframes || []).filter(
+        (r: any) => !(r.shotId === body.shotId && (actNumber == null || r.actNumber === actNumber))
+      )
+      kfResults.push({
+        shotId: body.shotId,
+        actNumber: shot.actNumber,
+        firstFrameUrl: shot.firstFrameUrl || shot.referenceImageUrl || '',
+        firstFrameStorageKey: shot.firstFrameStorageKey || null,
+        lastFrameUrl: result.url,
+        lastFrameStorageKey: result.storageKey,
+        description: shot.description,
+        actionChange: '',
+        isMock: !!result.isMock,
+      })
+      return { ...kfFresh, results: kfResults, keyframes: kfResults }
     })
 
     console.log('[KEYFRAMES-GENERATE-LAST] 尾帧生成完成, lastFrameUrl:', result.url?.slice(0, 80))
+
+    // 真实模型全失败时回退到占位图，不按正常产出收费
+    if (result.isMock) {
+      await deductPointsAndLog(userId, pointsCheck.cost, 'error', {
+        projectId: params.id,
+        workflowStepId: keyframesStep.id,
+        success: false,
+        errorMessage: `AI 生图模型全部失败，已回退为占位预览图：${result.lastError || '未知原因'}`,
+      })
+      return NextResponse.json({
+        success: true,
+        isMock: true,
+        lastFrameUrl: result.url,
+        assetId: asset.id,
+        warning: '当前生图服务不可用，返回的是占位预览图，点数未扣除，请稍后重试',
+      })
+    }
 
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: keyframesStep.id, success: true })
     return NextResponse.json({
