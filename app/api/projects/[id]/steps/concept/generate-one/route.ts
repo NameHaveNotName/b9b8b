@@ -75,7 +75,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   // 同步执行：串行生成该 act 的所有场景（每幕 1-2 张，CPU ~10-20s）
   try {
-    await _generateAct(params.id, step.id, outputData, actNumber, aspectRatio, imageModel)
+    await _generateAct(params.id, step.id, outputData, actNumber, aspectRatio, imageModel, userId)
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
     return NextResponse.json({ status: 'COMPLETED', actNumber })
   } catch (err: any) {
@@ -99,7 +99,8 @@ async function _generateAct(
   outputData: any,
   actNumber: number,
   aspectRatio: string,
-  imageModel?: string
+  imageModel?: string,
+  createdById?: string,
 ): Promise<void> {
   const prompts: any[] = outputData.prompts || []
   // 筛选当前 act 的所有场景
@@ -116,7 +117,7 @@ async function _generateAct(
 
   // 串行生成（CPU 时间可控）
   for (const promptItem of actPrompts) {
-    await _generateOne(paramsId, stepId, promptItem._idx, promptItem, aspectRatio, imageModel)
+    await _generateOne(paramsId, stepId, promptItem._idx, promptItem, aspectRatio, imageModel, createdById)
   }
 
   // 有任意 act 完成即标记 CONCEPT 为 COMPLETED
@@ -149,7 +150,8 @@ async function _generateOne(
   sceneIndex: number,
   promptItem: any,
   aspectRatio: string,
-  imageModel?: string
+  imageModel?: string,
+  createdById?: string,
 ): Promise<void> {
   // 去重检查（已有则跳过）
   try {
@@ -203,6 +205,7 @@ async function _generateOne(
       await prisma.asset.create({
         data: {
           projectId: paramsId,
+          createdById,
           stepId,
           type: 'IMAGE',
           mimeType: 'image/png',

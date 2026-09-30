@@ -776,6 +776,7 @@ function WorkflowInspectorDrawerWrapper({
   const [confirmData, setConfirmData] = useState<any>(null)
   const [feedbackData, setFeedbackData] = useState<any>(null)
   const [retryEditData, setRetryEditData] = useState<any>(null)
+  const retryActionsRef = useRef(new Set<string>())
   const [activeView, setActiveView] = useState<'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit'>('task-queue')
 
   const openInspector = useCallback((view: 'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit') => {
@@ -852,6 +853,14 @@ function WorkflowInspectorDrawerWrapper({
 
   // 重试副工作台的"重新生成"按钮实际执行
   const executeRetryRegenerate = useCallback(async (data: any, options: { promptOverride: string; refs: string[] }) => {
+    const targetKey = `${data.actNumber ?? 0}_${data.targetId}`
+    if (retryActionsRef.current.has(targetKey)) return
+    retryActionsRef.current.add(targetKey)
+    const clientActionId = crypto.randomUUID()
+    window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
+      key: targetKey,
+      state: { status: 'processing', shotId: data.targetId, actNumber: data.actNumber, startedAt: new Date().toISOString(), message: '请求已受理，正在准备生成' },
+    } }))
     setIsOpen(false)
     try {
       const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
@@ -865,24 +874,45 @@ function WorkflowInspectorDrawerWrapper({
           mode: 'regenerate',
           promptOverride: options.promptOverride,
           refImages: options.refs,
+          clientActionId,
         }),
       })
       const result = await res.json()
       if (!res.ok || !result.success) throw new Error(result.message || `HTTP ${res.status}`)
+      if (result.duplicate && result.operationStatus !== 'SUCCEEDED') {
+        if ((window as any).__refreshProject) (window as any).__refreshProject()
+        ;(window as any).__showToast?.({ kind: 'success', message: result.message || '任务已受理，正在处理中' })
+        return
+      }
       // 触发项目数据刷新（主页面 useSWR）
       if ((window as any).__refreshProject) (window as any).__refreshProject()
+      window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: { key: targetKey, state: { status: 'completed' } } }))
       if (result.isMock) {
         ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，请切换模型重试' })
       } else {
         ;(window as any).__showToast?.({ kind: 'success', message: '分镜草图已重新生成' })
       }
     } catch (e: any) {
+      window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
+        key: targetKey,
+        state: { status: 'failed', message: e?.message || '重新生成失败' },
+      } }))
       ;(window as any).__showToast?.({ kind: 'error', message: '重新生成失败：' + e?.message })
+    } finally {
+      retryActionsRef.current.delete(targetKey)
     }
   }, [projectId])
 
   // 重试副工作台的"修改原图"按钮实际执行
   const executeRetryEditOriginal = useCallback(async (data: any, options: { editInstruction: string; refs: string[] }) => {
+    const targetKey = `${data.actNumber ?? 0}_${data.targetId}`
+    if (retryActionsRef.current.has(targetKey)) return
+    retryActionsRef.current.add(targetKey)
+    const clientActionId = crypto.randomUUID()
+    window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
+      key: targetKey,
+      state: { status: 'processing', shotId: data.targetId, actNumber: data.actNumber, startedAt: new Date().toISOString(), message: '请求已受理，正在修改原图' },
+    } }))
     setIsOpen(false)
     try {
       const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
@@ -896,18 +926,31 @@ function WorkflowInspectorDrawerWrapper({
           mode: 'edit-original',
           editInstruction: options.editInstruction,
           refImages: options.refs,
+          clientActionId,
         }),
       })
       const result = await res.json()
       if (!res.ok || !result.success) throw new Error(result.message || `HTTP ${res.status}`)
+      if (result.duplicate && result.operationStatus !== 'SUCCEEDED') {
+        if ((window as any).__refreshProject) (window as any).__refreshProject()
+        ;(window as any).__showToast?.({ kind: 'success', message: result.message || '任务已受理，正在处理中' })
+        return
+      }
       if ((window as any).__refreshProject) (window as any).__refreshProject()
+      window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: { key: targetKey, state: { status: 'completed' } } }))
       if (result.isMock) {
         ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，请切换模型重试' })
       } else {
         ;(window as any).__showToast?.({ kind: 'success', message: '修改完成' })
       }
     } catch (e: any) {
+      window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
+        key: targetKey,
+        state: { status: 'failed', message: e?.message || '修改失败' },
+      } }))
       ;(window as any).__showToast?.({ kind: 'error', message: '修改失败：' + e?.message })
+    } finally {
+      retryActionsRef.current.delete(targetKey)
     }
   }, [projectId])
 
@@ -5231,7 +5274,21 @@ function StoryboardPanel({
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
   const [confirmingShotId, setConfirmingShotId] = useState<string | null>(null)
-  const generatingShots: Record<string, any> = step.outputData?.generatingShots || {}
+  const [localGeneratingShots, setLocalGeneratingShots] = useState<Record<string, any>>({})
+  const generatingShots: Record<string, any> = {
+    ...(step.outputData?.generatingShots || {}),
+    ...localGeneratingShots,
+  }
+
+  useEffect(() => {
+    const handleGenerationState = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; state?: Record<string, any> }>).detail
+      if (!detail?.key || !detail.state) return
+      setLocalGeneratingShots((current) => ({ ...current, [detail.key!]: detail.state }))
+    }
+    window.addEventListener('storyboard-generation-state', handleGenerationState)
+    return () => window.removeEventListener('storyboard-generation-state', handleGenerationState)
+  }, [])
 
   // [DRAG-REF] 用户拖入到分镜卡片的额外参考图（key = `${shotId}_${actNumber}` 或仅 shotId）
 // 从 outputData.shotExtraRefs 初始化，刷新后保留

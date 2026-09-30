@@ -79,16 +79,16 @@ export default function ContributionPanel({ groupId }: { groupId: string }) {
   const cards = [
     ['生成请求', data.summary.requestCount],
     ['供应商调用', data.summary.providerCallCount],
-    ['生成结果', data.summary.outputCount],
-    ['采用结果', data.summary.adoptedCount],
-    ['采用率', `${(data.summary.adoptionRate * 100).toFixed(1)}%`],
+    ['生成产出总量', data.summary.outputCount],
+    ['当前有效贡献', data.summary.adoptedCount],
+    ['当前采用率', `${(data.summary.adoptionRate * 100).toFixed(1)}%`],
     ['净消耗点数', data.summary.netPointsCost],
   ]
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-stone-500">请求与结果独立统计；保留在分镜、尾帧或视频表中的结果自动视为已采用。</p>
+        <p className="text-sm text-stone-500">生成产出包含历史版本；当前有效贡献按项目、步骤、镜头与帧角色去重。无法追溯操作者的旧数据标记为“未知”，不归给项目所有者。</p>
         <div className="flex gap-2">
           <a href={`/api/groups/${groupId}/contributions/export?days=${days}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`} className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-600 hover:bg-stone-50">导出 CSV</a>
           <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm">
@@ -109,7 +109,7 @@ export default function ContributionPanel({ groupId }: { groupId: string }) {
         <div className="border-b px-4 py-3 text-sm font-medium text-stone-700">成员汇总</div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="bg-stone-50 text-xs text-stone-500"><tr>{['成员', '生成请求', '生成结果', '采用数', '采用率', '净点数'].map((item) => <th key={item} className="px-4 py-3 font-medium">{item}</th>)}</tr></thead>
+            <thead className="bg-stone-50 text-xs text-stone-500"><tr>{['成员', '生成请求', '生成产出', '有效贡献', '当前采用率', '净点数'].map((item) => <th key={item} className="px-4 py-3 font-medium">{item}</th>)}</tr></thead>
             <tbody className="divide-y">{data.members.map((member) => <tr key={member.user.id}><td className="px-4 py-3"><div>{member.user.name || '未命名'}</div><div className="text-xs text-stone-400">{member.user.email}</div></td><td className="px-4 py-3">{member.requestCount}</td><td className="px-4 py-3">{member.outputCount}</td><td className="px-4 py-3">{member.adoptedCount}</td><td className="px-4 py-3">{(member.adoptionRate * 100).toFixed(1)}%</td><td className="px-4 py-3">{member.netPointsCost}</td></tr>)}</tbody>
           </table>
         </div>

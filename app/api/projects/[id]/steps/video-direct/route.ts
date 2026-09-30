@@ -57,7 +57,8 @@ async function backgroundGenerateDirectSegment(
   lastFrameUrl: string | null,
   duration: number,
   videoModel?: string,
-  aspectRatio?: string
+  aspectRatio?: string,
+  createdById?: string,
 ): Promise<{ success: boolean; resultId?: string; errorMessage?: string }> {
   try {
     console.log(`[DIRECT-SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
@@ -87,6 +88,7 @@ async function backgroundGenerateDirectSegment(
     const asset = await prisma.asset.create({
       data: {
         projectId,
+        createdById,
         type: 'VIDEO',
         mimeType: 'video/mp4',
         storageKey: result.storageKey,
@@ -237,7 +239,7 @@ async function handleGenerateDirectPrompts(projectId: string, stepId: string, us
     }
 
     const { generateSegmentPrompts } = await import('@/lib/video-segment-utils')
-    const segments = await generateSegmentPrompts(projectId, 'VIDEO_DIRECT', shots)
+    const segments = await generateSegmentPrompts(projectId, 'VIDEO_DIRECT', shots, userId)
 
     await prisma.workflowStep.update({
       where: { id: stepId },
@@ -316,6 +318,7 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
     const outcome = await backgroundGenerateDirectSegment(
       segmentId, projectId, segment.prompt, firstFrameUrl, lastFrameUrl,
       segment.duration || 5, body?.videoModel, defaultAspectRatio,
+      userId,
     )
     if (outcome.success) {
       await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId, resultId: outcome.resultId })
@@ -399,7 +402,8 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
         lastFrameUrl,
         segment.duration || 5,
         body?.videoModel,
-        defaultAspectRatio
+        defaultAspectRatio,
+        userId,
       )
       if (outcome.success) {
         succeeded += 1

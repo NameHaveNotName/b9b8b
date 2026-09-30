@@ -44,6 +44,8 @@ export interface PointsCheckResult {
   cost: number
   billingSource: BillingSource
   billingGroupId: string | null
+  duplicateOperation?: boolean
+  operationStatus?: string
 }
 
 interface BillingTarget {
@@ -98,6 +100,7 @@ export async function checkPoints(
   projectId?: string,
   actionKey?: string,
   category?: OperationCategory,
+  idempotencyKey?: string,
 ): Promise<PointsCheckResult> {
   // This must run before the first await in this function. See
   // prepareOperationContext for why the timing matters.
@@ -111,6 +114,28 @@ export async function checkPoints(
       cost,
       billingSource: 'USER',
       billingGroupId: null,
+    }
+  }
+
+  // 网络重试必须先于余额判断命中原操作；原请求可能已经完成扣点，若先检查
+  // 当前余额，会把安全重放误报为余额不足。
+  if (idempotencyKey) {
+    const existing = await prisma.operationLog.findUnique({
+      where: { idempotencyKey },
+      select: { id: true, userId: true, status: true, billingSource: true, billingGroupId: true },
+    })
+    if (existing && existing.userId === userId) {
+      activateOperationContext(pendingOperationContext, existing.id, userId)
+      return {
+        ok: true,
+        userId,
+        currentPoints: 0,
+        cost,
+        billingSource: existing.billingSource === 'GROUP' ? 'GROUP' : 'USER',
+        billingGroupId: existing.billingGroupId,
+        duplicateOperation: true,
+        operationStatus: existing.status,
+      }
     }
   }
 
@@ -129,7 +154,7 @@ export async function checkPoints(
   const ok = target.currentPoints >= target.cost
   if (ok) {
     try {
-      const operationId = await beginSupplierOperation({
+      const operation = await beginSupplierOperation({
         userId,
         pointsCost: target.cost,
         billingSource: target.source,
@@ -137,9 +162,23 @@ export async function checkPoints(
         projectId,
         actionKey,
         category,
+        idempotencyKey,
       })
-      activateOperationContext(pendingOperationContext, operationId, userId)
+      activateOperationContext(pendingOperationContext, operation.operationId, userId)
+      if (operation.duplicate) {
+        return {
+          ok: true,
+          userId,
+          currentPoints: target.currentPoints,
+          cost: target.cost,
+          billingSource: target.source,
+          billingGroupId: target.groupId,
+          duplicateOperation: true,
+          operationStatus: operation.status,
+        }
+      }
     } catch (error: any) {
+      if (idempotencyKey) throw error
       // Observability is fail-open: an unavailable ledger must not block generation.
       console.error('[supplier-ledger] begin operation failed:', error?.message)
     }

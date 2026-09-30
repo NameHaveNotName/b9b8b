@@ -187,7 +187,7 @@ async function handleGenerateAudio(body: any, userId: string) {
 
   try {
     await resetStaleGeneratingVoiceovers(segment.projectId)
-    const updated = await generateVoiceoverAudio(segmentId, body?.voiceId)
+    const updated = await generateVoiceoverAudio(segmentId, body?.voiceId, userId)
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: segment.projectId, assetId: segmentId, success: true })
     return NextResponse.json({
       success: true,
@@ -220,7 +220,7 @@ async function handleGenerateAllAudio(projectId: string, stepName: string, body:
 
   try {
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, success: true })
-    const segmentIds = await generateAllVoiceoverAudio(projectId, stepName, body?.voiceId)
+    const segmentIds = await generateAllVoiceoverAudio(projectId, stepName, body?.voiceId, userId)
     return NextResponse.json({
       success: true,
       segmentIds,

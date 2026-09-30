@@ -19,7 +19,8 @@ export async function processStyleGeneration(
   projectId: string,
   styleOptions: StyleOption[],
   aspectRatio: string = '16:9',
-  imageModel?: string
+  imageModel?: string,
+  createdById?: string,
 ) {
   console.log(`[StyleProcessor-ENTER] stepId=${stepId}, projectId=${projectId}, styleOptions=${styleOptions.length}, ratio=${aspectRatio}, imageModel=${imageModel || '默认'}`)
   console.log(`[ASPECT-RATIO] [StyleProcessor] Starting for step ${stepId}, ratio: ${aspectRatio}`)
@@ -157,6 +158,7 @@ export async function processStyleGeneration(
         const asset = await prisma.asset.create({
           data: {
             projectId,
+            createdById,
             stepId,
             type: 'IMAGE',
             mimeType: 'image/png',

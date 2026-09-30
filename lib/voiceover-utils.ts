@@ -336,7 +336,7 @@ async function downloadAndUploadAudio(
  * @param voiceId 音色 ID
  * @returns 更新后的配音片段
  */
-export async function generateVoiceoverAudio(segmentId: string, voiceId?: string): Promise<any> {
+export async function generateVoiceoverAudio(segmentId: string, voiceId?: string, createdById?: string): Promise<any> {
   const segment = await prisma.voiceoverSegment.findUnique({
     where: { id: segmentId },
   })
@@ -378,6 +378,7 @@ export async function generateVoiceoverAudio(segmentId: string, voiceId?: string
     await prisma.asset.create({
       data: {
         projectId: segment.projectId,
+        createdById,
         type: 'AUDIO',
         mimeType: 'audio/mpeg',
         storageKey,
@@ -416,7 +417,8 @@ export async function generateVoiceoverAudio(segmentId: string, voiceId?: string
 export async function generateAllVoiceoverAudio(
   projectId: string,
   stepName: string,
-  voiceId?: string
+  voiceId?: string,
+  createdById?: string,
 ): Promise<string[]> {
   await resetStaleGeneratingVoiceovers(projectId)
 
@@ -432,7 +434,7 @@ export async function generateAllVoiceoverAudio(
   const segmentIds: string[] = []
   for (const segment of pendingSegments) {
     try {
-      await generateVoiceoverAudio(segment.id, voiceId)
+      await generateVoiceoverAudio(segment.id, voiceId, createdById)
       segmentIds.push(segment.id)
     } catch (e: any) {
       console.warn(`[VOICEOVER-AUDIO-BATCH] segment ${segment.id} 失败:`, e?.message)

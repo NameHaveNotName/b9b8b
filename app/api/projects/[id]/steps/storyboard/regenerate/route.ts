@@ -131,6 +131,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const actNo = normalizeActNumber(body.actNumber)
   // mode: 'regenerate' (默认) | 'edit-original' (修改原图)
   const mode = bodyMode === 'edit-original' ? 'edit-original' : 'regenerate'
+  const clientActionId = typeof body.clientActionId === 'string'
+    ? body.clientActionId.trim().slice(0, 120)
+    : ''
 
   // body.extraRefs 显式传入时会覆盖持久化的 extraRefs（用于单次手动覆盖）
   let requestExtraRefUrls: string[] = []
@@ -189,9 +192,29 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     .filter((r: any) => typeof r?.url === 'string' && /^https?:\/\//i.test(r.url))
     .map((r: any) => r.url)
 
-  const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE), params.id, 'generation.storyboard_act_image', 'IMAGE')
+  const idempotencyKey = clientActionId
+    ? `storyboard-retry:${userId}:${params.id}:${targetActNumber ?? 0}:${shotId}:${clientActionId}`
+    : undefined
+  const pointsCheck = await checkPoints(
+    getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE),
+    params.id,
+    'generation.storyboard_act_image',
+    'IMAGE',
+    idempotencyKey,
+  )
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001' }, { status: 403 })
+  }
+  if (pointsCheck.duplicateOperation) {
+    const failed = pointsCheck.operationStatus === 'FAILED' || pointsCheck.operationStatus === 'CANCELLED'
+    return NextResponse.json({
+      success: !failed,
+      duplicate: true,
+      operationStatus: pointsCheck.operationStatus,
+      message: failed
+        ? '上次操作已失败，请重新发起'
+        : pointsCheck.operationStatus === 'SUCCEEDED' ? '该操作已完成' : '该镜头已在处理中',
+    }, { status: failed ? 409 : 200 })
   }
   const operationTarget = {
     scopeType: 'SHOT',
@@ -214,6 +237,20 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!shotPrompt) {
     return NextResponse.json({ error: 'VALIDATION_003', message: `镜头 ${shotId} 没有对应的提示词` }, { status: 400 })
   }
+
+  await markShotGeneration({
+    [generationKey]: {
+      status: 'processing',
+      actNumber: targetActNumber,
+      shotId,
+      startedAt: new Date().toISOString(),
+      message: '请求已受理，正在准备生成参数',
+      imageModel: newModel,
+      aspectRatio: newRatio,
+      mode,
+      clientActionId: clientActionId || undefined,
+    },
+  })
 
   let previousShotImageUrl: string | null = null
   let previousShotDesc: string | null = null
@@ -398,6 +435,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         imageModel: newModel,
         aspectRatio: newRatio,
         mode,
+        clientActionId: clientActionId || undefined,
       },
     })
     const result = await generateImage({

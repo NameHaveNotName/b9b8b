@@ -67,8 +67,8 @@ interface WorkflowInspectorDrawerProps {
   onRetryTask?: (task: InspectorTask) => void
   // Storyboard retry/edit
   retryEditData?: RetryEditData | null
-  onRetryRegenerate?: (data: RetryEditData, options: { promptOverride: string; refs: string[] }) => void
-  onRetryEditOriginal?: (data: RetryEditData, options: { editInstruction: string; refs: string[] }) => void
+  onRetryRegenerate?: (data: RetryEditData, options: { promptOverride: string; refs: string[] }) => Promise<void> | void
+  onRetryEditOriginal?: (data: RetryEditData, options: { editInstruction: string; refs: string[] }) => Promise<void> | void
 }
 
 /* ============================================================
@@ -674,13 +674,28 @@ function RetryEditView({
   onClose,
 }: {
   data: RetryEditData
-  onRegenerate: (data: RetryEditData, options: { promptOverride: string; refs: string[] }) => void
-  onEditOriginal: (data: RetryEditData, options: { editInstruction: string; refs: string[] }) => void
+  onRegenerate: (data: RetryEditData, options: { promptOverride: string; refs: string[] }) => Promise<void> | void
+  onEditOriginal: (data: RetryEditData, options: { editInstruction: string; refs: string[] }) => Promise<void> | void
   onClose: () => void
 }) {
   const [promptOverride, setPromptOverride] = useState(data.basePrompt)
   const [editInstruction, setEditInstruction] = useState('')
   const [selectedRefs, setSelectedRefs] = useState(() => new Set(data.baseRefs.map((ref) => ref.url)))
+  const [submitting, setSubmitting] = useState<'regenerate' | 'edit' | null>(null)
+
+  const submit = async (kind: 'regenerate' | 'edit') => {
+    if (submitting) return
+    setSubmitting(kind)
+    try {
+      if (kind === 'regenerate') {
+        await onRegenerate(data, { promptOverride: promptOverride.trim(), refs })
+      } else {
+        await onEditOriginal(data, { editInstruction: editInstruction.trim(), refs })
+      }
+    } finally {
+      setSubmitting(null)
+    }
+  }
 
   const toggleRef = (url: string) => {
     setSelectedRefs((current) => {
@@ -750,20 +765,20 @@ function RetryEditView({
         </button>
         {data.originalImageUrl && (
           <button
-            disabled={!editInstruction.trim()}
-            onClick={() => onEditOriginal(data, { editInstruction: editInstruction.trim(), refs })}
+            disabled={Boolean(submitting) || !editInstruction.trim()}
+            onClick={() => submit('edit')}
             className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-medium text-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            修改原图
+            {submitting === 'edit' ? <span className="inline-flex items-center gap-1"><Loader2 className="h-3.5 w-3.5 animate-spin" />提交中</span> : '修改原图'}
           </button>
         )}
         <button
-          disabled={!promptOverride.trim()}
-          onClick={() => onRegenerate(data, { promptOverride: promptOverride.trim(), refs })}
+          disabled={Boolean(submitting) || !promptOverride.trim()}
+          onClick={() => submit('regenerate')}
           className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <RotateCcw className="h-3.5 w-3.5" />
-          重新生成
+          {submitting === 'regenerate' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+          {submitting === 'regenerate' ? '提交中' : '重新生成'}
         </button>
       </div>
     </div>

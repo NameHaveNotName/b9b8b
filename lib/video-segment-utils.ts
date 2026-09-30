@@ -168,7 +168,8 @@ async function generateVideoPromptForShot(args: {
 export async function generateSegmentPrompts(
   projectId: string,
   stepName: 'VIDEO_DIRECT' | 'VIDEO_RENDER',
-  shots: any[]
+  shots: any[],
+  createdById?: string,
 ): Promise<any[]> {
   // 读取框架数据
   const fwStep = await prisma.workflowStep.findUnique({
@@ -201,6 +202,7 @@ export async function generateSegmentPrompts(
       prisma.videoSegment.create({
         data: {
           projectId,
+          createdById,
           shotId: shots[index].shotId || String(index + 1),
           stepName,
           prompt: result.videoPrompt,
@@ -281,7 +283,8 @@ async function generateVideoPromptForConcept(args: {
 export async function generateConceptSegmentPrompts(
   projectId: string,
   stepName: 'TRAILER',
-  conceptImages: any[]
+  conceptImages: any[],
+  createdById?: string,
 ): Promise<any[]> {
   // 读取框架数据
   const fwStep = await prisma.workflowStep.findUnique({
@@ -314,6 +317,7 @@ export async function generateConceptSegmentPrompts(
       return prisma.videoSegment.create({
         data: {
           projectId,
+          createdById,
           // shotId 复用为 concept asset id，video-segments API 可据此匹配图片 URL
           shotId: conceptImage.id || `concept_${index + 1}`,
           stepName,

@@ -66,6 +66,24 @@ function metadataTarget(metadata: unknown, fallbackShotId?: string | null, fallb
   return { targetType: null, targetKey: null, shotId: null, actNumber: null }
 }
 
+function resultRole(metadata: unknown, stepName: string | null | undefined, fallback: string) {
+  const data = recordOf(metadata)
+  const role = data.frameType || data.type || data.role || fallback
+  return `${stepName || 'UNKNOWN'}:${String(role).toLocaleLowerCase()}`
+}
+
+function contributionKey(input: {
+  projectId: string
+  stepName?: string | null
+  targetKey?: string | null
+  role: string
+  fallbackId: string
+}) {
+  return input.targetKey
+    ? `${input.projectId}/${input.stepName || 'UNKNOWN'}/${input.targetKey}/${input.role}`
+    : `${input.projectId}/result/${input.fallbackId}`
+}
+
 function metadataModels(metadata: unknown) {
   const data = recordOf(metadata)
   return [data.model, data.modelUsed, data.imageModel, data.modelId, data.videoModel]
@@ -198,11 +216,11 @@ export async function getGroupContributions(query: ContributionQuery) {
   const attributedUserIds = new Set<string>()
   for (const asset of assets) {
     const linked = resultByAsset.get(asset.id)
-    attributedUserIds.add(asset.createdById || linked?.operation?.userId || projectMap.get(asset.projectId)?.userId || '')
+    attributedUserIds.add(asset.createdById || linked?.operation?.userId || legacyOperationByAsset.get(asset.id)?.userId || '')
   }
   for (const segment of videoSegments) {
     const linked = resultByVideo.get(segment.id)
-    attributedUserIds.add(segment.createdById || linked?.operation?.userId || projectMap.get(segment.projectId)?.userId || '')
+    attributedUserIds.add(segment.createdById || linked?.operation?.userId || '')
   }
   attributedUserIds.delete('')
   const knownUsers = new Map(memberships.map((membership) => [membership.user.id, membership.user]))
@@ -217,8 +235,8 @@ export async function getGroupContributions(query: ContributionQuery) {
   for (const asset of assets) {
     const linkedResult = resultByAsset.get(asset.id)
     const linkedOperation = linkedResult?.operation || legacyOperationByAsset.get(asset.id) || null
-    const memberId = asset.createdById || linkedOperation?.userId || projectMap.get(asset.projectId)?.userId
-    if (!memberId || (query.userId && memberId !== query.userId)) continue
+    const memberId = asset.createdById || linkedOperation?.userId || null
+    if (query.userId && memberId !== query.userId) continue
     const models = [...new Set([...metadataModels(asset.metadata), ...(linkedOperation?.providerAttempts || []).map((attempt: any) => attempt.model).filter(Boolean)])]
     if (!matchesModel(models, query.model)) continue
     const adopted = isAdopted(asset, refs)
@@ -234,7 +252,9 @@ export async function getGroupContributions(query: ContributionQuery) {
       actionKey: linkedOperation?.actionKey || (origin === 'IMPORTED' ? 'asset.import' : 'generation.persisted-result'),
       category: linkedOperation?.category || (origin === 'IMPORTED' ? 'IMPORT' : 'OTHER'),
       status: linkedOperation?.status || (origin === 'IMPORTED' ? 'IMPORTED' : 'SUCCEEDED'),
-      member: knownUsers.get(memberId) || { id: memberId, name: null, email: '' },
+      member: memberId
+        ? knownUsers.get(memberId) || { id: memberId, name: null, email: '' }
+        : { id: '__unknown__', name: '未知操作者', email: '' },
       project: projectMap.get(asset.projectId) || null,
       workflowStepId: asset.stepId,
       stepName: asset.step?.stepType || linkedOperation?.stepName || null,
@@ -253,6 +273,13 @@ export async function getGroupContributions(query: ContributionQuery) {
       completedAt: linkedOperation?.completedAt || asset.createdAt,
       durationMs: linkedOperation?.durationMs ?? null,
       origin,
+      contributionKey: contributionKey({
+        projectId: asset.projectId,
+        stepName: asset.step?.stepType || linkedOperation?.stepName,
+        targetKey: linkedOperation?.scopeKey || target.targetKey,
+        role: resultRole(asset.metadata, asset.step?.stepType || linkedOperation?.stepName, asset.type),
+        fallbackId: asset.id,
+      }),
       results: [{
         id: linkedResult?.id || asset.id,
         kind: linkedResult?.kind || asset.type,
@@ -278,8 +305,8 @@ export async function getGroupContributions(query: ContributionQuery) {
     if (keys.some((key) => countedVideoKeys.has(key))) continue
     const linkedResult = resultByVideo.get(segment.id)
     const linkedOperation = linkedResult?.operation || null
-    const memberId = segment.createdById || linkedOperation?.userId || projectMap.get(segment.projectId)?.userId
-    if (!memberId || (query.userId && memberId !== query.userId)) continue
+    const memberId = segment.createdById || linkedOperation?.userId || null
+    if (query.userId && memberId !== query.userId) continue
     const models = [...new Set([...metadataModels(linkedResult?.metadata), ...(linkedOperation?.providerAttempts || []).map((attempt: any) => attempt.model)].filter(Boolean))] as string[]
     if (!matchesModel(models, query.model)) continue
     if (!matchesAdoption(true, query.adoptionStatus)) continue
@@ -291,7 +318,9 @@ export async function getGroupContributions(query: ContributionQuery) {
       actionKey: linkedOperation?.actionKey || 'generation.persisted-video',
       category: linkedOperation?.category || 'VIDEO',
       status: linkedOperation?.status || 'SUCCEEDED',
-      member: knownUsers.get(memberId) || { id: memberId, name: null, email: '' },
+      member: memberId
+        ? knownUsers.get(memberId) || { id: memberId, name: null, email: '' }
+        : { id: '__unknown__', name: '未知操作者', email: '' },
       project: projectMap.get(segment.projectId) || null,
       workflowStepId: null,
       stepName: segment.stepName || linkedOperation?.stepName || null,
@@ -310,6 +339,13 @@ export async function getGroupContributions(query: ContributionQuery) {
       completedAt: linkedOperation?.completedAt || segment.updatedAt,
       durationMs: linkedOperation?.durationMs ?? null,
       origin: 'GENERATED',
+      contributionKey: contributionKey({
+        projectId: segment.projectId,
+        stepName: segment.stepName || linkedOperation?.stepName,
+        targetKey: linkedOperation?.scopeKey || target.targetKey,
+        role: resultRole(linkedResult?.metadata, segment.stepName || linkedOperation?.stepName, 'video'),
+        fallbackId: segment.id,
+      }),
       results: [{
         id: linkedResult?.id || segment.id,
         kind: 'VIDEO',
@@ -325,6 +361,18 @@ export async function getGroupContributions(query: ContributionQuery) {
   }
 
   resultRows.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+  // 一个当前业务目标只贡献一次。按时间倒序保留最新采用结果，历史版本仍保留在
+  // “生成产出”中，但不再抬高当前有效贡献。
+  const currentContributionKeys = new Set<string>()
+  for (const row of resultRows) {
+    if (row.results[0]?.adoptionStatus !== 'ADOPTED') continue
+    if (currentContributionKeys.has(row.contributionKey)) {
+      row.results[0].adoptionStatus = 'SUPERSEDED'
+      row.results[0].adoptedAt = null
+      continue
+    }
+    currentContributionKeys.add(row.contributionKey)
+  }
   const memberMap = new Map(memberships.map((membership) => [membership.user.id, {
     user: membership.user,
     requestCount: 0,
@@ -375,7 +423,7 @@ export async function getGroupContributions(query: ContributionQuery) {
   }
 
   const outputCount = resultRows.length
-  const adoptedCount = resultRows.filter((row) => row.results[0]?.adoptionStatus === 'ADOPTED').length
+  const adoptedCount = currentContributionKeys.size
   const page = query.page || 1
   const pageSize = query.pageSize || Math.max(1, outputCount)
   const pagedRows = resultRows.slice((page - 1) * pageSize, page * pageSize)

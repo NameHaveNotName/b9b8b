@@ -34,7 +34,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     const firstResult = row.results[0]
     const shot = firstResult?.shotId ? `第${firstResult.actNumber || '-'}幕/${firstResult.shotId}` : row.scopeKey || ''
     return [
-      row.member.name || '未命名',
+      row.member.name || (row.member.id === '__unknown__' ? '未知操作者' : '未命名'),
       row.member.email,
       row.project?.title || '',
       row.stepName || row.actionKey,

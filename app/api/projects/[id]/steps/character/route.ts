@@ -429,6 +429,7 @@ async function generateCharacterImagesBackground(
         const asset = await prisma.asset.create({
           data: {
             projectId,
+            createdById: userId,
             stepId,
             type: 'IMAGE',
             mimeType: 'image/png',

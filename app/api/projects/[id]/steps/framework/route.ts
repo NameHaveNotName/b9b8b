@@ -274,6 +274,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       await prisma.asset.create({
         data: {
           projectId: params.id,
+          createdById: userId,
           stepId: step.id,
           type: 'TEXT',
           mimeType: 'application/json',

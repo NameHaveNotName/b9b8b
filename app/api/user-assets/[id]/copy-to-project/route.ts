@@ -39,6 +39,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const asset = await prisma.asset.create({
     data: {
       projectId,
+      createdById: user.id,
       type: 'REFERENCE',
       mimeType: userAsset.mimeType,
       storageKey: `user-asset:${userAsset.id}`,

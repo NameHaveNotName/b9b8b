@@ -296,7 +296,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           (async () => {
             console.log(`[STYLE-IMAGE] waitUntil 回调开始执行，stepId=${step.id}`)
             try {
-              await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel)
+              await processStyleGeneration(step.id, params.id, styleOptions, aspectRatio, imageModel, userId)
               console.log(`[STYLE-IMAGE] waitUntil 回调成功完成，stepId=${step.id}`)
             } catch (e: any) {
               // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED
@@ -508,7 +508,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         (async () => {
           console.log(`[STYLE] waitUntil 回调开始执行（compat），stepId=${step.id}`)
           try {
-            await processStyleGeneration(step.id, params.id, styleOptions, aspectRatioCompat, undefined)
+            await processStyleGeneration(step.id, params.id, styleOptions, aspectRatioCompat, undefined, userId)
             console.log(`[STYLE] waitUntil 回调成功完成（compat），stepId=${step.id}`)
           } catch (e: any) {
             // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED

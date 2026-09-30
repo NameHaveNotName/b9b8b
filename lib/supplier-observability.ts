@@ -74,25 +74,40 @@ export async function beginSupplierOperation(input: {
   scopeType?: string
   scopeKey?: string
 }) {
-  const operation = await prisma.operationLog.create({
-    data: {
-      userId: input.userId,
-      type: 'generate',
-      actionKey: input.actionKey || 'generation.unknown',
-      category: input.category || 'OTHER',
-      status: 'SUBMITTED',
-      projectId: input.projectId,
-      pointsCost: input.pointsCost,
-      success: false,
-      billingSource: input.billingSource || 'USER',
-      billingGroupId: input.billingGroupId,
-      idempotencyKey: input.idempotencyKey,
-      scopeType: input.scopeType,
-      scopeKey: input.scopeKey,
-    },
-  })
+  const data = {
+    userId: input.userId,
+    type: 'generate',
+    actionKey: input.actionKey || 'generation.unknown',
+    category: input.category || 'OTHER',
+    status: 'SUBMITTED',
+    projectId: input.projectId,
+    pointsCost: input.pointsCost,
+    success: false,
+    billingSource: input.billingSource || 'USER',
+    billingGroupId: input.billingGroupId,
+    idempotencyKey: input.idempotencyKey,
+    scopeType: input.scopeType,
+    scopeKey: input.scopeKey,
+  }
+  let operation: { id: string; status: string }
+  let duplicate = false
+  try {
+    operation = await prisma.operationLog.create({ data, select: { id: true, status: true } })
+  } catch (error: unknown) {
+    const errorCode = error && typeof error === 'object' && 'code' in error
+      ? String(error.code)
+      : null
+    if (!input.idempotencyKey || errorCode !== 'P2002') throw error
+    const existing = await prisma.operationLog.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: { id: true, userId: true, status: true },
+    })
+    if (!existing || existing.userId !== input.userId) throw error
+    operation = existing
+    duplicate = true
+  }
   enterOperationContext(operation.id, input.userId)
-  return operation.id
+  return { operationId: operation.id, duplicate, status: operation.status }
 }
 
 export async function setCurrentOperationTarget(target: OperationTarget) {

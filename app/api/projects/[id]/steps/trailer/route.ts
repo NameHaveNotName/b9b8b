@@ -20,7 +20,8 @@ import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 async function processTrailerInline(
   stepId: string,
   projectId: string,
-  conceptImageKeys: string[]
+  conceptImageKeys: string[],
+  createdById?: string,
 ) {
   console.log(`[TRAILER-JOB-START] inline=true, stepId=${stepId}, projectId=${projectId}, timestamp=${new Date().toISOString()}`)
   console.log(`[TRAILER-JOB-DATA] conceptImages count=${conceptImageKeys.length}`)
@@ -32,6 +33,7 @@ async function processTrailerInline(
     await prisma.asset.create({
       data: {
         projectId,
+        createdById,
         stepId,
         type: 'VIDEO',
         mimeType: 'video/mp4',
@@ -98,7 +100,8 @@ async function backgroundGenerateSegment(
   imageUrl: string,
   duration: number,
   videoModel?: string,
-  aspectRatio?: string
+  aspectRatio?: string,
+  createdById?: string,
 ): Promise<{ success: boolean; resultId?: string; errorMessage?: string }> {
   try {
     console.log(`[SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
@@ -131,6 +134,7 @@ async function backgroundGenerateSegment(
     const asset = await prisma.asset.create({
       data: {
         projectId,
+        createdById,
         type: 'VIDEO',
         mimeType: 'video/mp4',
         storageKey: result.storageKey,
@@ -367,7 +371,7 @@ async function handleLegacyTrailer(
 
   if (!queued) {
     console.log(`[TRAILER-POST] 走 waitUntil 兜底分支`)
-    waitUntil(processTrailerInline(step.id, projectId, conceptImageKeys))
+    waitUntil(processTrailerInline(step.id, projectId, conceptImageKeys, userId))
   }
 
   return NextResponse.json({
@@ -397,7 +401,7 @@ async function handleGeneratePrompts(projectId: string, stepId: string, callerUs
     }
 
     const { generateConceptSegmentPrompts } = await import('@/lib/video-segment-utils')
-    const segments = await generateConceptSegmentPrompts(projectId, 'TRAILER', conceptImages)
+    const segments = await generateConceptSegmentPrompts(projectId, 'TRAILER', conceptImages, userId)
 
     // 更新 step 状态为 PENDING
     await prisma.workflowStep.update({
@@ -487,6 +491,7 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
     const outcome = await backgroundGenerateSegment(
       segmentId, projectId, 'TRAILER', segment.prompt, imageUrl,
       segment.duration || 5, body?.videoModel, body?.aspectRatio,
+      userId,
     )
     if (outcome.success) {
       await finalizeCurrentSupplierOperation({ status: 'SUCCEEDED', projectId, workflowStepId: stepId, resultId: outcome.resultId })
@@ -563,7 +568,8 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
         imageUrl,
         segment.duration || 5,
         body?.videoModel,
-        body?.aspectRatio
+        body?.aspectRatio,
+        userId,
       )
       if (outcome.success) {
         succeeded += 1
