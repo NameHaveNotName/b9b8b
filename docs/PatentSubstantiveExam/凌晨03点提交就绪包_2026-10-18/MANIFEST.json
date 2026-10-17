@@ -1,0 +1,42 @@
+{
+  "applicationNumber": "2026109280496",
+  "inventionTitle": "一种基于AI工作流的影视前期制作方法及系统",
+  "draftDossierNumber": "10000568328326",
+  "previousClaimsDossierNumber": "10000568252354",
+  "oldAbstractCharactersExcludingWhitespace": 322,
+  "oldAbstractRawCharacters": 323,
+  "newAbstractCharactersIncludingPunctuation": 268,
+  "abstractDrawing": "原说明书附图图3",
+  "files": [
+    {
+      "name": "01_说明书摘要_268字.txt",
+      "bytes": 801,
+      "sha256": "eddbda6060954040d7726c0b723df967c2748f5e9f9253e88c17784cceaf9ec2"
+    },
+    {
+      "name": "02_原说明书摘要_322字.txt",
+      "bytes": 902,
+      "sha256": "ac3ba7fa46b7008615cddf3894555b8549917a38a424ca304e5701434cb6e994"
+    },
+    {
+      "name": "03_主动补正内容录入表.md",
+      "bytes": 1519,
+      "sha256": "f8593be3c38933edc937c288b7acb1350110313daf77587f7e483e1166d9056c"
+    },
+    {
+      "name": "04_摘要附图_原说明书图3.jpg",
+      "bytes": 349772,
+      "sha256": "007495ec9397c013ce988b4383ac76d6301beabdeb11e4095d175e90ed3235f0"
+    },
+    {
+      "name": "04_浏览器提交步骤.md",
+      "bytes": 1841,
+      "sha256": "453d6de96561bd7c66c190a56d685e1c7df8cd37287f4099dac99af92d398dfd"
+    },
+    {
+      "name": "05_最终核验清单.md",
+      "bytes": 993,
+      "sha256": "ca7d5b812132ea4ffb365fa386b76a30d718f2f264407ce9985fa2f45221d400"
+    }
+  ]
+}
