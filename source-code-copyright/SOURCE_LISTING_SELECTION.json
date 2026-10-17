@@ -1,0 +1,14 @@
+{
+  "software": "AI 影视全流程工作流系统",
+  "version": "V1.0",
+  "gitCommit": "a5824ea12b10725d5abdd7a39c72a12cfaeafc97",
+  "productSourceFiles": 224,
+  "sourcePhysicalLines": 51898,
+  "layoutLines": 64991,
+  "listingPages": 60,
+  "linesPerPage": 50,
+  "frontStart": "app/layout.tsx",
+  "frontEnd": "app/(dashboard)/groups/[id]/page.tsx",
+  "backStart": "lib/workflow-state.ts",
+  "backEnd": "types/index.ts"
+}

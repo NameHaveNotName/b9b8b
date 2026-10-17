@@ -1,0 +1,52 @@
+{
+  "generated": "2026-10-17",
+  "software": "AI 影视全流程工作流系统",
+  "version": "V1.0",
+  "files": [
+    {
+      "path": "Deliverables/01_源程序鉴别材料.docx",
+      "bytes": 118697,
+      "sha256": "ab8a45aa94b6673d6070f00fd8aa515ca912aa6ae74fe36744a7e7fa3a09f433"
+    },
+    {
+      "path": "Deliverables/02_软件操作说明书.docx",
+      "bytes": 2083751,
+      "sha256": "d1c579d5fa41fb738873748dc890a09592dfe1b2b94b90073e1cf5deebf8c687"
+    },
+    {
+      "path": "Deliverables/03_源代码归档.zip",
+      "bytes": 772390,
+      "sha256": "972ea5b21d7300784084ad6f96dd627297ad0c29bc640f3eaa47068968fde903"
+    },
+    {
+      "path": "PrivateDeliverables/04_软著信息采集表_完整版.docx",
+      "bytes": 40754,
+      "sha256": "4bbba9049e92b88377eb8d60b5d1070dd239e2902d8b4ebe58a8f2798c00eb80"
+    },
+    {
+      "path": "PrivateDeliverables/05_计算机软件著作权客户登记申请表_完整版.docx",
+      "bytes": 22062,
+      "sha256": "a9f14b97de575c2b47f564dccb73668b3706eff9234749feb5d931b53f82366f"
+    },
+    {
+      "path": "05_源代码文件与哈希清单.csv",
+      "bytes": 27373,
+      "sha256": "1186acc6808130484e2aae9d8ba4895e9b39361bca90f65f7389d6f14278e94b"
+    },
+    {
+      "path": "SOURCE_LISTING_SELECTION.json",
+      "bytes": 434,
+      "sha256": "d8ec200309ee76d16bb799646f6b07eb77b1ac2a007877d5b631b6b084fad3dc"
+    },
+    {
+      "path": "Deliverables/01_源程序鉴别材料.pdf",
+      "bytes": 5726768,
+      "sha256": "8163a5bdf87d40bf9472c74689bfeec5ef265c9fe24071ca48b04de2ab7d6723"
+    },
+    {
+      "path": "Deliverables/02_软件操作说明书.pdf",
+      "bytes": 1466486,
+      "sha256": "03fb1315fea156216880aba5d68966638c73b5464ec27d564e30b435113c7d93"
+    }
+  ]
+}
