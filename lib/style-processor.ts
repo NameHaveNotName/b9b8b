@@ -31,13 +31,14 @@ export async function processStyleGeneration(
   aspectRatio: string = '16:9',
   imageModel?: string,
   createdById?: string,
-  billing?: StyleBillingContext
+  billing?: StyleBillingContext,
+  referenceOverrides?: string[]
 ) {
   console.log(`[StyleProcessor-ENTER] stepId=${stepId}, projectId=${projectId}, styleOptions=${styleOptions.length}, ratio=${aspectRatio}, imageModel=${imageModel || '默认'}`)
   console.log(`[ASPECT-RATIO] [StyleProcessor] Starting for step ${stepId}, ratio: ${aspectRatio}`)
 
   const userRefs = await getProjectReferences(projectId).catch(() => [])
-  const userRefUrls = userRefs.filter(r => r.url).map(r => r.url)
+  const userRefUrls = referenceOverrides || userRefs.filter(r => r.url).map(r => r.url)
   console.log(`[StyleProcessor] 用户参考图: ${userRefUrls.length} 张`)
 
   // 幂等检查：若 step 已 COMPLETED/FAILED，直接跳过（防止 BullMQ + setImmediate 双触发）

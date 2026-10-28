@@ -3,8 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import fs from 'fs'
-import path from 'path'
+import { resolveStorageReference, toStorageReference, uploadFile } from '@/lib/r2'
 import {
   safeSegment,
   resolveUploadExtension,
@@ -12,7 +11,8 @@ import {
 } from '@/lib/upload-safety'
 
 /**
- * 保存充值凭证图片到本地 mock-storage
+ * 保存充值凭证图片到持久对象存储。
+ * 数据库只保存稳定 storage key，读取时再签发短期 URL。
  */
 async function saveProofImage(userId: string, file: File): Promise<string> {
   // 扩展名只信任 MIME 白名单：file.name 完全由客户端控制，
@@ -27,20 +27,9 @@ async function saveProofImage(userId: string, file: File): Promise<string> {
 
   const buffer = Buffer.from(await file.arrayBuffer())
   const filename = `recharge_${safeSegment(userId, 'user', 40)}_${Date.now()}.${ext}`
-  const dir = path.join(process.cwd(), 'public', 'mock-storage', 'recharge-proofs')
-
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-
-  // 再兜一层：解析后必须仍在目标目录内
-  const filePath = path.join(dir, filename)
-  if (path.dirname(path.resolve(filePath)) !== path.resolve(dir)) {
-    throw new Error('INVALID_PROOF_PATH')
-  }
-
-  fs.writeFileSync(filePath, buffer)
-  return `/mock-storage/recharge-proofs/${filename}`
+  const storageKey = `users/${safeSegment(userId, 'user', 40)}/recharge-proofs/${filename}`
+  await uploadFile(storageKey, buffer, file.type || `image/${ext}`)
+  return toStorageReference(storageKey)
 }
 
 /**
@@ -116,7 +105,12 @@ export async function GET() {
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ orders })
+    const hydratedOrders = await Promise.all(orders.map(async (order: any) => ({
+      ...order,
+      proofImageUrl: await resolveStorageReference(order.proofImageUrl, 900),
+    })))
+
+    return NextResponse.json({ orders: hydratedOrders })
   } catch (e: any) {
     console.error('[RECHARGE] GET error:', e)
     return NextResponse.json({ error: 'SERVER_001', message: e.message }, { status: 500 })

@@ -29,6 +29,7 @@ interface KeyframesTableProps {
   projectId: string
   onShotsChange: (shots: Shot[]) => void
   onActionChange?: (shotId: string, actionChange: string) => void
+  onToast?: (t: { kind: 'success' | 'error'; message: string } | null) => void
 }
 
 const CAMERA_MOVES = ['推镜头', '拉镜头', '摇镜头', '移镜头', '跟镜头', '升镜头', '降镜头', '固定']
@@ -341,6 +342,7 @@ export default function KeyframesTable({
   projectId,
   onShotsChange,
   onActionChange,
+  onToast,
 }: KeyframesTableProps) {
   const [generatingShotId, setGeneratingShotId] = useState<string | null>(null)
   // 每个镜头的生成失败原因，key = `${actNumber}_${shotId}`。
@@ -412,7 +414,7 @@ export default function KeyframesTable({
       // 原实现用 alert() 阻塞弹窗，且卡片上没有任何失败痕迹，
       // 刷新后无法区分「生成失败过」和「从来没生成过」
       setErrors((prev) => ({ ...prev, [keyOf(shotId, actNumber)]: message }))
-      ;(window as any).__showToast?.({ kind: 'error', message: '尾帧生成失败：' + message })
+      onToast?.({ kind: 'error', message: '尾帧生成失败：' + message })
     } finally {
       setGeneratingShotId(null)
     }

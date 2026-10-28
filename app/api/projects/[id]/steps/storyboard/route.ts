@@ -528,6 +528,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
     const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
+    const requestedRefImages = Array.isArray(body?.refImages) ? body.refImages.filter((url: unknown): url is string => typeof url === 'string' && url.trim().length > 0).slice(0, 30) : undefined
     console.log(`[STORYBOARD-ACT] 开始生成第 ${actNumber} 幕，shotId: ${shotId || 'auto'}，比例: ${aspectRatio}，模型: ${imageModel || '默认'}`)
 
     const pointsCheck = await checkPoints(getImageGenerationCost(imageModel, GENERATION_COSTS.STORYBOARD_ACT_IMAGE), params.id, 'generation.storyboard_act_image', 'IMAGE')
@@ -815,7 +816,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       const characterImageUrls = characterImageRefs.map((ref) => ref.url)
 
       const refs = await getProjectReferences(params.id).catch(() => [])
-      const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+      const userRefUrls = requestedRefImages || refs.filter(r => r.url).map(r => r.url)
 
       const extraRefsKey = actNumber != null ? `${targetShotId}_${actNumber}` : targetShotId
       const persistedExtraRefs: Array<{ url: string; id?: string }> = (existingOutput.shotExtraRefs || {})[extraRefsKey] || []

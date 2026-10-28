@@ -18,6 +18,7 @@ interface VideoDirectPanelProps {
   onExecute: (stepType: string, body?: any) => void
   isAvailable?: boolean
   readOnly?: boolean
+  setToast?: (t: { kind: 'success' | 'error'; message: string } | null) => void
 }
 
 function ProcessingBlock({ message }: { message: string }) {
@@ -397,6 +398,7 @@ export default function VideoDirectPanel({
   onExecute,
   isAvailable = true,
   readOnly,
+  setToast,
 }: VideoDirectPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null)
@@ -506,7 +508,7 @@ export default function VideoDirectPanel({
       console.error('[BGM] 生成失败:', e)
       // 原实现只 console.error：用户只看到按钮恢复正常，完全不知道失败了
       setLocalError('音乐生成失败：' + (e?.message || '未知错误'))
-      ;(window as any).__showToast?.({ kind: 'error', message: '音乐生成失败：' + (e?.message || '未知错误') })
+      setToast?.({ kind: 'error', message: '音乐生成失败：' + (e?.message || '未知错误') })
     } finally {
       setIsGeneratingBgm(false)
     }
@@ -528,7 +530,7 @@ export default function VideoDirectPanel({
     } catch (e: any) {
       console.error('[VOICEOVER] 生成文案失败:', e)
       setLocalError('配音文案生成失败：' + (e?.message || '未知错误'))
-      ;(window as any).__showToast?.({ kind: 'error', message: '配音文案生成失败：' + (e?.message || '未知错误') })
+      setToast?.({ kind: 'error', message: '配音文案生成失败：' + (e?.message || '未知错误') })
     } finally {
       setIsGeneratingScripts(false)
     }
@@ -548,7 +550,7 @@ export default function VideoDirectPanel({
     } catch (e: any) {
       console.error('[VOICEOVER] 生成音频失败:', e)
       setLocalError('配音生成失败：' + (e?.message || '未知错误'))
-      ;(window as any).__showToast?.({ kind: 'error', message: '配音生成失败：' + (e?.message || '未知错误') })
+      setToast?.({ kind: 'error', message: '配音生成失败：' + (e?.message || '未知错误') })
     } finally {
       setGeneratingVoiceId(null)
     }
@@ -569,15 +571,15 @@ export default function VideoDirectPanel({
       // 导致“全部生成音频”失败时用户什么都看不到
       if (data.failedCount > 0) {
         setLocalError(`部分配音生成失败：成功 ${data.count} 条，失败 ${data.failedCount} 条（失败部分未计费）`)
-        ;(window as any).__showToast?.({ kind: 'error', message: data.message || `部分配音生成失败（${data.failedCount} 条）` })
+        setToast?.({ kind: 'error', message: data.message || `部分配音生成失败（${data.failedCount} 条）` })
       } else if (data.message) {
-        ;(window as any).__showToast?.({ kind: 'success', message: data.message })
+        setToast?.({ kind: 'success', message: data.message })
       }
       await mutateVoiceover()
     } catch (e: any) {
       console.error('[VOICEOVER] 批量生成音频失败:', e)
       setLocalError('批量生成配音失败：' + (e?.message || '未知错误'))
-      ;(window as any).__showToast?.({ kind: 'error', message: '批量生成配音失败：' + (e?.message || '未知错误') })
+      setToast?.({ kind: 'error', message: '批量生成配音失败：' + (e?.message || '未知错误') })
     } finally {
       setGeneratingVoiceId(null)
     }
@@ -693,7 +695,7 @@ export default function VideoDirectPanel({
     setIsComposing(false)
     setComposeStartedAt(null)
     setLocalError('视频合成超时或失败，请重新点击「合成视频」重试')
-    ;(window as any).__showToast?.({ kind: 'error', message: '视频合成超时或失败，请重试' })
+    setToast?.({ kind: 'error', message: '视频合成超时或失败，请重试' })
   }, [composeStuck])
 
   const handleGeneratePrompts = () => {

@@ -179,6 +179,7 @@ export default function TrailerPanel({
   projectId,
   executing,
   onExecute,
+  setToast,
   readOnly,
   defaultAspectRatio,
 }: TrailerPanelProps) {
@@ -229,7 +230,7 @@ export default function TrailerPanel({
     } catch (e: any) {
       console.error('[BGM] 生成失败:', e)
       setLocalError('音乐生成失败：' + (e?.message || '未知错误'))
-      ;(window as any).__showToast?.({ kind: 'error', message: '音乐生成失败：' + (e?.message || '未知错误') })
+      setToast?.({ kind: 'error', message: '音乐生成失败：' + (e?.message || '未知错误') })
     } finally {
       setIsGeneratingBgm(false)
     }
@@ -314,7 +315,7 @@ export default function TrailerPanel({
     setIsComposing(false)
     setComposeStartedAt(null)
     setLocalError('视频合成超时或失败，请重新点击「合成视频」重试')
-    ;(window as any).__showToast?.({ kind: 'error', message: '视频合成超时或失败，请重试' })
+    setToast?.({ kind: 'error', message: '视频合成超时或失败，请重试' })
   }, [composeStuck])
 
   if (combinedVideoUrl) {

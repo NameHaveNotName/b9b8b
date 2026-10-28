@@ -154,6 +154,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
     const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
+    const requestedRefImages = Array.isArray(body?.refImages) ? body.refImages.filter((url: unknown): url is string => typeof url === 'string' && url.trim().length > 0).slice(0, 30) : undefined
     console.log(`[ASPECT-RATIO] [CONCEPT-IMAGE] 用户选择比例: ${aspectRatio}`)
     console.log(`[MODEL-SELECT] [CONCEPT-IMAGE] 用户选择模型: ${imageModel || '默认'}`)
 
@@ -247,7 +248,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         .filter((c: any) => c.name) as Array<{ name: string; description: string }>
 
       const refs = await getProjectReferences(params.id).catch(() => [])
-      const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+      const userRefUrls = requestedRefImages || refs.filter(r => r.url).map(r => r.url)
 
       const imageClient = await getImageClient()
       const scenes = []

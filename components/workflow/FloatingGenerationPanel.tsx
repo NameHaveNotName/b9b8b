@@ -46,6 +46,7 @@ interface FloatingGenerationPanelProps {
   onLocateStep?: (stepType: string) => void
   // Callback when user clicks "open asset library"
   onOpenAssetLibrary?: (step: WorkflowStep) => void
+  onOpenWorkbench?: () => void
 }
 
 const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -156,6 +157,7 @@ export default function FloatingGenerationPanel({
   onViewResult,
   onLocateStep,
   onOpenAssetLibrary,
+  onOpenWorkbench,
 }: FloatingGenerationPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [dismissedTasks, setDismissedTasks] = useState<Set<string>>(new Set())
@@ -225,7 +227,7 @@ export default function FloatingGenerationPanel({
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={(e) => { e.stopPropagation(); (window as any).__openInspector?.() }}
+              onClick={(e) => { e.stopPropagation(); onOpenWorkbench?.() }}
               className="rounded-lg border border-stone-200 px-2.5 py-1 text-[11px] font-medium text-stone-500 transition hover:bg-stone-100"
               title="打开生成工作台"
             >

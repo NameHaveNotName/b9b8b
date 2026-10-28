@@ -7,7 +7,7 @@ import { processStyleGeneration } from '../lib/style-processor'
 import { enterOperationContext } from '../lib/supplier-observability'
 
 const worker = new Worker('style-generation', async (job) => {
-  const { stepId, projectId, styleOptions, operationId, operationUserId, billing } = job.data as {
+  const { stepId, projectId, styleOptions, aspectRatio, imageModel, referenceOverrides, operationId, operationUserId, billing } = job.data as {
     stepId: string
     projectId: string
     styleOptions: Array<{
@@ -16,6 +16,9 @@ const worker = new Worker('style-generation', async (job) => {
       styleDescription: string
       prompt: string
     }>
+    aspectRatio?: string
+    imageModel?: string
+    referenceOverrides?: string[]
     operationId?: string
     operationUserId?: string
     billing?: {
@@ -32,8 +35,8 @@ const worker = new Worker('style-generation', async (job) => {
     stepId,
     projectId,
     styleOptions,
-    '16:9',
-    undefined,
+    aspectRatio || '16:9',
+    imageModel,
     operationUserId,
     billing && operationUserId
       ? {
@@ -42,7 +45,8 @@ const worker = new Worker('style-generation', async (job) => {
           billingGroupId: billing.billingGroupId,
           unitCost: billing.unitCost,
         }
-      : undefined
+      : undefined,
+    referenceOverrides
   )
   console.log(`[StyleWorker] Completed job ${job.id}`)
 }, { connection: redisConnection, concurrency: 1 })

@@ -199,6 +199,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (action === 'generate-images') {
     const aspectRatio = body?.aspectRatio || '16:9'
     const imageModel = body?.imageModel
+    const requestedRefImages = Array.isArray(body?.refImages) ? body.refImages.filter((url: unknown): url is string => typeof url === 'string' && url.trim().length > 0).slice(0, 30) : undefined
     console.log(`[ASPECT-RATIO] [STYLE-IMAGE] 用户选择比例: ${aspectRatio}`)
     console.log(`[MODEL-SELECT] [STYLE-IMAGE] 用户选择模型: ${imageModel || '默认'}`)
 
@@ -279,7 +280,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         try {
           await styleQueue.add(
             'generate-style-images',
-            { stepId: step.id, projectId: params.id, styleOptions, aspectRatio, imageModel, operationId: getCurrentOperationId(), operationUserId: userId, billing: { billingSource: pointsCheck.billingSource, billingGroupId: pointsCheck.billingGroupId, unitCost: GENERATION_COSTS.STYLE_UNIFY } },
+            { stepId: step.id, projectId: params.id, styleOptions, aspectRatio, imageModel, referenceOverrides: requestedRefImages, operationId: getCurrentOperationId(), operationUserId: userId, billing: { billingSource: pointsCheck.billingSource, billingGroupId: pointsCheck.billingGroupId, unitCost: GENERATION_COSTS.STYLE_UNIFY } },
             {
               // jobId 按 step 去重：attempts 重试 / 被 Vercel 杀掉后重投时不会并存
               // 第二个任务，避免重复上传资产与重复扣费
@@ -308,7 +309,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
                 billingSource: pointsCheck.billingSource,
                 billingGroupId: pointsCheck.billingGroupId,
                 unitCost: GENERATION_COSTS.STYLE_UNIFY,
-              })
+              }, requestedRefImages)
               console.log(`[STYLE-IMAGE] waitUntil 回调成功完成，stepId=${step.id}`)
             } catch (e: any) {
               // 工作指令.txt（2026-06-02 卡死修复）：后台处理失败必须标记状态为 FAILED

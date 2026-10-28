@@ -190,13 +190,13 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
 function ExecutionView({ run, onBackToConfig }: { run: GenerationRun; onBackToConfig: () => void }) {
   const running = run.status === 'running'
   const success = run.status === 'completed'
-  const failed = run.status === 'failed'
+  const failed = run.status === 'failed' || run.status === 'interrupted'
   return (
     <div className="space-y-4">
       <section className={`rounded-xl border p-4 ${running ? 'border-blue-200 bg-blue-50' : success ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
         <div className="flex items-start gap-3">
           {running ? <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-blue-600" /> : success ? <CheckCircle2 className="mt-0.5 h-5 w-5 text-green-600" /> : <AlertCircle className="mt-0.5 h-5 w-5 text-red-600" />}
-          <div className="min-w-0 flex-1"><p className={`text-sm font-semibold ${running ? 'text-blue-800' : success ? 'text-green-800' : 'text-red-800'}`}>{running ? '任务执行中' : success ? '生成完成' : '生成失败'}</p><p className="mt-1 text-xs leading-relaxed text-stone-600">{run.message}</p>{run.completedAt && <p className="mt-1 text-[10px] text-stone-500">完成于 {new Date(run.completedAt).toLocaleTimeString()}</p>}</div>
+          <div className="min-w-0 flex-1"><p className={`text-sm font-semibold ${running ? 'text-blue-800' : success ? 'text-green-800' : 'text-red-800'}`}>{running ? '任务执行中' : success ? '生成完成' : run.status === 'interrupted' ? '执行已中断' : '生成失败'}</p><p className="mt-1 text-xs leading-relaxed text-stone-600">{run.message}</p>{run.completedAt && <p className="mt-1 text-[10px] text-stone-500">完成于 {new Date(run.completedAt).toLocaleTimeString()}</p>}</div>
         </div>
         {run.previewUrl && <div className="mt-3 overflow-hidden rounded-lg border border-white/80 bg-white">{run.previewType === 'video' ? <video src={run.previewUrl} controls className="max-h-64 w-full" /> : <>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={run.previewUrl} alt="生成结果" className="max-h-64 w-full object-contain" /></>}</div>}
         {run.isMock && <p className="mt-2 text-xs font-medium text-red-700">供应商返回了占位结果，原资产已保留且本次不应计费。</p>}
@@ -206,9 +206,9 @@ function ExecutionView({ run, onBackToConfig }: { run: GenerationRun; onBackToCo
       <section className="rounded-xl border border-stone-200 bg-white p-4">
         <div className="mb-4"><p className="text-xs font-semibold text-stone-700">执行过程记录</p><p className="mt-1 text-[10px] text-stone-500">结果出现后，过程记录保留在下方，便于回看任务实际经历的阶段。</p></div>
         <div className="space-y-0">
-          <div className="grid grid-cols-[18px_1fr] gap-2.5 pb-4"><div className="flex flex-col items-center"><span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-green-500" /><span className="mt-1 w-px flex-1 bg-stone-200" /></div><div><p className="text-xs font-medium text-stone-700">配置已锁定</p><p className="mt-0.5 text-[10px] text-stone-500">提示词、参考图顺序、模型和画幅已保存为本次请求快照。</p></div></div>
-          <div className="grid grid-cols-[18px_1fr] gap-2.5 pb-4"><div className="flex flex-col items-center"><span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-green-500" /><span className="mt-1 w-px flex-1 bg-stone-200" /></div><div><p className="text-xs font-medium text-stone-700">请求已提交</p><p className="mt-0.5 text-[10px] text-stone-500">生成请求已进入当前步骤的供应商调用流程。</p></div></div>
-          <div className="grid grid-cols-[18px_1fr] gap-2.5"><div className="flex flex-col items-center">{running ? <span className="mt-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" /> : success ? <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-green-500" /> : <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-red-500" />}</div><div><p className="text-xs font-medium text-stone-700">{running ? '等待供应商结果' : success ? '结果已返回并保存' : '执行已终止'}</p><p className="mt-0.5 text-[10px] text-stone-500">{running ? '只展示已确认的真实阶段，不估算完成百分比。' : success ? '生成资产已写入当前步骤，可在上方直接预览。' : run.error || run.message}</p>{run.startedAt && <p className="mt-1 text-[10px] text-stone-400">开始于 {new Date(run.startedAt).toLocaleTimeString()}</p>}</div></div>
+          <div className="grid grid-cols-[18px_1fr] gap-2.5 pb-4"><div className="flex flex-col items-center"><span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-green-500" /><span className="mt-1 w-px flex-1 bg-stone-200" /></div><div><p className="text-xs font-medium text-stone-700">请求已入库</p><p className="mt-0.5 text-[10px] text-stone-500">任务编号 {run.taskId || '正在关联'}；配置快照可用于刷新后恢复。</p></div></div>
+          {(run.attempts || []).map((attempt, index) => <div key={attempt.id} className="grid grid-cols-[18px_1fr] gap-2.5 pb-4"><div className="flex flex-col items-center"><span className={`mt-0.5 h-2.5 w-2.5 rounded-full ${attempt.status === 'FAILED' ? 'bg-red-500' : attempt.status === 'RUNNING' ? 'animate-pulse bg-blue-500' : 'bg-green-500'}`} /><span className="mt-1 w-px flex-1 bg-stone-200" /></div><div><p className="text-xs font-medium text-stone-700">供应商调用 {index + 1} · {attempt.provider}{attempt.model ? ` · ${attempt.model}` : ''}</p><p className="mt-0.5 text-[10px] text-stone-500">状态 {attempt.status}{attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ''}{attempt.externalTaskId ? ` · 外部任务 ${attempt.externalTaskId}` : ''}</p>{attempt.error && <p className="mt-1 text-[10px] text-red-600">{attempt.error}</p>}</div></div>)}
+          <div className="grid grid-cols-[18px_1fr] gap-2.5"><div className="flex flex-col items-center">{running ? <span className="mt-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" /> : success ? <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-green-500" /> : <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-red-500" />}</div><div><p className="text-xs font-medium text-stone-700">{run.stage || (running ? '供应商处理中' : success ? '结果已保存' : '执行已终止')}</p><p className="mt-0.5 text-[10px] text-stone-500">{run.message}；不估算虚假百分比。</p>{run.startedAt && <p className="mt-1 text-[10px] text-stone-400">开始于 {new Date(run.startedAt).toLocaleTimeString()}</p>}</div></div>
         </div>
       </section>
 
@@ -389,12 +389,73 @@ function WorkbenchAssetShelf({ projectId, run }: { projectId: string; run: Gener
 export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, draft, run, onDraftChange, onSubmit, onLocateStep }: WorkflowInspectorDrawerProps) {
   const [localDraft, setLocalDraft] = useState<GenerationDraft | null>(draft)
   const [activePanel, setActivePanel] = useState<'配置' | '执行'>('配置')
+  const [selectedTask, setSelectedTask] = useState<any>(null)
   useEffect(() => setLocalDraft(draft), [draft])
   useEffect(() => {
     setActivePanel(run ? '执行' : '配置')
+    if (run) setSelectedTask(null)
   }, [run])
+  const { data: taskData } = useSWR(
+    isOpen ? `/api/projects/${projectId}/generation-tasks?limit=20` : null,
+    assetFetcher,
+    { refreshInterval: run?.status === 'running' ? 3000 : 10000, revalidateOnFocus: true }
+  )
+  const baseRun: GenerationRun | null = run || (selectedTask ? {
+    status: selectedTask.status,
+    message: selectedTask.message,
+    taskId: selectedTask.id,
+    stage: selectedTask.stage,
+    rawStatus: selectedTask.rawStatus,
+    startedAt: selectedTask.startedAt,
+    completedAt: selectedTask.completedAt,
+    error: selectedTask.error,
+    attempts: selectedTask.attempts || [],
+    requestSnapshot: localDraft || undefined,
+  } : null)
+  const persisted = (taskData?.tasks || []).find((task: any) =>
+    (baseRun?.taskId && task.id === baseRun.taskId)
+    || (!baseRun?.taskId && localDraft && task.stepType === localDraft.stepType && (!baseRun?.startedAt || new Date(task.startedAt).getTime() >= new Date(baseRun.startedAt).getTime() - 15000))
+  )
+  const effectiveRun: GenerationRun | null = baseRun && persisted ? {
+    ...baseRun,
+    taskId: persisted.id,
+    status: persisted.status,
+    stage: persisted.stage,
+    rawStatus: persisted.rawStatus,
+    message: persisted.message || baseRun.message,
+    startedAt: persisted.startedAt || baseRun.startedAt,
+    completedAt: persisted.completedAt || baseRun.completedAt,
+    error: persisted.error || baseRun.error,
+    attempts: persisted.attempts || [],
+  } : baseRun
   if (!isOpen) return null
   const updateDraft = (next: GenerationDraft) => { setLocalDraft(next); onDraftChange(next) }
+  const restoreTask = (task: any) => {
+    const snapshot = task.requestSnapshot || {}
+    const restored: GenerationDraft = {
+      stepType: task.stepType || snapshot.stepType || '',
+      kind: snapshot.kind || 'image',
+      targetId: snapshot.targetId,
+      targetLabel: snapshot.targetLabel || STEP_LABELS[task.stepType] || task.stepType,
+      prompt: snapshot.prompt || snapshot.prompts?.[0]?.text || '',
+      promptEditable: true,
+      prompts: Array.isArray(snapshot.prompts) ? snapshot.prompts.map((item: any, index: number) => ({ id: item.id || `${task.id}-${index}`, label: item.label || `提示词 ${index + 1}`, text: item.text || '', textField: 'prompt', source: { prompt: item.text || '' } })) : undefined,
+      references: Array.isArray(snapshot.references) ? snapshot.references.map((item: any) => ({ ...item, type: item.type || 'other', removable: true })) : [],
+      referencesResolved: true,
+      referencesEditable: snapshot.kind === 'image' || snapshot.kind === 'video',
+      model: snapshot.model || '',
+      modelEditable: snapshot.kind === 'image',
+      aspectRatio: snapshot.aspectRatio || '16:9',
+      aspectRatioEditable: snapshot.kind === 'image' || snapshot.kind === 'video',
+      pointCost: 0,
+      inputDeps: [],
+      isRetry: true,
+      requestBody: {},
+    }
+    setSelectedTask(task)
+    updateDraft(restored)
+    setActivePanel('执行')
+  }
 
   return (
     <aside className="fixed right-0 top-0 z-50 flex h-full w-[min(92vw,440px)] flex-col border-l border-stone-200 bg-white shadow-2xl">
@@ -404,7 +465,7 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
       </header>
       <div className="flex-1 overflow-y-auto p-4">
         <div className="space-y-6">
-          {!localDraft ? <div className="flex min-h-52 flex-col items-center justify-center text-center"><Settings2 className="h-10 w-10 text-stone-300" /><p className="mt-3 text-sm font-medium text-stone-600">尚未选择生成任务</p><p className="mt-1 max-w-xs text-xs leading-relaxed text-stone-500">请从任一步骤点击生成、重新生成或修改原图。这里不再重复展示九步任务队列。</p></div> : activePanel === '配置' ? <ConfigurationView draft={localDraft} run={run} onChange={updateDraft} onSubmit={onSubmit} /> : run ? <ExecutionView run={run} onBackToConfig={() => setActivePanel('配置')} /> : <div className="py-12 text-center text-xs text-stone-500">提交配置后将在这里显示执行过程。</div>}
+          {!localDraft ? <div className="space-y-4"><div className="flex min-h-40 flex-col items-center justify-center text-center"><Settings2 className="h-10 w-10 text-stone-300" /><p className="mt-3 text-sm font-medium text-stone-600">尚未选择生成任务</p><p className="mt-1 max-w-xs text-xs leading-relaxed text-stone-500">可从步骤发起生成，或恢复下方最近任务的真实执行记录。</p></div>{(taskData?.tasks || []).slice(0, 5).map((task: any) => <button type="button" key={task.id} onClick={() => restoreTask(task)} className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-3 text-left hover:border-amber-300"><div><p className="text-xs font-semibold text-stone-700">{STEP_LABELS[task.stepType] || task.stepType || task.actionKey}</p><p className="mt-1 text-[10px] text-stone-500">{task.message}</p></div><span className="ml-3 shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[10px] text-stone-600">恢复</span></button>)}</div> : activePanel === '配置' ? <ConfigurationView draft={localDraft} run={effectiveRun} onChange={updateDraft} onSubmit={onSubmit} /> : effectiveRun ? <ExecutionView run={effectiveRun} onBackToConfig={() => setActivePanel('配置')} /> : <div className="py-12 text-center text-xs text-stone-500">提交配置后将在这里显示执行过程。</div>}
           <WorkbenchAssetShelf projectId={projectId} run={run} />
         </div>
       </div>

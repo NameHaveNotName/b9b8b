@@ -99,6 +99,32 @@ function buildPublicUrl(key: string): string {
 const MAX_FILE_SIZE_MB = parseInt(process.env.MAX_FILE_SIZE_MB || '50', 10)
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
+const STORAGE_REFERENCE_PREFIX = 'storage:'
+
+/**
+ * Persist object-storage locations as stable keys instead of expiring signed URLs.
+ * API responses can resolve the reference into a short-lived URL when the caller
+ * is authorized to view the file.
+ */
+export function toStorageReference(key: string): string {
+  return `${STORAGE_REFERENCE_PREFIX}${key}`
+}
+
+export function storageKeyFromReference(value: string | null | undefined): string | null {
+  if (!value?.startsWith(STORAGE_REFERENCE_PREFIX)) return null
+  const key = value.slice(STORAGE_REFERENCE_PREFIX.length).trim()
+  return key || null
+}
+
+export async function resolveStorageReference(
+  value: string | null | undefined,
+  expiresIn: number = 3600
+): Promise<string | null> {
+  if (!value) return null
+  const key = storageKeyFromReference(value)
+  return key ? getSignedFileUrl(key, expiresIn) : value
+}
+
 export async function uploadFile(key: string, body: Buffer, contentType: string) {
   if (body.length > MAX_FILE_SIZE_BYTES) {
     throw new Error(`STORAGE_004: 文件大小超过限制 (${MAX_FILE_SIZE_MB}MB)`)

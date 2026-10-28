@@ -52,8 +52,11 @@ export interface GenerationDraft {
 }
 
 export interface GenerationRun {
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'interrupted'
   message: string
+  taskId?: string
+  stage?: string
+  rawStatus?: string
   startedAt?: string
   completedAt?: string
   previewUrl?: string
@@ -61,5 +64,18 @@ export interface GenerationRun {
   isMock?: boolean
   error?: string
   requestSnapshot?: GenerationDraft
+  attempts?: Array<{
+    id: string
+    provider: string
+    model?: string | null
+    status: string
+    attemptNo?: number | null
+    externalTaskId?: string | null
+    httpStatus?: number | null
+    startedAt?: string
+    completedAt?: string | null
+    durationMs?: number | null
+    error?: string | null
+  }>
 }
 // End of generation workbench contracts.

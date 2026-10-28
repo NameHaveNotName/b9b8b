@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { resolveStorageReference } from '@/lib/r2'
 
 /**
  * GET /api/admin/recharges
@@ -45,7 +46,12 @@ export async function GET(req: Request) {
         .reduce((sum: number, o: any) => sum + o.points, 0),
     }
 
-    return NextResponse.json({ orders, stats })
+    const hydratedOrders = await Promise.all(orders.map(async (order: any) => ({
+      ...order,
+      proofImageUrl: await resolveStorageReference(order.proofImageUrl, 900),
+    })))
+
+    return NextResponse.json({ orders: hydratedOrders, stats })
   } catch (e: any) {
     console.error('[ADMIN-RECHARGE] GET error:', e)
     return NextResponse.json({ error: 'SERVER_001', message: e.message }, { status: 500 })

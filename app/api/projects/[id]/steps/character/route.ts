@@ -155,6 +155,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
     const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
+    const requestedRefImages = Array.isArray(body?.refImages) ? body.refImages.filter((url: unknown): url is string => typeof url === 'string' && url.trim().length > 0).slice(0, 30) : undefined
     console.log(`[ASPECT-RATIO] [CHARACTER-IMAGE] 用户选择比例: ${aspectRatio}`)
     console.log(`[MODEL-SELECT] [CHARACTER-IMAGE] 用户选择模型: ${imageModel || '默认'}`)
 
@@ -234,6 +235,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
             userId,
             pointsCheck.billingSource,
             pointsCheck.billingGroupId,
+            requestedRefImages,
           )
         } catch (e: any) {
           console.error('[CHARACTER-IMAGE] 后台生成异常:', e?.message)
@@ -386,6 +388,7 @@ async function generateCharacterImagesBackground(
   userId: string,
   billingSource: 'USER' | 'GROUP',
   billingGroupId: string | null,
+  requestedRefImages?: string[],
 ) {
   try {
     const styleStep = await prisma.workflowStep.findFirst({
@@ -406,7 +409,7 @@ async function generateCharacterImagesBackground(
     }
 
     const refs = await getProjectReferences(projectId).catch(() => [])
-    const userRefUrls = refs.filter((r: any) => r.url).map((r: any) => r.url)
+    const userRefUrls = requestedRefImages || refs.filter((r: any) => r.url).map((r: any) => r.url)
 
     const imageClient = await getImageClient()
     const portraits: any[] = []

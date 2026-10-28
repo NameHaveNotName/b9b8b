@@ -4,19 +4,14 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { getTextClient } from '@/lib/api-clients'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
-import fs from 'fs'
 import path from 'path'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
+import { toStorageReference, uploadFile } from '@/lib/r2'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const ALLOWED_TYPES = ['text/plain', 'text/markdown', 'application/octet-stream']
 const ALLOWED_EXTS = ['.txt', '.md']
-
-async function readTextFile(filePath: string): Promise<string> {
-  const buffer = fs.readFileSync(filePath)
-  return buffer.toString('utf-8')
-}
 
 async function parseFramework(text: string) {
   const textClient = await getTextClient()
@@ -139,16 +134,12 @@ export async function POST(req: Request) {
       )
     }
 
-    // 保存文件
+    // 保存原始文件到持久对象存储；Vercel 的部署目录不可写且不会跨实例保留。
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
     const filename = `framework_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
-    const dir = path.join(process.cwd(), 'public', 'mock-storage', 'framework-imports')
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true })
-    }
-    const filePath = path.join(dir, filename)
-    fs.writeFileSync(filePath, buffer)
+    const storageKey = `users/${userId}/framework-imports/${filename}`
+    await uploadFile(storageKey, buffer, file.type || 'text/plain; charset=utf-8')
 
     // 读取文本内容
     const rawText = buffer.toString('utf-8')
@@ -190,7 +181,7 @@ export async function POST(req: Request) {
       success: true,
       fileName: file.name,
       fileSize: file.size,
-      fileUrl: `/mock-storage/framework-imports/${filename}`,
+      fileUrl: toStorageReference(storageKey),
       framework: result.framework,
       source: result.source,
       rawText: result.rawText,
