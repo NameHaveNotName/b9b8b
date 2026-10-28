@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
   const referenceAssetIds = Array.isArray(body.referenceAssetIds)
     ? body.referenceAssetIds.filter((id: any) => typeof id === 'string')
     : []
+  const saveToLibrary = body.saveToLibrary !== false
 
   if (!kind) return NextResponse.json({ error: 'VALIDATION_001', message: '请选择人物形象或环境图片' }, { status: 400 })
   const template = getAssetTemplate(templateId, kind)
@@ -99,9 +100,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'IMAGE_001', message: lastError || '生图失败，请稍后重试' }, { status: 502 })
     }
 
-    const storageKey = `users/${userId}/assets/generated_${kind.toLowerCase()}_${Date.now()}.png`
+    const storageKey = saveToLibrary
+      ? `users/${userId}/assets/generated_${kind.toLowerCase()}_${Date.now()}.png`
+      : `users/${userId}/asset-candidates/generated_${kind.toLowerCase()}_${Date.now()}.png`
     await uploadFile(storageKey, buffer, 'image/png')
     const url = await getSignedFileUrl(storageKey)
+
+    if (!saveToLibrary) {
+      await deductPointsAndLog(userId, points.cost, 'generate', { success: true })
+      return NextResponse.json({
+        candidate: {
+          kind,
+          title: title || template.name,
+          description,
+          prompt: finalPrompt,
+          templateId: template.id,
+          mimeType: 'image/png',
+          storageKey,
+          url,
+          metadata: { templateName: template.name, referenceAssetIds, referenceImages, model, quality: 'medium', revisedPrompt },
+        },
+        cost: points.cost,
+      })
+    }
 
     const asset = await prisma.userAsset.create({
       data: {

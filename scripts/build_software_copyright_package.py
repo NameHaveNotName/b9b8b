@@ -198,9 +198,9 @@ def source_listing(files: list[Path]):
     return selected, selected_origins, physical, len(lines)
 
 
-def build_source_docx(selected: list[str]):
+def build_source_docx(selected: list[str], layout_lines: int):
     doc = Document()
-    configure_doc(doc, f"{SOFTWARE_NAME}{VERSION}", page_in_header=True)
+    configure_doc(doc, f"{SOFTWARE_NAME} {VERSION} 源程序鉴别材料（前30页及后30页）", page_in_header=True)
     sec = doc.sections[0]
     sec.top_margin = Cm(1.55)
     sec.bottom_margin = Cm(1.2)
@@ -216,6 +216,7 @@ def build_source_docx(selected: list[str]):
         table.autofit = False
         table.columns[0].width = Cm(1.05)
         table.columns[1].width = Cm(16.8)
+        corpus_start = page * LINES_PER_PAGE + 1 if page < 30 else layout_lines - 1500 + (page - 30) * LINES_PER_PAGE + 1
         for i, (row, code) in enumerate(zip(table.rows, block), 1):
             row.height = Pt(12.5)
             row.height_rule = 2
@@ -232,7 +233,7 @@ def build_source_docx(selected: list[str]):
             p0 = row.cells[0].paragraphs[0]
             p0.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             p0.paragraph_format.space_after = Pt(0)
-            r0 = p0.add_run(str(page * 50 + i))
+            r0 = p0.add_run(str(corpus_start + i - 1))
             set_run(r0, "Consolas", 7.2, color="666666")
             p1 = row.cells[1].paragraphs[0]
             p1.paragraph_format.space_after = Pt(0)
@@ -448,6 +449,7 @@ def build_archive_and_manifests(files: list[Path], code_lines: int, layout_lines
         "productSourceFiles": len(product_code_files()), "sourcePhysicalLines": code_lines, "layoutLines": layout_lines,
         "listingPages": 60, "linesPerPage": 50, "frontStart": selected_origins[0], "frontEnd": selected_origins[1499],
         "backStart": selected_origins[1500], "backEnd": selected_origins[-1],
+        "frontLayoutRange": [1, 1500], "backLayoutRange": [layout_lines - 1499, layout_lines],
     }
     (BASE / "SOURCE_LISTING_SELECTION.json").write_text(json.dumps(selection, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -458,7 +460,7 @@ def copy_evidence():
     for _, name, *_ in SCREEN_SECTIONS: shutil.copy2(SCREEN_SOURCE / name, EVIDENCE / name)
 
 
-def write_readmes(code_files, code_lines):
+def write_readmes(code_files, code_lines, layout_lines):
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     readme = f"""# {SOFTWARE_NAME} {VERSION} 软件著作权材料
 
@@ -466,7 +468,7 @@ def write_readmes(code_files, code_lines):
 
 ## 可提交材料
 
-- `Deliverables/01_源程序鉴别材料.docx`：60页，每页50行，前30页与后30页合并为一个Word文档；页码位于页眉右侧。
+- `Deliverables/01_源程序鉴别材料.docx`：60页，每页50行，选取完整排版语料第1-1500行及第{layout_lines - 1499}-{layout_lines}行；页码位于页眉右侧。
 - `Deliverables/01_源程序鉴别材料.pdf`：由上述Word稿导出的提交预览版。
 - `Deliverables/02_软件操作说明书.docx`：包含软件实际运行界面、操作路径和文字说明，超过15页。
 - `Deliverables/02_软件操作说明书.pdf`：由上述Word稿导出的提交预览版。
@@ -495,7 +497,7 @@ def write_readmes(code_files, code_lines):
 ## 已修复的硬伤
 
 1. 旧源码材料名称为“FilmFlow 影视工作流系统”，与申请口径“{SOFTWARE_NAME}”不一致；新材料已统一。
-2. 旧源码只有两份TXT且共2977行，并标注“目标3000行”；新Word固定60页×50行，取自当前真实源码。
+2. 旧源码只有两份TXT且共2977行，并标注“目标3000行”；新Word固定60页×50行，明确选取完整排版语料第1-1500行及第{layout_lines - 1499}-{layout_lines}行。
 3. 旧脚本把页码放在页脚并拆成前后两份；新稿合并为一个文档，页码位于页眉右侧，无宣传性页脚。
 4. 旧说明书使用Next.js 14等过时描述；新稿按仓库实际依赖更新为Next.js 15.5、React 19和Node.js 24。
 5. 旧说明书部分版本只有文字占位或非实际界面；新稿仅使用已保存的真实运行截图，个人信息采用遮盖/替换处理。
@@ -526,11 +528,11 @@ def main():
     copy_evidence()
     code = product_code_files()
     selected, origins, physical, layout = source_listing(code)
-    build_source_docx(selected)
+    build_source_docx(selected, layout)
     build_manual_docx()
     build_private_forms(physical)
     build_archive_and_manifests(archive_files(), physical, layout, origins)
-    write_readmes(len(code), physical)
+    write_readmes(len(code), physical, layout)
     package_manifest()
     print(json.dumps({"sourceFiles": len(code), "sourceLines": physical, "sourceDocx": str(SOURCE_DOCX), "manualDocx": str(MANUAL_DOCX)}, ensure_ascii=False, indent=2))
 

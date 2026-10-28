@@ -1,7 +1,7 @@
 import { prisma } from './prisma';
 import { WorkflowStepType, StepStatus } from '@prisma/client';
 import { getStepOrder } from './workflow';
-import { computeProjectStateFromSteps, STEP_CONFIG, TYPE_TO_STEP_ID, ProjectState } from './workflow-state';
+import { computeProjectStateFromSteps, hasStoryboardImage, STEP_CONFIG, TYPE_TO_STEP_ID, ProjectState } from './workflow-state';
 import { finalizeCurrentSupplierOperation } from './supplier-observability';
 
 export async function createStep(projectId: string, stepType: WorkflowStepType, order: number) {
@@ -236,6 +236,7 @@ export async function canExecuteStep(projectId: string, targetStep: WorkflowStep
         stepStyleDone: project.stepStyleDone || derivedState.stepStyleDone,
         stepCharacterDone: project.stepCharacterDone || derivedState.stepCharacterDone,
         stepConceptDone: project.stepConceptDone || derivedState.stepConceptDone,
+        stepConceptImageDone: derivedState.stepConceptImageDone,
         stepStoryboardDone: project.stepStoryboardDone || derivedState.stepStoryboardDone,
         stepStoryboardFirstframeDone: project.stepStoryboardFirstframeDone || derivedState.stepStoryboardFirstframeDone,
         stepTrailerDone: project.stepTrailerDone || derivedState.stepTrailerDone,
@@ -248,11 +249,12 @@ export async function canExecuteStep(projectId: string, targetStep: WorkflowStep
       if ((targetStep === 'KEYFRAMES' || targetStep === 'VIDEO_DIRECT') && !dagOk) {
         const storyboardStep = steps.find((s) => s.stepType === 'STORYBOARD');
         const shots = (storyboardStep?.outputData as any)?.shots || [];
-        const hasFirstFrame = shots.some((shot: any) => Boolean(shot?.firstFrameUrl || shot?.referenceImageUrl));
-        if (hasFirstFrame) return true;
+        if (hasStoryboardImage(shots)) return true;
       }
 
-      return linearOk || dagOk;
+      // 可见九步以同一份 DAG 规则为准。不能再用 linearOk 兜底，否则例如
+      // CONCEPT 仅被标记为完成但没有图片时，TRAILER 仍会被上一顺序步骤误放行。
+      return dagOk;
     }
   }
 

@@ -16,6 +16,7 @@ import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { setCurrentOperationTarget, finalizeCurrentSupplierOperation } from '@/lib/supplier-observability'
 import { mergeStepOutputData } from '@/lib/workflow-executor'
+import { getBoundReferences } from '@/lib/asset-bindings'
 
 const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 
@@ -183,9 +184,10 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   // key 格式：`${shotId}_${actNumber}`（如果 actNumber 存在），否则只 shotId
   const extraRefsKey = targetActNumber != null ? `${shotId}_${targetActNumber}` : shotId
   const persistedExtraRefs: Array<{ url: string; id?: string }> = (outputData.shotExtraRefs || {})[extraRefsKey] || []
-  const extraRefUrls: string[] = persistedExtraRefs
-    .filter((r: any) => typeof r?.url === 'string' && /^https?:\/\//i.test(r.url))
-    .map((r: any) => r.url)
+  const boundReferences = await getBoundReferences(params.id, 'SHOT', `${targetActNumber ?? ''}:${shotId}`).catch(() => [])
+  const extraRefUrls: string[] = [...boundReferences.map((reference) => reference.url), ...persistedExtraRefs.map((reference) => reference.url)]
+    .filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url))
+    .filter((url, index, all) => all.indexOf(url) === index)
 
   const idempotencyKey = clientActionId
     ? `storyboard-retry:${userId}:${params.id}:${targetActNumber ?? 0}:${shotId}:${clientActionId}`
@@ -291,8 +293,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const finalExtraRefUrls = requestExtraRefUrls.length > 0 ? requestExtraRefUrls : extraRefUrls
 
   // 用户在副工作台手动编辑后的参考图列表（覆盖默认拼接）
-  const userOverrideRefs: string[] = Array.isArray(bodyRefImages)
-    ? bodyRefImages.filter((u: any) => typeof u === 'string' && /^https?:\/\//i.test(u))
+  const hasUserReferenceOverride = Array.isArray(bodyRefImages)
+  const userOverrideRefs: string[] = hasUserReferenceOverride
+    ? bodyRefImages.filter((u: any) =>
+        typeof u === 'string'
+        && (/^https?:\/\//i.test(u) || /^data:image\//i.test(u) || u.startsWith('/'))
+      )
     : []
 
   const defaultReferenceUrls = uniqueUrlList(
@@ -316,12 +322,13 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     })
     primaryRefForEdit = original?.url || undefined
     // 用户拖入 / 选择的参考图（不含原图自身）
-    const filteredRefs = userOverrideRefs.length > 0 ? uniqueUrlList(finalExtraRefUrls, userOverrideRefs) : defaultReferenceUrls
+    // 工作台提交的是完整有序清单；空数组也表示用户明确不要辅助参考图。
+    const filteredRefs = hasUserReferenceOverride ? uniqueUrlList(userOverrideRefs) : defaultReferenceUrls
     refImages = filteredRefs.filter(u => u && u !== primaryRefForEdit)
     console.log(`[STORYBOARD-REGENERATE] edit-original 模式, primaryRef=${!!primaryRefForEdit}, extra refs=${refImages.length}`)
-  } else if (userOverrideRefs.length > 0) {
-    // 用户在副工作台完全自定义了参考图列表（重新生成模式 + 自定义 refs）
-    refImages = uniqueUrlList(finalExtraRefUrls, userOverrideRefs)
+  } else if (hasUserReferenceOverride) {
+    // 用户在生成工作台完全自定义了参考图列表（包括顺序和空列表）。
+    refImages = uniqueUrlList(userOverrideRefs)
     console.log(`[STORYBOARD-REGENERATE] 用户自定义 refs=${userOverrideRefs.length}`)
   } else {
     // 默认拼接

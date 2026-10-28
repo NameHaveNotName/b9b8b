@@ -46,6 +46,7 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
       stepStyleDone: project.stepStyleDone || derivedState.stepStyleDone || hasSelectedStyle,
       stepCharacterDone: project.stepCharacterDone || derivedState.stepCharacterDone,
       stepConceptDone: project.stepConceptDone || derivedState.stepConceptDone,
+      stepConceptImageDone: derivedState.stepConceptImageDone,
       stepStoryboardDone: project.stepStoryboardDone || derivedState.stepStoryboardDone,
       stepStoryboardFirstframeDone: project.stepStoryboardFirstframeDone || derivedState.stepStoryboardFirstframeDone,
       stepTrailerDone: project.stepTrailerDone || derivedState.stepTrailerDone,

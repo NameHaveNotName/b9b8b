@@ -18,6 +18,12 @@ interface StoryboardShot {
   description: string
   visualDetail?: string
   transition?: string
+  imageUrl?: string
+  firstFrameUrl?: string
+  referenceImageUrl?: string
+  imageStorageKey?: string
+  firstFrameStorageKey?: string
+  referenceImageStorageKey?: string
 }
 
 const EXTRACT_FRAMEWORK_PROMPT = `角色：高端艺术电影 AI 编剧与结构顾问
@@ -122,6 +128,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const convertedShots = shots.map((shot: StoryboardShot, index: number) => {
       const shotId = shot.shotId || `shot_${String(index + 1).padStart(3, '0')}`
       const firstFrame = firstFrameMap?.[shotId]
+      const importedImageUrl = firstFrame?.url || shot.firstFrameUrl || shot.referenceImageUrl || shot.imageUrl
+      const importedStorageKey = firstFrame?.storageKey
+        || shot.firstFrameStorageKey
+        || shot.referenceImageStorageKey
+        || shot.imageStorageKey
       return {
         shotId,
         actNumber: 1,
@@ -133,10 +144,10 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       sceneName: '',
       visualDetail: shot.visualDetail || '',
       transition: shot.transition || '',
-      ...(firstFrame ? {
-        firstFrameUrl: firstFrame.url,
-        firstFrameStorageKey: firstFrame.storageKey,
-        firstFrameAssetId: firstFrame.assetId,
+      ...(importedImageUrl ? {
+        firstFrameUrl: importedImageUrl,
+        firstFrameStorageKey: importedStorageKey,
+        firstFrameAssetId: firstFrame?.assetId,
       } : {}),
     }
     })
@@ -463,9 +474,6 @@ function getStepOrder(stepType: string): number {
     'STORYBOARD': 6,
     'KEYFRAMES': 7,
     'VIDEO_DIRECT': 8,
-    'VIDEO_RENDER': 9,
-    'CAMERA': 10,
-    'REVIEW': 11,
   }
   return orderMap[stepType] || 0
 }

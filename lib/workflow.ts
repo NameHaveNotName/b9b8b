@@ -13,15 +13,12 @@ export const WORKFLOW_STEPS = [
   { type: 'STORYBOARD' as const,   label: '分镜设计',   order: 6,  description: '绘制分镜草图',             icon: 'Grid' },
   { type: 'KEYFRAMES' as const,    label: '生成尾帧',   order: 7,  description: '基于分镜起始帧生成尾帧',     icon: 'Frame' },
   { type: 'VIDEO_DIRECT' as const, label: '直生视频',   order: 8,  description: '基于起始帧/尾帧生成视频',      icon: 'Video' },
-  { type: 'VIDEO_RENDER' as const, label: 'AI渲染',     order: 9,  description: '实拍视频风格化（大动作）',   icon: 'Wand' },
-  { type: 'CAMERA' as const,       label: '电脑运镜',   order: 10, description: '预设镜头运动+AI渲染',       icon: 'Camera' },
-  { type: 'REVIEW' as const,       label: '评测优化',   order: 11, description: '一致性检测与情感审核',       icon: 'CheckCircle' },
 ] as const;
 
 export type WorkflowStepType = typeof WORKFLOW_STEPS[number]['type'];
 
 // ============================================================
-// 2. 可见步骤配置（前端工作流看板只渲染这 9 步）
+// 2. 可见步骤配置（数据库与前端统一为这 9 步）
 // ============================================================
 export const VISIBLE_STEP_TYPES = [
   'IDEATION',
@@ -95,12 +92,9 @@ export const stepTypeToPrisma: Record<WorkflowStepType, PrismaStepType> = {
   STORYBOARD: 'STORYBOARD',
   KEYFRAMES: 'KEYFRAMES',
   VIDEO_DIRECT: 'VIDEO_DIRECT',
-  VIDEO_RENDER: 'VIDEO_RENDER',
-  CAMERA: 'CAMERA',
-  REVIEW: 'REVIEW',
 };
 
-/** 将 Prisma 枚举值转回应用层类型（用于从数据库读取后转换，包含历史隐藏步骤） */
+/** 将 Prisma 枚举值转回应用层类型 */
 export function prismaToStepType(prismaType: PrismaStepType): WorkflowStepType {
   return prismaType as WorkflowStepType;
 }

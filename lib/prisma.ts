@@ -150,12 +150,22 @@ const RELATIONS: Record<string, Record<string, { model: string; fk: string; sour
     assets: { model: 'asset', fk: 'projectId' },
     videoSegments: { model: 'videoSegment', fk: 'projectId' },
     voiceoverSegments: { model: 'voiceoverSegment', fk: 'projectId' },
+    assetBindings: { model: 'assetBinding', fk: 'projectId' },
   },
   workflowStep: {
     resultAssets: { model: 'asset', fk: 'stepId' },
   },
   asset: {
     step: { model: 'workflowStep', fk: 'id', sourceField: 'stepId' },
+    bindings: { model: 'assetBinding', fk: 'assetId' },
+  },
+  userAsset: {
+    bindings: { model: 'assetBinding', fk: 'userAssetId' },
+  },
+  assetBinding: {
+    project: { model: 'project', fk: 'id', sourceField: 'projectId' },
+    userAsset: { model: 'userAsset', fk: 'id', sourceField: 'userAssetId' },
+    asset: { model: 'asset', fk: 'id', sourceField: 'assetId' },
   },
 }
 

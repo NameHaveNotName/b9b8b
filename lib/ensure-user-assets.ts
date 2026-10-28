@@ -19,6 +19,10 @@ EXCEPTION
   WHEN duplicate_object THEN null;
 END $$;
 `)
+      for (const value of ['STYLE', 'OBJECT', 'BRAND']) {
+        await prisma.$executeRawUnsafe(`ALTER TYPE "UserAssetKind" ADD VALUE IF NOT EXISTS '${value}'`)
+      }
+      await prisma.$executeRawUnsafe(`ALTER TYPE "UserAssetSource" ADD VALUE IF NOT EXISTS 'PROJECT'`)
       await prisma.$executeRawUnsafe(`
 CREATE TABLE IF NOT EXISTS "user_assets" (
   "id" TEXT NOT NULL,

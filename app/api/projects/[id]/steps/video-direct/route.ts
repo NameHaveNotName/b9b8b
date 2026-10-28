@@ -308,7 +308,7 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
 
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
   const shot = shots[segment.sequence] || shots.find((s: any) => s.shotId === segment.shotId)
-  const firstFrameUrl = shot?.firstFrameUrl || ''
+  const firstFrameUrl = shot?.firstFrameUrl || shot?.referenceImageUrl || shot?.imageUrl || ''
   if (!firstFrameUrl) {
     return NextResponse.json({ error: 'NO_IMAGE', message: '该分镜没有可用的首帧' }, { status: 400 })
   }
@@ -424,7 +424,7 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
     let mockCount = 0
     for (const segment of segmentsToRun) {
       const shot = shots.find((s: any) => s.shotId === segment.shotId)
-      const firstFrameUrl = shot?.firstFrameUrl || ''
+      const firstFrameUrl = shot?.firstFrameUrl || shot?.referenceImageUrl || shot?.imageUrl || ''
       if (!firstFrameUrl) {
         await prisma.videoSegment.update({
           where: { id: segment.id },

@@ -74,11 +74,76 @@ export interface ProjectState {
   stepStyleDone: boolean
   stepCharacterDone: boolean
   stepConceptDone: boolean
+  /** 概念图步骤中是否至少已有一张可用图片（不是“步骤已完成”的同义词） */
+  stepConceptImageDone: boolean
   stepStoryboardDone: boolean
   stepStoryboardFirstframeDone: boolean
   stepTrailerDone: boolean
   stepEndingDone: boolean
   stepDirectDone: boolean
+}
+
+/**
+ * 判断分镜是否已经携带可用于后续生成的画面。
+ * 导入、参考图模式、首帧模式和旧数据使用的字段名不同，因此统一兼容。
+ */
+export function hasStoryboardImage(shots: unknown): boolean {
+  if (!Array.isArray(shots)) return false
+  return shots.some((shot) => {
+    if (!shot || typeof shot !== 'object') return false
+    const item = shot as Record<string, unknown>
+    return [
+      item.firstFrameUrl,
+      item.referenceImageUrl,
+      item.imageUrl,
+      item.thumbnailUrl,
+    ].some((value) => typeof value === 'string' && value.trim().length > 0)
+  })
+}
+
+/**
+ * 判断概念图步骤是否已经产出至少一张可供宣传片使用的图片。
+ *
+ * 新数据通常通过 resultAssets 关联图片；旧数据及逐幕生成结果可能只保存在
+ * outputData 中，因此两条路径都要兼容。完成/跳过步骤本身不代表已有图片。
+ */
+export function hasConceptImage(step: {
+  outputData?: unknown
+  resultAssets?: Array<{ type?: unknown; url?: unknown; metadata?: unknown }>
+} | undefined): boolean {
+  if (!step) return false
+
+  const hasAsset = step.resultAssets?.some((asset) => {
+    const metadata = asset?.metadata && typeof asset.metadata === 'object'
+      ? asset.metadata as Record<string, unknown>
+      : null
+    return asset?.type === 'IMAGE'
+      && metadata?.isMock !== true
+      && typeof asset.url === 'string'
+      && asset.url.trim().length > 0
+  })
+  if (hasAsset) return true
+
+  const output = step.outputData
+  if (!output || typeof output !== 'object') return false
+
+  const hasImageValue = (value: unknown): boolean => {
+    if (typeof value === 'string') return value.trim().length > 0
+    if (!value || typeof value !== 'object') return false
+    const item = value as Record<string, unknown>
+    if (item.isMock === true) return false
+    return [item.url, item.imageUrl, item.storageKey].some(
+      (candidate) => typeof candidate === 'string' && candidate.trim().length > 0
+    )
+  }
+
+  const data = output as Record<string, unknown>
+  if ([data.url, data.imageUrl, data.storageKey].some(hasImageValue)) return true
+
+  return ['scenes', 'images', 'results'].some((field) => {
+    const items = data[field]
+    return Array.isArray(items) && items.some(hasImageValue)
+  })
 }
 
 /** StepId → Project 布尔字段名 */
@@ -119,14 +184,17 @@ export const STEP_CONFIG: Record<StepId, StepConfig> = {
   },
   concept: {
     unlockCondition: (p) => p.stepCharacterDone,
-    hideCondition: (p) => p.stepConceptDone,
+    // 宣传片完成后，概念图进入只读；概念图自身完成仍可继续补图/重生成。
+    hideCondition: (p) => p.stepTrailerDone,
   },
   storyboard: {
     unlockCondition: (p) => p.stepFrameworkDone,
-    hideCondition: (p) => p.stepEndingDone || p.stepDirectDone,
+    // 分镜允许持续编辑和重生成，不因下游尾帧/视频完成而进入只读。
+    hideCondition: () => false,
   },
   trailer: {
-    unlockCondition: (p) => p.stepFrameworkDone,
+    // 宣传片依赖真实概念图资产，而不是仅依赖概念图步骤完成标记。
+    unlockCondition: (p) => p.stepConceptImageDone,
     hideCondition: () => false,
   },
   ending: {
@@ -173,16 +241,21 @@ export function getAllStepDisplayStates(project: ProjectState) {
  * 用于在现有 WorkflowStep 数据之上计算 ProjectState
  */
 export function computeProjectStateFromSteps(
-  steps: Array<{ stepType: string; status: string; outputData?: unknown }>
+  steps: Array<{
+    stepType: string
+    status: string
+    outputData?: unknown
+    resultAssets?: Array<{ type?: unknown; url?: unknown; metadata?: unknown }>
+  }>
 ): ProjectState {
   const isDone = (type: string) =>
     steps.some((s) => s.stepType === type && (s.status === 'COMPLETED' || s.status === 'SKIPPED'))
   const storyboardStep = steps.find((step) => step.stepType === 'STORYBOARD')
+  const conceptStep = steps.find((step) => step.stepType === 'CONCEPT')
   const storyboardOutput = storyboardStep?.outputData && typeof storyboardStep.outputData === 'object'
-    ? storyboardStep.outputData as { shots?: Array<{ firstFrameUrl?: unknown }> }
+    ? storyboardStep.outputData as { shots?: unknown }
     : null
-  const hasStoryboardFirstFrame = Array.isArray(storyboardOutput?.shots)
-    && storyboardOutput.shots.some((shot) => typeof shot?.firstFrameUrl === 'string' && shot.firstFrameUrl.trim().length > 0)
+  const hasStoryboardFirstFrame = hasStoryboardImage(storyboardOutput?.shots)
 
   return {
     stepIdeaDone: isDone('IDEATION'),
@@ -190,6 +263,7 @@ export function computeProjectStateFromSteps(
     stepStyleDone: isDone('STYLE'),
     stepCharacterDone: isDone('CHARACTER'),
     stepConceptDone: isDone('CONCEPT'),
+    stepConceptImageDone: hasConceptImage(conceptStep),
     stepStoryboardDone: isDone('STORYBOARD'),
     stepStoryboardFirstframeDone: hasStoryboardFirstFrame,
     stepTrailerDone: isDone('TRAILER'),
@@ -206,7 +280,7 @@ export function stepIdToPrismaType(stepId: StepId): string {
 }
 
 /**
- * 根据 Prisma stepType 获取 StepId（可能返回 undefined，因为不是所有 12 步都在 DAG 中）
+ * 根据 Prisma stepType 获取 StepId
  */
 export function prismaTypeToStepId(stepType: string): StepId | undefined {
   return TYPE_TO_STEP_ID[stepType]

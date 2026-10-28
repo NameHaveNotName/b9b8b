@@ -1,95 +1,65 @@
 /* Shared types for workflow UI components */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export type InspectorView = 'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit'
+export type GenerationReferenceType =
+  | 'original'
+  | 'character'
+  | 'style'
+  | 'previous-shot'
+  | 'user-upload'
+  | 'user-dragged'
+  | 'first-frame'
+  | 'last-frame'
+  | 'concept'
+  | 'other'
 
-export interface WorkflowStep {
-  id: string
-  stepType: string
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
-  order: number
-  startedAt?: string | null
-  completedAt?: string | null
-  errorMessage?: string | null
-  outputData?: any
-  resultAssets?: any[]
-}
-
-export interface AssetDecisionData {
-  id: string
-  type: 'style' | 'character' | 'concept' | 'trailer' | 'keyframes' | 'video' | 'storyboard'
-  name: string
-  description?: string
-  imageUrl?: string
-  videoUrl?: string
-  thumbnailUrl?: string
-  metadata?: Record<string, unknown>
-  isSelected?: boolean
-  is基准?: boolean
-  downstreamSteps?: string[]
-  isRegenerating?: boolean
-  isMock?: boolean
-  mockReason?: string
-  modelNo?: number
-  imageModel?: string
-}
-
-export interface InspectorTask {
-  id: string
-  stepType: string
-  label: string
-  priority: 'high' | 'normal' | 'low'
-  category: 'suggested' | 'failed' | 'available' | 'waiting' | 'iterable'
-  errorMessage?: string
-  suggestion?: string
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'AVAILABLE'
-  actNumber?: number
-  downstreamSteps?: string[]
-}
-
-export interface GenerationConfirmData {
-  stepType: string
-  inputDeps: string[]
-  model: string
-  aspectRatio: string
-  duration?: number
-  bgmStrategy?: string
-  prompt: string
-  pointCost: number
-  asset?: AssetDecisionData
-}
-
-export interface ResultFeedbackData {
-  step: WorkflowStep
-  stages: Array<{
-    name: string
-    status: 'pending' | 'processing' | 'completed' | 'failed'
-    progress?: number
-    error?: string
-  }>
-  previewUrl?: string
-  partialSuccess?: boolean
-  failedReason?: string
-  preservedAssets?: string[]
-  retryWillConsume前置?: boolean
-}
-
-export interface RetryEditReference {
+export interface GenerationReference {
   url: string
   label: string
-  type: 'character' | 'style' | 'previous-shot' | 'user-upload' | 'user-dragged'
+  type: GenerationReferenceType
   removable: boolean
 }
 
-export interface RetryEditData {
+export interface GenerationDraft {
   stepType: string
-  targetId: string
+  kind: 'text' | 'image' | 'video' | 'music'
+  targetId?: string
   actNumber?: number
   targetLabel: string
-  basePrompt: string
-  baseRefs: RetryEditReference[]
-  originalImageUrl: string | null
-  currentModel: string
+  prompt: string
+  promptRequired?: boolean
+  promptEditable?: boolean
+  prompts?: Array<{
+    id: string
+    label: string
+    text: string
+    textField: string
+    source: Record<string, any>
+  }>
+  references: GenerationReference[]
+  referencesResolved?: boolean
+  referencesEditable?: boolean
+  originalImageUrl?: string | null
+  editInstruction?: string
+  model: string
+  modelEditable?: boolean
   aspectRatio: string
+  aspectRatioEditable?: boolean
   pointCost: number
+  inputDeps: string[]
+  isRetry?: boolean
+  requestBody?: Record<string, any>
 }
+
+export interface GenerationRun {
+  status: 'running' | 'completed' | 'failed'
+  message: string
+  startedAt?: string
+  completedAt?: string
+  previewUrl?: string
+  previewType?: 'image' | 'video'
+  isMock?: boolean
+  error?: string
+  requestSnapshot?: GenerationDraft
+}
+// End of generation workbench contracts.

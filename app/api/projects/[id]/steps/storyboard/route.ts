@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
 import { generateImage } from '@/lib/api-clients/openlux'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
+import { getBoundReferences } from '@/lib/asset-bindings'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { uploadFile, uploadThumbnail, getSignedFileUrl, deleteFile } from '@/lib/r2'
 import { claimStepForGeneration, completeStep, failStep, canExecuteStep, mergeStepOutputData } from '@/lib/workflow-executor'
@@ -818,9 +819,10 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
       const extraRefsKey = actNumber != null ? `${targetShotId}_${actNumber}` : targetShotId
       const persistedExtraRefs: Array<{ url: string; id?: string }> = (existingOutput.shotExtraRefs || {})[extraRefsKey] || []
-      const extraRefUrls = persistedExtraRefs
-        .filter((r: any) => typeof r?.url === 'string' && /^https?:\/\//i.test(r.url))
-        .map((r: any) => r.url)
+      const boundReferences = await getBoundReferences(params.id, 'SHOT', `${actNumber ?? ''}:${targetShotId}`).catch(() => [])
+      const extraRefUrls = [...boundReferences.map((reference) => reference.url), ...persistedExtraRefs.map((reference) => reference.url)]
+        .filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url))
+        .filter((url, index, all) => all.indexOf(url) === index)
 
       const refImages = uniqueUrlList(
         extraRefUrls,

@@ -15,9 +15,6 @@ import {
   LayoutGrid,
   Frame,
   Video,
-  Wand,
-  Camera,
-  CircleCheck,
   ArrowRight,
   FolderOpen,
   Sparkles,
@@ -38,9 +35,6 @@ const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   STORYBOARD: LayoutGrid,
   KEYFRAMES: Frame,
   VIDEO_DIRECT: Video,
-  VIDEO_RENDER: Wand,
-  CAMERA: Camera,
-  REVIEW: CircleCheck,
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -53,9 +47,6 @@ const STEP_LABELS: Record<string, string> = {
   STORYBOARD: '分镜设计',
   KEYFRAMES: '生成尾帧',
   VIDEO_DIRECT: '直生视频',
-  VIDEO_RENDER: 'AI渲染',
-  CAMERA: '电脑运镜',
-  REVIEW: '评测优化',
 }
 
 function formatDate(date: Date): string {
@@ -180,7 +171,7 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
           <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-base font-semibold tracking-tight text-stone-800">进度概览</h2>
-              <span className="text-sm text-stone-500">{completedCount} / 12 步</span>
+              <span className="text-sm text-stone-500">{completedCount} / 9 步</span>
             </div>
 
             {/* 进度条 */}

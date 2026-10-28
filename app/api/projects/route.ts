@@ -62,7 +62,7 @@ export async function POST(req: Request) {
 
     console.log('[POST /api/projects] created project:', project.id, 'with userId:', user.id)
 
-    // 自动初始化 12 步 WorkflowStep 记录（全部 PENDING）
+    // 自动初始化 9 步 WorkflowStep 记录（全部 PENDING）
     const stepTypes: string[] = [
       'IDEATION',
       'FRAMEWORK',
@@ -73,9 +73,6 @@ export async function POST(req: Request) {
       'STORYBOARD',
       'KEYFRAMES',
       'VIDEO_DIRECT',
-      'VIDEO_RENDER',
-      'CAMERA',
-      'REVIEW',
     ];
 
     const existingSteps = await prisma.workflowStep.findMany({

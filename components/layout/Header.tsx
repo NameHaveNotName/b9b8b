@@ -24,8 +24,6 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/project/') && pathname.endsWith('/workflow')) return '工作流看板'
   if (pathname.startsWith('/project/') && pathname.endsWith('/storyboard')) return '分镜编辑器'
   if (pathname.startsWith('/project/') && pathname.endsWith('/assets')) return '资产库'
-  if (pathname.startsWith('/project/') && pathname.endsWith('/evaluation')) return '评测对比'
-  if (pathname.startsWith('/project/') && pathname.endsWith('/export')) return '导出下载'
   if (pathname.match(/^\/project\/[^\/]+$/)) return '项目总览'
   return ''
 }

@@ -10,5 +10,13 @@
   "frontStart": "app/layout.tsx",
   "frontEnd": "app/(dashboard)/groups/[id]/page.tsx",
   "backStart": "lib/workflow-state.ts",
-  "backEnd": "types/index.ts"
+  "backEnd": "types/index.ts",
+  "frontLayoutRange": [
+    1,
+    1500
+  ],
+  "backLayoutRange": [
+    63492,
+    64991
+  ]
 }

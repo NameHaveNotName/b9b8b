@@ -12,6 +12,7 @@ import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { mergeStepOutputData } from '@/lib/workflow-executor'
 import { GENERATION_COSTS } from '@/lib/points-config'
+import { getBoundReferences } from '@/lib/asset-bindings'
 
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -88,6 +89,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   try {
     const refs = await getProjectReferences(params.id).catch(() => [])
     const userRefUrls = refs.filter(r => r.url).map(r => r.url)
+    const priorityReferences = await getBoundReferences(params.id, 'CHARACTER', character?.id || '').catch(() => [])
+    const priorityReferenceUrls = priorityReferences.map((reference) => reference.url).filter(Boolean)
 
     const imageClient = await getImageClient()
     const result = await imageClient.generateCharacterPortrait(
@@ -97,7 +100,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       stylePrompt,
       newRatio,
       newModel,
-      userRefUrls
+      userRefUrls,
+      priorityReferenceUrls
     )
 
     // 旧 Asset 必须等新图生成成功后再删：先删再生成的话，一次失败或 Serverless

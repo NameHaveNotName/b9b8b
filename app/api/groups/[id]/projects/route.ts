@@ -36,7 +36,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
     const stepTypes: string[] = [
       'IDEATION', 'FRAMEWORK', 'STYLE', 'CHARACTER', 'CONCEPT', 'TRAILER',
-      'STORYBOARD', 'KEYFRAMES', 'VIDEO_DIRECT', 'VIDEO_RENDER', 'CAMERA', 'REVIEW',
+      'STORYBOARD', 'KEYFRAMES', 'VIDEO_DIRECT',
     ]
     await prisma.workflowStep.createMany({
       data: stepTypes.map((stepType, index) => ({

@@ -11,7 +11,25 @@ import { prisma } from "@/lib/prisma"
 export const AUTH_BACKEND_UNAVAILABLE = "AUTH_BACKEND_UNAVAILABLE" as const
 
 export function isAuthBackendError(err: unknown): boolean {
-  return err instanceof Error && err.message === AUTH_BACKEND_UNAVAILABLE
+  return err instanceof Error && (
+    err.message === AUTH_BACKEND_UNAVAILABLE
+    || err.message.startsWith(`${AUTH_BACKEND_UNAVAILABLE}:`)
+  )
+}
+
+/**
+ * Supabase 在请求没有携带会话 cookie 时会返回 AuthSessionMissingError。
+ * 这是正常的匿名访问，不是认证服务故障。
+ *
+ * 这里使用稳定的 name/code 判断，避免业务层依赖 @supabase/auth-js 的
+ * 间接依赖路径，同时兼容不同 Supabase 版本返回的错误形态。
+ */
+export function isMissingAuthSession(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false
+  const authError = err as { name?: unknown; code?: unknown; message?: unknown }
+  return authError.name === "AuthSessionMissingError"
+    || authError.code === "session_not_found"
+    || authError.message === "Auth session missing!"
 }
 
 /** 服务端获取当前登录用户（优先 Supabase Auth）
@@ -24,6 +42,7 @@ export async function getCurrentUser() {
     const supabase = await createClient()
     const { data, error } = await supabase.auth.getUser()
     if (error) {
+      if (isMissingAuthSession(error)) return null
       // getUser 返回错误说明无法向 Supabase 求证会话（网络/配置故障），
       // 不能当成"没登录"
       throw new Error(`${AUTH_BACKEND_UNAVAILABLE}: ${error.message}`)
@@ -67,6 +86,7 @@ export async function getCurrentUserId(): Promise<string | null> {
   const supabase = await createClient()
   const { data, error } = await supabase.auth.getUser()
   if (error) {
+    if (isMissingAuthSession(error)) return null
     throw new Error(`${AUTH_BACKEND_UNAVAILABLE}: ${error.message}`)
   }
   return data?.user?.id || null

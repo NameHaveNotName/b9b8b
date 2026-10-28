@@ -43,7 +43,7 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
   ])
 
   return NextResponse.json({
-    assets,
+    assets: assets.map((asset: any) => ({ ...asset, step: Array.isArray(asset.step) ? asset.step[0] || null : asset.step })),
     total,
     page,
     limit,

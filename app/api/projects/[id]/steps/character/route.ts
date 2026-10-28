@@ -14,6 +14,7 @@ import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
+import { getBoundReferences } from '@/lib/asset-bindings'
 
 /**
  * 生成角色提示词（供 generate-prompts 和 generate-images 共用）
@@ -414,6 +415,8 @@ async function generateCharacterImagesBackground(
 
     for (const promptItem of resolvedPrompts) {
       try {
+        const priorityReferences = await getBoundReferences(projectId, 'CHARACTER', promptItem.characterId).catch(() => [])
+        const priorityReferenceUrls = priorityReferences.map((reference) => reference.url).filter(Boolean)
         const enrichedCharacter = {
           id: promptItem.characterId,
           name: promptItem.characterName,
@@ -428,7 +431,8 @@ async function generateCharacterImagesBackground(
           stylePrompt,
           aspectRatio,
           imageModel,
-          userRefUrls
+          userRefUrls,
+          priorityReferenceUrls
         )
         if (!result?.url || !result?.storageKey) {
           console.error(`[CHARACTER-BG] 角色 ${promptItem.characterName} 返回结果缺少 url/storageKey:`, JSON.stringify(result))

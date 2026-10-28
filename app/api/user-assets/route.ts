@@ -10,7 +10,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
 function parseKind(value: unknown) {
-  return value === 'CHARACTER' || value === 'ENVIRONMENT' || value === 'REFERENCE'
+  return value === 'CHARACTER' || value === 'ENVIRONMENT' || value === 'STYLE' || value === 'OBJECT' || value === 'BRAND' || value === 'REFERENCE'
     ? value
     : 'REFERENCE'
 }
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const kind = searchParams.get('kind')
   const where: any = { userId }
-  if (kind === 'CHARACTER' || kind === 'ENVIRONMENT' || kind === 'REFERENCE') where.kind = kind
+  if (['CHARACTER', 'ENVIRONMENT', 'STYLE', 'OBJECT', 'BRAND', 'REFERENCE'].includes(kind || '')) where.kind = kind
 
   const assets = await prisma.userAsset.findMany({
     where,
@@ -31,7 +31,10 @@ export async function GET(req: NextRequest) {
     take: 100,
   })
 
-  return NextResponse.json({ assets })
+  const hydratedAssets = await Promise.all(assets.map(async (asset: any) => {
+    try { return { ...asset, url: await getSignedFileUrl(asset.storageKey) } } catch { return asset }
+  }))
+  return NextResponse.json({ assets: hydratedAssets })
 }
 
 export async function POST(req: NextRequest) {
@@ -50,6 +53,9 @@ export async function POST(req: NextRequest) {
   const kind = parseKind(formData.get('kind'))
   const title = typeof formData.get('title') === 'string' ? String(formData.get('title')).trim() : ''
   const description = typeof formData.get('description') === 'string' ? String(formData.get('description')).trim() : ''
+  const tags = typeof formData.get('tags') === 'string'
+    ? String(formData.get('tags')).split(/[,，]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 20)
+    : []
 
   const buffer = Buffer.from(await file.arrayBuffer())
   const filename = file.name || 'asset.png'
@@ -67,7 +73,7 @@ export async function POST(req: NextRequest) {
       mimeType: file.type,
       storageKey,
       url,
-      metadata: { originalFilename: filename },
+      metadata: { originalFilename: filename, tags },
     },
   })
 

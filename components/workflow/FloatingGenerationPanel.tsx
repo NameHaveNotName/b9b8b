@@ -18,9 +18,6 @@ import {
   LayoutGrid,
   Frame,
   Video,
-  Wand,
-  Camera,
-  CircleCheck,
   ArrowRight,
   ExternalLink,
 } from 'lucide-react'
@@ -61,9 +58,6 @@ const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   STORYBOARD: LayoutGrid,
   KEYFRAMES: Frame,
   VIDEO_DIRECT: Video,
-  VIDEO_RENDER: Wand,
-  CAMERA: Camera,
-  REVIEW: CircleCheck,
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -76,28 +70,17 @@ const STEP_LABELS: Record<string, string> = {
   STORYBOARD: '分镜设计',
   KEYFRAMES: '生成尾帧',
   VIDEO_DIRECT: '直生视频',
-  VIDEO_RENDER: 'AI渲染',
-  CAMERA: '电脑运镜',
-  REVIEW: '评测优化',
 }
 
-/** Simulated progress from elapsed time */
-function simulateProgress(startedAt?: string | null): { pct: number; longRunning: boolean; elapsedSec: number } {
-  if (!startedAt) return { pct: 0, longRunning: false, elapsedSec: 0 }
+/** 只展示真实可知的耗时，不把耗时伪装成供应商进度百分比。 */
+function getElapsedState(startedAt?: string | null): { longRunning: boolean; elapsedSec: number } {
+  if (!startedAt) return { longRunning: false, elapsedSec: 0 }
   const start = new Date(startedAt).getTime()
   const now = Date.now()
   const elapsed = Math.max(0, now - start)
   const elapsedSec = Math.round(elapsed / 1000)
 
-  let pct = 0
-  if (elapsed < 10000) {
-    pct = Math.round((elapsed / 10000) * 50)
-  } else if (elapsed < 40000) {
-    pct = 50 + Math.round(((elapsed - 10000) / 30000) * 40)
-  } else {
-    pct = 90
-  }
-  return { pct: Math.min(95, pct), longRunning: elapsed >= 40000, elapsedSec }
+  return { longRunning: elapsed >= 40000, elapsedSec }
 }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -242,11 +225,11 @@ export default function FloatingGenerationPanel({
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={(e) => { e.stopPropagation(); (window as any).__openInspector?.('task-queue') }}
+              onClick={(e) => { e.stopPropagation(); (window as any).__openInspector?.() }}
               className="rounded-lg border border-stone-200 px-2.5 py-1 text-[11px] font-medium text-stone-500 transition hover:bg-stone-100"
-              title="打开副工作台"
+              title="打开生成工作台"
             >
-              副工作台
+              生成工作台
             </button>
             <ChevronUp className="h-4 w-4 text-stone-400" />
           </div>
@@ -296,7 +279,7 @@ export default function FloatingGenerationPanel({
             {/* Processing tasks */}
             {visibleProcessing.map(step => {
               const Icon = STEP_ICONS[step.stepType] || Loader2
-              const { pct, longRunning, elapsedSec } = simulateProgress(step.startedAt)
+              const { longRunning, elapsedSec } = getElapsedState(step.startedAt)
 
               return (
                 <div
@@ -313,16 +296,7 @@ export default function FloatingGenerationPanel({
                       <span className="truncate text-sm font-medium text-stone-700">
                         {STEP_LABELS[step.stepType] || step.stepType}
                       </span>
-                      <span className="shrink-0 text-[11px] text-blue-600">{pct}%</span>
-                    </div>
-                    {/* Progress bar */}
-                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-stone-100">
-                      <div
-                        className={`h-full rounded-full transition-all duration-1000 ${
-                          longRunning ? 'animate-pulse bg-amber-500' : 'bg-blue-500'
-                        }`}
-                        style={{ width: `${pct}%` }}
-                      />
+                      <span className="shrink-0 text-[11px] text-blue-600">处理中</span>
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-1 text-[11px] text-stone-400">
                       <span className="flex items-center gap-1">

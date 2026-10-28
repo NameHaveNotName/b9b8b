@@ -29,7 +29,7 @@ enum GroupCostMode {
   GROUP_POOL
 }
 
-// 12步工作流类型
+// 9步工作流类型
 enum WorkflowStepType {
   IDEATION // 创意扩散
   FRAMEWORK // 框架搭建
@@ -40,9 +40,6 @@ enum WorkflowStepType {
   STORYBOARD // 分镜设计
   KEYFRAMES // 首尾帧
   VIDEO_DIRECT // 直生视频
-  VIDEO_RENDER // AI渲染
-  CAMERA // 电脑运镜
-  REVIEW // 一致性检测/评测
 }
 
 // 步骤执行状态
@@ -66,12 +63,16 @@ enum AssetType {
 enum UserAssetKind {
   CHARACTER
   ENVIRONMENT
+  STYLE
+  OBJECT
+  BRAND
   REFERENCE
 }
 
 enum UserAssetSource {
   UPLOAD
   GENERATED
+  PROJECT
 }
 
 // 评测维度
@@ -159,6 +160,7 @@ model UserAsset {
   metadata    Json?
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
+  bindings    AssetBinding[]
 
   @@index([userId, kind, createdAt])
   @@map("user_assets")
@@ -203,6 +205,7 @@ model Project {
   creativeIterations CreativeIteration[]
   videoSegments      VideoSegment[]
   voiceoverSegments  VoiceoverSegment[]
+  assetBindings      AssetBinding[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -290,7 +293,7 @@ model WorkflowStep {
   inputData    Json? // 该步输入参数
   outputData   Json? // 该步输出结果
   errorMessage String?          @db.Text
-  order        Int // 步骤顺序（0-11）
+  order        Int // 步骤顺序（0-8）
   retryCount   Int              @default(0)
   startedAt    DateTime?
   completedAt  DateTime?
@@ -318,10 +321,35 @@ model Asset {
   createdById String?
   origin      String        @default("GENERATED")
   createdAt   DateTime      @default(now())
+  bindings    AssetBinding[]
 
   @@index([projectId, type])
   @@index([stepId])
   @@index([createdById, createdAt])
+}
+
+model AssetBinding {
+  id            String     @id @default(cuid())
+  projectId     String     @map("project_id")
+  project       Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userAssetId   String?    @map("user_asset_id")
+  userAsset     UserAsset? @relation(fields: [userAssetId], references: [id], onDelete: Cascade)
+  assetId       String?    @map("asset_id")
+  asset         Asset?     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  targetType    String     @map("target_type")
+  targetKey     String     @map("target_key")
+  referenceRole String     @default("GENERAL") @map("reference_role")
+  priority      Int        @default(0)
+  enabled       Boolean    @default(true)
+  createdById   String?    @map("created_by_id")
+  metadata      Json?
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  @@index([projectId, targetType, targetKey, enabled])
+  @@index([userAssetId])
+  @@index([assetId])
+  @@map("asset_bindings")
 }
 
 model Evaluation {

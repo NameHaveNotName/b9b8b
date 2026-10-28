@@ -129,7 +129,8 @@ export interface ImageClient {
     stylePrompt?: string,
     aspectRatio?: string,
     imageModel?: string,
-    userReferenceUrls?: string[]
+    userReferenceUrls?: string[],
+    priorityReferenceUrls?: string[]
   ): Promise<CharacterPortraitResult>
   generateConceptScene(
     projectId: string,
@@ -208,7 +209,7 @@ export async function getImageClient(): Promise<ImageClient> {
         return results
       },
 
-      async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?, userReferenceUrls?) {
+      async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?, userReferenceUrls?, priorityReferenceUrls?) {
         const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
         const styleHint = _stylePrompt ? `Style reference: ${_stylePrompt}. ` : ''
         const refHint = hasUserRefs ? 'Strictly match the character appearance, colors, outfit, hairstyle and iconic accessories from the provided reference image(s). ' : ''
@@ -222,12 +223,19 @@ export async function getImageClient(): Promise<ImageClient> {
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${ar}`)
         const model = imageModel || IMAGE_MODELS.primary
         console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: style=${!!styleRefUrl} user=${hasUserRefs} (${userReferenceUrls?.map((u: string) => u.slice(0, 30)).join(', ')})`)
+        const priorityRefs = (priorityReferenceUrls || []).filter(Boolean)
+        const primaryReference = priorityRefs[0] || styleRefUrl
+        const secondaryReferences = [
+          ...priorityRefs.slice(1),
+          ...(priorityRefs.length > 0 && styleRefUrl ? [styleRefUrl] : []),
+          ...(userReferenceUrls || []),
+        ].filter((url, index, all) => Boolean(url) && url !== primaryReference && all.indexOf(url) === index)
         const { buffer, isMock, lastError } = await generateImage({
           model,
           prompt,
           quality: 'medium',
-          referenceImageUrl: styleRefUrl,
-          referenceImages: hasUserRefs ? userReferenceUrls : undefined,
+          referenceImageUrl: primaryReference,
+          referenceImages: secondaryReferences.length > 0 ? secondaryReferences : undefined,
           aspectRatio: ar,
           watermark: false,
         })

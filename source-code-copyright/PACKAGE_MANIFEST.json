@@ -5,8 +5,8 @@
   "files": [
     {
       "path": "Deliverables/01_源程序鉴别材料.docx",
-      "bytes": 118697,
-      "sha256": "ab8a45aa94b6673d6070f00fd8aa515ca912aa6ae74fe36744a7e7fa3a09f433"
+      "bytes": 118799,
+      "sha256": "34ee800229900e67b8c391bf2f2b921a0f5a14b93ce3f2359469298bd76455cf"
     },
     {
       "path": "Deliverables/02_软件操作说明书.docx",
@@ -35,13 +35,13 @@
     },
     {
       "path": "SOURCE_LISTING_SELECTION.json",
-      "bytes": 434,
-      "sha256": "d8ec200309ee76d16bb799646f6b07eb77b1ac2a007877d5b631b6b084fad3dc"
+      "bytes": 538,
+      "sha256": "7129269178ee290c17ad31bf0122df234c210eccb494c4f5c3084cbcd79adc68"
     },
     {
       "path": "Deliverables/01_源程序鉴别材料.pdf",
-      "bytes": 5726768,
-      "sha256": "8163a5bdf87d40bf9472c74689bfeec5ef265c9fe24071ca48b04de2ab7d6723"
+      "bytes": 5733430,
+      "sha256": "0e45d15a1d54647c08beba5604fe8f20e5c23d42c444999bcdced0aa8cf18158"
     },
     {
       "path": "Deliverables/02_软件操作说明书.pdf",

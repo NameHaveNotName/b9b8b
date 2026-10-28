@@ -9,8 +9,8 @@ import { IMAGE_MODELS } from '@/lib/models-config'
 
 type UserAsset = {
   id: string
-  kind: 'CHARACTER' | 'ENVIRONMENT' | 'REFERENCE'
-  source: 'UPLOAD' | 'GENERATED'
+  kind: 'CHARACTER' | 'ENVIRONMENT' | 'STYLE' | 'OBJECT' | 'BRAND' | 'REFERENCE'
+  source: 'UPLOAD' | 'GENERATED' | 'PROJECT'
   title?: string | null
   description?: string | null
   url: string
@@ -26,11 +26,14 @@ export default function UserAssetsPage({
   searchParams: Promise<{ projectId?: string }>
 }) {
   const resolvedSearchParams = use(searchParams)
-  const [kind, setKind] = useState<'ALL' | 'CHARACTER' | 'ENVIRONMENT' | 'REFERENCE'>('ALL')
+  const [kind, setKind] = useState<'ALL' | UserAsset['kind']>('ALL')
   const [uploading, setUploading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [message, setMessage] = useState('')
   const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set())
+  const [uploadForm, setUploadForm] = useState({ kind: 'REFERENCE' as UserAsset['kind'], title: '', tags: '' })
+  const [candidate, setCandidate] = useState<any>(null)
+  const [candidateTags, setCandidateTags] = useState('')
   const [form, setForm] = useState({
     kind: 'CHARACTER' as 'CHARACTER' | 'ENVIRONMENT',
     templateId: ASSET_LIBRARY_TEMPLATES.find((t) => t.kind === 'CHARACTER')?.id || '',
@@ -54,13 +57,15 @@ export default function UserAssetsPage({
     try {
       const fd = new FormData()
       fd.append('file', file)
-      fd.append('kind', kind === 'ALL' ? 'REFERENCE' : kind)
-      fd.append('title', file.name)
+      fd.append('kind', uploadForm.kind)
+      fd.append('title', uploadForm.title.trim() || file.name)
+      fd.append('tags', uploadForm.tags)
       const res = await fetch('/api/user-assets', { method: 'POST', body: fd })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.message || json.error || `HTTP ${res.status}`)
       await mutate()
       setMessage('已上传到资产库')
+      setUploadForm((current) => ({ ...current, title: '', tags: '' }))
     } catch (e: any) {
       setMessage(e?.message || '上传失败')
     } finally {
@@ -78,17 +83,45 @@ export default function UserAssetsPage({
         body: JSON.stringify({
           ...form,
           referenceAssetIds: Array.from(selectedRefs),
+          saveToLibrary: false,
         }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.message || json.error || `HTTP ${res.status}`)
-      await mutate()
-      setMessage(`生成完成，已扣 ${json.cost ?? getImageGenerationCost(form.imageModel)} 点`)
+      setCandidate(json.candidate)
+      setCandidateTags('')
+      setMessage(`候选图生成完成，已扣 ${json.cost ?? getImageGenerationCost(form.imageModel)} 点；确认后才会进入资产库`)
     } catch (e: any) {
       setMessage(e?.message || '生成失败')
     } finally {
       setGenerating(false)
     }
+  }
+
+  async function saveCandidate() {
+    if (!candidate) return
+    setMessage('')
+    const res = await fetch('/api/user-assets/candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...candidate, title: form.title.trim() || candidate.title, tags: candidateTags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean) }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) { setMessage(json.message || json.error || '保存失败'); return }
+    setCandidate(null)
+    setMessage('候选图已保存到资产库')
+    await mutate()
+  }
+
+  async function discardCandidate() {
+    if (!candidate) return
+    await fetch('/api/user-assets/candidates', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storageKey: candidate.storageKey }),
+    }).catch(() => {})
+    setCandidate(null)
+    setMessage('已放弃候选图')
   }
 
   async function copyToProject(assetId: string) {
@@ -126,6 +159,13 @@ export default function UserAssetsPage({
         <div className="space-y-4">
           <div className="rounded-lg border border-stone-200 bg-white p-4">
             <h2 className="mb-3 text-sm font-semibold text-stone-800">上传素材</h2>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <select value={uploadForm.kind} onChange={(e) => setUploadForm((current) => ({ ...current, kind: e.target.value as UserAsset['kind'] }))} className="rounded-md border border-stone-200 px-2.5 py-2 text-xs">
+                <option value="CHARACTER">角色</option><option value="ENVIRONMENT">场景</option><option value="STYLE">风格</option><option value="OBJECT">产品与道具</option><option value="BRAND">品牌素材</option><option value="REFERENCE">通用参考</option>
+              </select>
+              <input value={uploadForm.title} onChange={(e) => setUploadForm((current) => ({ ...current, title: e.target.value }))} placeholder="名称（默认文件名）" className="rounded-md border border-stone-200 px-2.5 py-2 text-xs" />
+            </div>
+            <input value={uploadForm.tags} onChange={(e) => setUploadForm((current) => ({ ...current, tags: e.target.value }))} placeholder="可选标签，用逗号分隔" className="mb-3 w-full rounded-md border border-stone-200 px-2.5 py-2 text-xs" />
             <label className="flex h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 bg-stone-50 text-sm text-stone-500 hover:bg-stone-100">
               {uploading ? <LoaderCircle className="mb-2 h-5 w-5 animate-spin" /> : <Upload className="mb-2 h-5 w-5" />}
               选择图片上传
@@ -194,25 +234,33 @@ export default function UserAssetsPage({
             />
             <button
               onClick={generateAsset}
-              disabled={generating || !form.templateId}
+              disabled={generating || !form.templateId || Boolean(candidate)}
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               {generating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              生成并保存到资产库（{getImageGenerationCost(form.imageModel)} 点）
+              {candidate ? '请先保存或放弃当前候选图' : `生成候选图（${getImageGenerationCost(form.imageModel)} 点）`}
             </button>
+            {candidate && (
+              <div className="mt-3 space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <div className="aspect-video overflow-hidden rounded-md bg-stone-100">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={candidate.url} alt="资产候选图" className="h-full w-full object-contain" /></div>
+                <p className="text-xs font-medium text-emerald-800">候选图尚未进入资产库</p>
+                <input value={candidateTags} onChange={(e) => setCandidateTags(e.target.value)} placeholder="保存标签，用逗号分隔" className="w-full rounded-md border border-emerald-200 bg-white px-2.5 py-2 text-xs" />
+                <div className="grid grid-cols-2 gap-2"><button onClick={discardCandidate} className="rounded-md border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600">放弃</button><button onClick={saveCandidate} className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-medium text-white">保存到资产库</button></div>
+              </div>
+            )}
           </div>
         </div>
 
         <div className="rounded-lg border border-stone-200 bg-white">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 p-4">
-            <div className="flex gap-2">
-              {(['ALL', 'CHARACTER', 'ENVIRONMENT', 'REFERENCE'] as const).map((k) => (
+            <div className="flex flex-wrap gap-2">
+              {(['ALL', 'CHARACTER', 'ENVIRONMENT', 'STYLE', 'OBJECT', 'BRAND', 'REFERENCE'] as const).map((k) => (
                 <button
                   key={k}
                   onClick={() => setKind(k)}
                   className={`rounded-md px-3 py-1.5 text-sm ${kind === k ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600'}`}
                 >
-                  {k === 'ALL' ? '全部' : k === 'CHARACTER' ? '人物' : k === 'ENVIRONMENT' ? '环境' : '上传'}
+                  {k === 'ALL' ? '全部' : k === 'CHARACTER' ? '角色' : k === 'ENVIRONMENT' ? '场景' : k === 'STYLE' ? '风格' : k === 'OBJECT' ? '产品与道具' : k === 'BRAND' ? '品牌' : '通用'}
                 </button>
               ))}
             </div>
@@ -244,7 +292,8 @@ export default function UserAssetsPage({
                         onClick={() => {
                           setSelectedRefs((prev) => {
                             const next = new Set(prev)
-                            selected ? next.delete(asset.id) : next.add(asset.id)
+                            if (selected) next.delete(asset.id)
+                            else next.add(asset.id)
                             return next
                           })
                         }}

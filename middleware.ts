@@ -3,10 +3,26 @@ import type { NextRequest } from "next/server"
 import { updateSession } from "@/lib/supabase/middleware"
 
 // 受保护的路由前缀
-const PROTECTED_PREFIXES = ["/dashboard", "/project", "/settings", "/admin"]
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/project",
+  "/assets",
+  "/groups",
+  "/invitations",
+  "/settings",
+  "/admin",
+]
 
 // 这些 API 路由也需要认证
-const PROTECTED_API_PREFIXES = ["/api/projects", "/api/tasks"]
+const PROTECTED_API_PREFIXES = [
+  "/api/projects",
+  "/api/tasks",
+  "/api/user",
+  "/api/groups",
+  "/api/recharge",
+  "/api/framework",
+  "/api/admin",
+]
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -68,10 +84,21 @@ export const config = {
     "/dashboard",
     "/dashboard/:path*",
     "/project/:path*",
+    "/assets",
+    "/assets/:path*",
+    "/groups",
+    "/groups/:path*",
+    "/invitations",
     "/settings/:path*",
     "/admin/:path*",
     "/api/projects/:path*",
     "/api/tasks/:path*",
+    "/api/user/:path*",
+    "/api/user-assets/:path*",
+    "/api/groups/:path*",
+    "/api/recharge/:path*",
+    "/api/framework/:path*",
+    "/api/admin/:path*",
     "/login",
   ],
 }

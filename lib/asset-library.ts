@@ -1,4 +1,4 @@
-export type UserAssetKind = 'CHARACTER' | 'ENVIRONMENT' | 'REFERENCE'
+export type UserAssetKind = 'CHARACTER' | 'ENVIRONMENT' | 'STYLE' | 'OBJECT' | 'BRAND' | 'REFERENCE'
 
 export type AssetTemplate = {
   id: string

@@ -32,9 +32,6 @@ const STEP_LABELS: Record<string, string> = {
   STORYBOARD: '分镜设计',
   KEYFRAMES: '首尾帧',
   VIDEO_DIRECT: '直生视频',
-  VIDEO_RENDER: 'AI渲染',
-  CAMERA: '电脑运镜',
-  REVIEW: '评测优化',
 }
 
 export default async function AdminUserProjectsPage(props: PageProps) {
@@ -183,7 +180,7 @@ export default async function AdminUserProjectsPage(props: PageProps) {
                   const latestCompletedStep = project.steps
                     .filter((s: any) => s.status === 'COMPLETED' || s.status === 'SKIPPED')
                     .sort((a: any, b: any) => {
-                      const order = ['IDEATION','FRAMEWORK','STYLE','CHARACTER','CONCEPT','TRAILER','STORYBOARD','KEYFRAMES','VIDEO_DIRECT','VIDEO_RENDER','CAMERA','REVIEW']
+                      const order = ['IDEATION','FRAMEWORK','STYLE','CHARACTER','CONCEPT','TRAILER','STORYBOARD','KEYFRAMES','VIDEO_DIRECT']
                       return order.indexOf(a.stepType) - order.indexOf(b.stepType)
                     })
                     .pop()

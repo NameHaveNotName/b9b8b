@@ -9,7 +9,6 @@ import {
   ArrowRight,
   Play,
   Image as ImageIcon,
-  FileText,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -31,22 +30,21 @@ import TopStepper from './_components/TopStepper'
 import TrailerPanel from './_components/TrailerPanel'
 import VideoDirectPanel from './_components/VideoDirectPanel'
 import IdeaAnchor from '@/components/workflow/IdeaAnchor'
-import QueueMonitor from '@/components/generation/QueueMonitor'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer'
 import { VISIBLE_STEP_TYPES } from '@/lib/workflow'
-import { ASPECT_RATIO_OPTIONS, IMAGE_MODELS, MODEL_SHORT_NAME, STYLE_MODEL_POOL, VIDEO_MODELS, VIDEO_MODEL_SHORT_NAME } from '@/lib/models-config'
+import { ASPECT_RATIO_OPTIONS, IMAGE_MODELS, MODEL_SHORT_NAME, STYLE_MODEL_POOL, TEXT_MODELS, VIDEO_MODELS, VIDEO_MODEL_SHORT_NAME } from '@/lib/models-config'
 import { PROJECT_TAG_OPTIONS, PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
 import HoverImageBadge from '@/components/generation/HoverImageBadge'
 import { ClickToEdit } from '@/components/ui/ClickToEdit'
 import CostBadge from '@/components/CostBadge'
 import { DEFAULT_GENERATE_COST, GENERATION_COSTS, calculateBatchCost, getImageGenerationCost } from '@/lib/points-config'
-import { getStepDisplayState, prismaTypeToStepId } from '@/lib/workflow-state'
+import { getStepDisplayState, hasStoryboardImage, prismaTypeToStepId } from '@/lib/workflow-state'
 import { exportFrameworkToWord } from '@/lib/framework-export'
 import FrameworkImportModal from '@/components/framework/FrameworkImportModal'
 import IdeationDeepenPanel from '@/components/workflow/IdeationDeepenPanel'
 import ReferenceBar from '@/components/workflow/ReferenceBar'
 import FloatingGenerationPanel from '@/components/workflow/FloatingGenerationPanel'
-import WorkflowInspectorDrawer from '@/components/workflow/WorkflowInspectorDrawer'
+import WorkflowInspectorDrawer, { type GenerationDraft, type GenerationRun } from '@/components/workflow/WorkflowInspectorDrawer'
 import SuggestionBar from '@/components/workflow/SuggestionBar'
 import { exportStoryboardExcel } from '@/lib/storyboard-excel-export'
 import { proxiedMediaUrl } from '@/lib/media-url'
@@ -78,9 +76,6 @@ const STEP_LABELS: Record<string, string> = {
   STORYBOARD: '分镜设计',
   KEYFRAMES: '生成尾帧',
   VIDEO_DIRECT: '直生视频',
-  VIDEO_RENDER: 'AI渲染',
-  CAMERA: '电脑运镜',
-  REVIEW: '评测优化',
 }
 
 const API_STEP_MAP: Record<string, string> = {
@@ -93,9 +88,6 @@ const API_STEP_MAP: Record<string, string> = {
   STORYBOARD: 'storyboard',
   KEYFRAMES: 'keyframes',
   VIDEO_DIRECT: 'video-direct',
-  VIDEO_RENDER: 'video-render',
-  CAMERA: 'camera',
-  REVIEW: 'review',
 }
 
 const SHOW_STORYBOARD_BATCH_CONTROLS = false
@@ -238,7 +230,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
   const executeStep = useCallback(
     async (stepType: string, body?: any) => {
       const apiPath = API_STEP_MAP[stepType]
-      if (!apiPath) return
+      if (!apiPath) return { success: false, message: '未找到步骤执行接口' }
       setExecuting(stepType)
       setLastError(null)
 
@@ -249,7 +241,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         if (idx === undefined || idx === null) {
           setLastError('请先选择一个创意方向')
           setExecuting(null)
-          return
+          return { success: false, message: '请先选择一个创意方向' }
         }
         body = { directionIndex: idx }
       }
@@ -268,7 +260,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         if ((stepType === 'KEYFRAMES' || stepType === 'VIDEO_DIRECT') && !isAvailable) {
           const storyboardStep = steps.find((s: any) => s.stepType === 'STORYBOARD')
           const shots = storyboardStep?.outputData?.shots || []
-          isAvailable = shots.some((shot: any) => Boolean(shot?.firstFrameUrl || shot?.referenceImageUrl))
+          isAvailable = hasStoryboardImage(shots)
         }
 
         // 兼容：若 STYLE 步骤已有 selectedStyleId / selectedRef 但 stepStyleDone 未被写入（旧数据/迁移遗漏），也视为可用
@@ -295,7 +287,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
             : '该步骤当前不可用'
           setLastError(`「${stepLabel}」未解锁：${reason}，请先完成必要的前置步骤`)
           setExecuting(null)
-          return
+          return { success: false, message: `「${stepLabel}」未解锁：${reason}` }
         }
       }
 
@@ -319,7 +311,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         // 不在 mutation 中导航，避免已登录用户被登录页送回仪表盘。
         if (res.status === 401) {
           setLastError('会话校验暂时失败，请留在当前页刷新后重试')
-          return
+          return { success: false, message: '会话校验暂时失败，请刷新后重试' }
         }
 
         // 防御：超时或服务器崩溃可能导致响应为空/非 JSON
@@ -341,7 +333,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         if (!result.success) {
           if (result.error === 'POINTS_001') {
             setLastError('点数不足，请联系管理员充值')
-            return
+            return { success: false, message: '点数不足，请联系管理员充值' }
           }
           // 裸错误码对用户无意义，补上映射
           const errorLabel: Record<string, string> = {
@@ -361,7 +353,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
           const errorMsg = `执行失败：${friendly}${result.message ? ' — ' + result.message.slice(0, 100) : ''}`
           setLastError(errorMsg)
           setToast({ kind: 'error', message: friendly + (result.message ? `：${result.message.slice(0, 80)}` : '') })
-          return
+          return { success: false, message: errorMsg, result }
         }
 
         // 抢占被拒：服务端返回 success + alreadyRunning。
@@ -369,7 +361,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         if (result.alreadyRunning) {
           setToast({ kind: 'error', message: result.message || '该任务已在进行中，请等待完成' })
           await mutate()
-          return
+          return { success: false, message: result.message || '该任务已在进行中', result }
         }
 
         // 调试日志：成功
@@ -378,9 +370,11 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
           setToast({ kind: 'success', message: String(result.message).slice(0, 120) })
         }
         await mutate()
+        return { success: true, result }
       } catch (e: any) {
         console.error(`[executeStep] ${stepType} error:`, e)
         setLastError('网络错误：' + e.message)
+        return { success: false, message: e.message }
       } finally {
         setExecuting(null)
       }
@@ -617,32 +611,36 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
             step={currentStep}
             project={project}
             executing={executing}
-            onExecute={() => executeStep(currentStep.stepType)}
+            onExecute={() => {
+              if ((window as any).__buildConfirmFromCurrentStep) {
+                ;(window as any).__buildConfirmFromCurrentStep({}, currentStep.stepType)
+              } else {
+                executeStep(currentStep.stepType)
+              }
+            }}
             onRetry={() => {
               if (currentStep.stepType === 'FRAMEWORK') {
-                executeStep('FRAMEWORK', { regenerate: true })
+                ;(window as any).__buildConfirmFromCurrentStep?.({ regenerate: true }, 'FRAMEWORK')
               } else if (currentStep.stepType === 'CONCEPT') {
-                // CONCEPT：走新的异步生成路径（202 + 轮询），避免 504 超时
                 const hasPrompts = (currentStep.outputData?.prompts?.length || 0) > 0
                 if (hasPrompts) {
                   const defaultRatio = currentStep.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
                   const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
-                  ;(window as any).__conceptRetry?.(currentStep.outputData.prompts.length, defaultRatio, defaultModel)
+                  ;(window as any).__buildConfirmFromCurrentStep?.({ action: 'generate-images', force: true, aspectRatio: defaultRatio, imageModel: defaultModel }, 'CONCEPT')
                 } else {
-                  executeStep('CONCEPT', { action: 'generate-prompts' })
+                  ;(window as any).__buildConfirmFromCurrentStep?.({ action: 'generate-prompts' }, 'CONCEPT')
                 }
               } else if (['STYLE', 'CHARACTER', 'STORYBOARD', 'KEYFRAMES'].includes(currentStep.stepType)) {
-                // 工作指令.txt（2026-06-07）：重试必须走完整流程，不能跳过提示词生成
                 const hasPrompts = currentStep.outputData?.prompts?.length > 0
                 if (hasPrompts) {
                   const defaultRatio = currentStep.outputData?.aspectRatio || project.selectedAspectRatio || '16:9'
                   const defaultModel = currentStep.outputData?.imageModel || IMAGE_MODELS.primary
-                  executeStep(currentStep.stepType, { action: 'generate-images', force: true, aspectRatio: defaultRatio, imageModel: defaultModel })
+                  ;(window as any).__buildConfirmFromCurrentStep?.({ action: 'generate-images', force: true, aspectRatio: defaultRatio, imageModel: defaultModel }, currentStep.stepType)
                 } else {
-                  executeStep(currentStep.stepType, { action: 'generate-prompts' })
+                  ;(window as any).__buildConfirmFromCurrentStep?.({ action: 'generate-prompts' }, currentStep.stepType)
                 }
               } else {
-                executeStep(currentStep.stepType)
+                ;(window as any).__buildConfirmFromCurrentStep?.({}, currentStep.stepType)
               }
             }}
             onCancel={() => handleCancel(currentStep.stepType)}
@@ -688,7 +686,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
               onExecute={(stepType, body) => {
                 // 先打开副工作台,显示生成前确认
                 if ((window as any).__buildConfirmFromCurrentStep) {
-                  ;(window as any).__buildConfirmFromCurrentStep(body)
+                  ;(window as any).__buildConfirmFromCurrentStep(body, stepType)
                 } else {
                   // 兜底:直接执行
                   executeStep(stepType, body)
@@ -718,10 +716,10 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
                 <span className="text-sm text-amber-700">该资产将用于人物设计、概念图、分镜尾帧和视频片段生成。切换基准时会提示是否影响已生成资产。</span>
               </div>
               <button
-                onClick={() => { (window as any).__openInspector?.('task-queue') }}
+                onClick={() => { (window as any).__openInspector?.() }}
                 className="shrink-0 rounded-lg border border-amber-300 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition hover:bg-amber-50"
               >
-                展开副工作台
+                展开生成工作台
               </button>
             </div>
           )}
@@ -759,9 +757,6 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         </div>
       )}
 
-      {/* 队列监控（固定右下角） */}
-      <QueueMonitor projectId={params.id} steps={steps} />
-
       {/* 框架导入弹窗 */}
       {showImportModal && (
         <FrameworkImportModal
@@ -795,7 +790,6 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         }}
       />
       <WorkflowInspectorDrawerWrapper
-        steps={steps}
         projectId={params.id}
         currentStep={currentStep}
         project={project}
@@ -806,70 +800,151 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
 }
 
 function WorkflowInspectorDrawerWrapper({
-  steps,
   projectId,
   currentStep,
   project,
   setActiveStepType,
 }: {
-  steps: any[]
   projectId: string
   currentStep: any
   project: any
   setActiveStepType: (t: string) => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
-  const [confirmData, setConfirmData] = useState<any>(null)
-  const [feedbackData, setFeedbackData] = useState<any>(null)
-  const [retryEditData, setRetryEditData] = useState<any>(null)
+  const [draft, setDraft] = useState<GenerationDraft | null>(null)
+  const [run, setRun] = useState<GenerationRun | null>(null)
   const retryActionsRef = useRef(new Set<string>())
-  const [activeView, setActiveView] = useState<'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit'>('task-queue')
 
-  const openInspector = useCallback((view: 'task-queue' | 'generation-confirm' | 'result-feedback' | 'retry-edit') => {
-    setActiveView(view)
-    setIsOpen(true)
-  }, [])
+  const openInspector = useCallback(() => setIsOpen(true), [])
 
   // 点击"生成/重新生成"时打开副工作台 + 构建实际参数
-  const [pendingBody, setPendingBody] = useState<any>(null)
-
   const buildConfirmFromCurrentStep = useCallback((body?: any, overrideStepType?: string) => {
     if (!currentStep) return
-    setPendingBody(body || null)
     // 兼容：IDEATION 步骤点击"进入下一步"时 body.directionIndex 存在但 stepType 实际是 FRAMEWORK
     const targetStepType =
       overrideStepType
       || (body?.directionIndex !== undefined && currentStep.stepType === 'IDEATION' ? 'FRAMEWORK' : currentStep.stepType)
     const out = currentStep.outputData || {}
-    const prompt = out.prompts?.[0]?.englishPrompt
+    const prompt = body?.promptOverride
+      || out.prompts?.[0]?.englishPrompt
       || out.prompts?.[0]?.chineseDesc
       || out.englishPrompt
       || out.chineseDesc
       || ''
-    setConfirmData({
+    const editablePrompts = Array.isArray(out.prompts)
+      ? out.prompts.map((item: any, index: number) => {
+          const textField = typeof item?.englishPrompt === 'string'
+            ? 'englishPrompt'
+            : typeof item?.prompt === 'string'
+              ? 'prompt'
+              : 'chineseDesc'
+          const label = item?.styleName
+            || item?.characterName
+            || item?.name
+            || (item?.shotId ? `${item.shotId}${item.actNumber ? ` · 第${item.actNumber}幕` : ''}` : '')
+            || (item?.actNumber ? `第${item.actNumber}幕 · 场景${Number(item.sceneIndex ?? index) + 1}` : '')
+            || `提示词 ${index + 1}`
+          return {
+            id: String(item?.id || item?.shotId || `${targetStepType}-${index}`),
+            label,
+            text: String(item?.[textField] || ''),
+            textField,
+            source: item,
+          }
+        })
+      : undefined
+    const bodyRefs = Array.isArray(body?.refImages) ? body.refImages : []
+    const references = bodyRefs
+      .filter((url: unknown) => typeof url === 'string' && url)
+      .map((url: string, index: number) => ({ url, label: `请求参考图 ${index + 1}`, type: 'other' as const, removable: true }))
+    const costMap: Record<string, number> = {
+      IDEATION: GENERATION_COSTS.IDEA_DIFFUSION,
+      FRAMEWORK: GENERATION_COSTS.FRAMEWORK,
+      STYLE: GENERATION_COSTS.STYLE_UNIFY,
+      CHARACTER: GENERATION_COSTS.CHARACTER_DESIGN,
+      CONCEPT: GENERATION_COSTS.CONCEPT_ART,
+      STORYBOARD: body?.action === 'generate-prompts' ? GENERATION_COSTS.STORYBOARD_PROMPTS : GENERATION_COSTS.STORYBOARD_ACT_IMAGE,
+      KEYFRAMES: GENERATION_COSTS.KEYFRAME,
+      TRAILER: GENERATION_COSTS.TRAILER,
+      VIDEO_DIRECT: GENERATION_COSTS.VIDEO_DIRECT_SEGMENT,
+    }
+    const action = body?.action || ''
+    const kind: GenerationDraft['kind'] =
+      ['IDEATION', 'FRAMEWORK'].includes(targetStepType)
+      || action === 'generate-prompts'
+      || action === 'generate-segment-prompts'
+        ? 'text'
+        : action === 'generate-bgm'
+          ? 'music'
+          : ['TRAILER', 'VIDEO_DIRECT'].includes(targetStepType)
+            ? 'video'
+            : 'image'
+    const resolvedModel = body?.imageModel
+      || body?.videoModel
+      || out.imageModel
+      || out.modelId
+      || (kind === 'text' ? TEXT_MODELS.IDEATION : kind === 'video' ? VIDEO_MODELS.direct.primary : 'gpt-image-1')
+    const promptsCanBeSaved = editablePrompts?.length > 0
+      && ['STYLE', 'CHARACTER', 'CONCEPT', 'KEYFRAMES'].includes(targetStepType)
+    const estimatedPointCost = kind === 'image' && action === 'generate-images' && editablePrompts?.length
+      ? calculateBatchCost(costMap[targetStepType] || GENERATION_COSTS.DEFAULT, editablePrompts.length)
+      : costMap[targetStepType] || GENERATION_COSTS.DEFAULT
+    setDraft({
       stepType: targetStepType,
-      inputDeps: getInputDeps(targetStepType, project),
-      model: out.imageModel || out.modelId || 'gpt-image-1',
-      aspectRatio: out.aspectRatio || project.selectedAspectRatio || '16:9',
+      kind,
+      targetLabel: STEP_LABELS[targetStepType] || targetStepType,
+      inputDeps: getInputDeps(targetStepType),
+      model: resolvedModel,
+      modelEditable: kind === 'image',
+      aspectRatio: body?.aspectRatio || out.aspectRatio || project.selectedAspectRatio || '16:9',
+      aspectRatioEditable: kind === 'image' || kind === 'video',
       prompt,
-      pointCost: 5,
+      promptRequired: false,
+      promptEditable: promptsCanBeSaved,
+      prompts: editablePrompts,
+      references,
+      referencesResolved: bodyRefs.length > 0,
+      referencesEditable: false,
+      pointCost: estimatedPointCost,
+      isRetry: currentStep.status === 'COMPLETED' || currentStep.status === 'FAILED',
+      requestBody: body || {},
     })
-    openInspector('generation-confirm')
+    setRun(null)
+    openInspector()
   }, [currentStep, project, openInspector])
 
-  // 任务完成时显示结果反馈
+  // 历史结果不再进入独立“结果反馈”页，而是在同一生成工作台中展示。
   const buildFeedbackFromStep = useCallback((step: any) => {
     if (!step) return
-    setFeedbackData({
-      step,
-      stages: step.status === 'FAILED' ? [{ name: '生成', status: 'failed', error: step.errorMessage }] : [],
-      previewUrl: step.outputData?.styleRefUrl || step.outputData?.imageUrl || step.outputData?.url,
-      partialSuccess: false,
-      failedReason: step.status === 'FAILED' ? step.errorMessage : undefined,
-      preservedAssets: [],
+    const out = step.outputData || {}
+    const previewUrl = out.styleRefUrl || out.imageUrl || out.url || out.scenes?.[0]?.url || out.results?.[0]?.lastFrameUrl
+    setDraft({
+      stepType: step.stepType,
+      kind: ['TRAILER', 'VIDEO_DIRECT'].includes(step.stepType) ? 'video' : 'image',
+      targetLabel: STEP_LABELS[step.stepType] || step.stepType,
+      inputDeps: getInputDeps(step.stepType),
+      model: out.imageModel || out.modelId || 'gpt-image-1',
+      modelEditable: false,
+      aspectRatio: out.aspectRatio || project.selectedAspectRatio || '16:9',
+      aspectRatioEditable: false,
+      prompt: out.prompts?.[0]?.englishPrompt || '',
+      promptEditable: false,
+      references: [],
+      referencesResolved: false,
+      referencesEditable: false,
+      pointCost: GENERATION_COSTS.DEFAULT,
+      isRetry: true,
+      requestBody: {},
     })
-    openInspector('result-feedback')
-  }, [openInspector])
+    setRun({
+      status: step.status === 'FAILED' ? 'failed' : 'completed',
+      message: step.status === 'FAILED' ? (step.errorMessage || '生成失败') : '任务已经完成，可查看结果或调整参数再次生成。',
+      previewUrl,
+      previewType: ['TRAILER', 'VIDEO_DIRECT'].includes(step.stepType) ? 'video' : 'image',
+      completedAt: step.completedAt || undefined,
+    })
+    openInspector()
+  }, [openInspector, project])
 
   // 打开分镜重试副工作台（StoryboardPanel 通过 window 调用）
   const openRetryEditForStoryboard = useCallback((payload: {
@@ -882,20 +957,35 @@ function WorkflowInspectorDrawerWrapper({
     currentModel: string
     aspectRatio: string
   }) => {
-    setRetryEditData({
-      stepType: 'storyboard',
+    const refs: GenerationDraft['references'] = payload.baseRefs.map((ref) => ({ ...ref }))
+    if (payload.originalImageUrl && !refs.some((ref) => ref.url === payload.originalImageUrl)) {
+      refs.unshift({ url: payload.originalImageUrl, label: '当前分镜原图', type: 'original', removable: false })
+    }
+    setDraft({
+      stepType: 'STORYBOARD',
+      kind: 'image',
       targetId: payload.shotId,
       actNumber: payload.actNumber,
       targetLabel: payload.targetLabel,
-      basePrompt: payload.basePrompt,
-      baseRefs: payload.baseRefs,
+      prompt: payload.basePrompt,
+      promptRequired: true,
+      promptEditable: true,
+      references: refs,
+      referencesResolved: true,
+      referencesEditable: true,
       originalImageUrl: payload.originalImageUrl,
-      currentModel: payload.currentModel,
+      model: payload.currentModel,
+      modelEditable: true,
       aspectRatio: payload.aspectRatio,
-      pointCost: 5,
+      aspectRatioEditable: true,
+      pointCost: GENERATION_COSTS.STORYBOARD_ACT_IMAGE,
+      inputDeps: getInputDeps('STORYBOARD'),
+      isRetry: true,
+      requestBody: {},
     })
-    openInspector('retry-edit')
-  }, [openInspector])
+    setRun(null)
+    openInspector()
+  }, [openInspector, project])
 
   /**
    * 生成一个稳定的 clientActionId。
@@ -925,15 +1015,18 @@ function WorkflowInspectorDrawerWrapper({
   }, [])
 
   // 重试副工作台的"重新生成"按钮实际执行
-  const executeRetryRegenerate = useCallback(async (data: any, options: { promptOverride: string; refs: string[] }) => {
+  const executeStoryboardDraft = useCallback(async (data: GenerationDraft, mode: 'generate' | 'edit-original') => {
     const targetKey = `${data.actNumber ?? 0}_${data.targetId}`
     if (retryActionsRef.current.has(targetKey)) {
-      // 原实现是静默 return：请求进行中（最长 180s+）再点一次，看到的就是「点了完全没反应」
       ;(window as any).__showToast?.({ kind: 'error', message: '该镜头正在重新生成中，请等待当前任务完成' })
       return
     }
     retryActionsRef.current.add(targetKey)
     const clientActionId = nextRetryActionId(targetKey)
+    const refs = data.references
+      .filter((ref) => ref.type !== 'original')
+      .map((ref) => ref.url)
+    setRun({ status: 'running', message: mode === 'edit-original' ? '正在整理原图、修改意见和参考图并调用供应商…' : '正在整理最终提示词和参考图并调用供应商…', startedAt: new Date().toISOString(), requestSnapshot: data })
     window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
       key: targetKey,
       state: { status: 'processing', shotId: data.targetId, actNumber: data.actNumber, startedAt: new Date().toISOString(), message: '请求已受理，正在准备生成' },
@@ -946,103 +1039,85 @@ function WorkflowInspectorDrawerWrapper({
           shotId: data.targetId,
           actNumber: data.actNumber,
           aspectRatio: data.aspectRatio,
-          imageModel: data.currentModel,
-          mode: 'regenerate',
-          promptOverride: options.promptOverride,
-          refImages: options.refs,
+          imageModel: data.model,
+          mode,
+          promptOverride: mode === 'generate' ? data.prompt : undefined,
+          editInstruction: mode === 'edit-original' ? data.editInstruction : undefined,
+          refImages: refs,
           clientActionId,
         }),
       })
       const result = await res.json()
-      // 服务端对重复的 clientActionId 返回 409 { success:false, duplicate:true }，
-      // 必须在 !res.ok 之前先处理，否则正确的去重会被报成"重新生成失败"
       if (result?.duplicate && result.operationStatus !== 'SUCCEEDED') {
         if ((window as any).__refreshProject) (window as any).__refreshProject()
-        ;(window as any).__showToast?.({ kind: 'success', message: result.message || '任务已受理，正在处理中' })
+        setRun({ status: 'running', message: result.message || '任务已受理，正在处理中', startedAt: new Date().toISOString() })
         return
       }
       if (!res.ok || !result?.success) throw new Error(result?.message || `HTTP ${res.status}`)
-      // 触发项目数据刷新（主页面 useSWR）
       if ((window as any).__refreshProject) (window as any).__refreshProject()
       window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: { key: targetKey, state: { status: 'completed' } } }))
-      if (result.isMock) {
-        ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，点数未扣除，请切换模型重试' })
-      } else {
-        ;(window as any).__showToast?.({ kind: 'success', message: '分镜草图已重新生成' })
-      }
+      setRun((previous) => ({ ...previous, status: result.isMock ? 'failed' : 'completed', message: result.warning || (mode === 'edit-original' ? '原图修改完成。' : '分镜草图已重新生成。'), completedAt: new Date().toISOString(), previewUrl: result.asset?.url, previewType: 'image', isMock: !!result.isMock }))
+      ;(window as any).__showToast?.({ kind: result.isMock ? 'error' : 'success', message: result.warning || '生成完成' })
     } catch (e: any) {
       window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
         key: targetKey,
         state: { status: 'failed', message: e?.message || '重新生成失败' },
       } }))
+      setRun((previous) => ({ ...previous, status: 'failed', message: e?.message || '重新生成失败', completedAt: new Date().toISOString(), error: e?.message }))
       ;(window as any).__showToast?.({ kind: 'error', message: '重新生成失败：' + e?.message })
     } finally {
       retryActionsRef.current.delete(targetKey)
       clearRetryActionId(targetKey)
-      // 请求真正结束后才关抽屉：提前关闭会销毁 RetryEditView 的 submitting 状态，
-      // 用户点下去看不到任何“生成中”反馈，就会反复点击
-      setIsOpen(false)
     }
   }, [projectId, nextRetryActionId, clearRetryActionId])
 
-  // 重试副工作台的"修改原图"按钮实际执行
-  const executeRetryEditOriginal = useCallback(async (data: any, options: { editInstruction: string; refs: string[] }) => {
-    const targetKey = `${data.actNumber ?? 0}_${data.targetId}`
-    if (retryActionsRef.current.has(targetKey)) {
-      // 原实现是静默 return：请求进行中（最长 180s+）再点一次，看到的就是「点了完全没反应」
-      ;(window as any).__showToast?.({ kind: 'error', message: '该镜头正在重新生成中，请等待当前任务完成' })
+  const submitDraft = useCallback(async (nextDraft: GenerationDraft, mode: 'generate' | 'edit-original') => {
+    setDraft(nextDraft)
+    if (nextDraft.stepType === 'STORYBOARD' && nextDraft.targetId) {
+      await executeStoryboardDraft(nextDraft, mode)
       return
     }
-    retryActionsRef.current.add(targetKey)
-    const clientActionId = nextRetryActionId(targetKey)
-    window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
-      key: targetKey,
-      state: { status: 'processing', shotId: data.targetId, actNumber: data.actNumber, startedAt: new Date().toISOString(), message: '请求已受理，正在修改原图' },
-    } }))
-    try {
-      const res = await fetchWithRetry(`/api/projects/${projectId}/steps/storyboard/regenerate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          shotId: data.targetId,
-          actNumber: data.actNumber,
-          aspectRatio: data.aspectRatio,
-          imageModel: data.currentModel,
-          mode: 'edit-original',
-          editInstruction: options.editInstruction,
-          refImages: options.refs,
-          clientActionId,
-        }),
-      })
-      const result = await res.json()
-      // 先处理 duplicate（服务端返回 409 + success:false），再判失败
-      if (result?.duplicate && result.operationStatus !== 'SUCCEEDED') {
-        if ((window as any).__refreshProject) (window as any).__refreshProject()
-        ;(window as any).__showToast?.({ kind: 'success', message: result.message || '任务已受理，正在处理中' })
-        return
-      }
-      if (!res.ok || !result?.success) throw new Error(result?.message || `HTTP ${res.status}`)
-      if ((window as any).__refreshProject) (window as any).__refreshProject()
-      window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: { key: targetKey, state: { status: 'completed' } } }))
-      if (result.isMock) {
-        ;(window as any).__showToast?.({ kind: 'error', message: result.warning || '当前模型不可用，返回了占位图，点数未扣除，请切换模型重试' })
-      } else {
-        ;(window as any).__showToast?.({ kind: 'success', message: '修改完成' })
-      }
-    } catch (e: any) {
-      window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
-        key: targetKey,
-        state: { status: 'failed', message: e?.message || '修改失败' },
-      } }))
-      ;(window as any).__showToast?.({ kind: 'error', message: '修改失败：' + e?.message })
-    } finally {
-      retryActionsRef.current.delete(targetKey)
-      clearRetryActionId(targetKey)
-      // 请求真正结束后才关抽屉：提前关闭会销毁 RetryEditView 的 submitting 状态，
-      // 用户点下去看不到任何“生成中”反馈，就会反复点击
-      setIsOpen(false)
+    if (!(window as any).__executeStep) {
+      setRun({ status: 'failed', message: '执行入口未就绪，请刷新页面后重试。' })
+      return
     }
-  }, [projectId, nextRetryActionId, clearRetryActionId])
+    const requestBody = {
+      ...(nextDraft.requestBody || {}),
+      ...(nextDraft.kind === 'image' ? { imageModel: nextDraft.model } : {}),
+      ...(nextDraft.kind === 'video' ? { videoModel: nextDraft.model } : {}),
+      aspectRatio: nextDraft.aspectRatio,
+      ...(nextDraft.promptEditable && nextDraft.prompt ? { promptOverride: nextDraft.prompt } : {}),
+      ...(nextDraft.referencesResolved && nextDraft.references.length > 0 ? { refImages: nextDraft.references.map((ref) => ref.url) } : {}),
+    }
+    setRun({ status: 'running', message: nextDraft.prompts?.length ? `正在保存并冻结 ${nextDraft.prompts.length} 条提示词…` : '正在冻结本次请求参数…', startedAt: new Date().toISOString(), requestSnapshot: nextDraft })
+    try {
+      if (nextDraft.prompts?.length && ['STYLE', 'CHARACTER', 'CONCEPT', 'KEYFRAMES'].includes(nextDraft.stepType)) {
+        const route = API_STEP_MAP[nextDraft.stepType]
+        const saveResponse = await fetch(`/api/projects/${projectId}/steps/${route}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompts: nextDraft.prompts.map((item) => item.source) }),
+        })
+        if (!saveResponse.ok) {
+          const saveError = await saveResponse.json().catch(() => ({}))
+          throw new Error(saveError.message || '保存生成提示词失败')
+        }
+      }
+      setRun((previous) => previous ? { ...previous, message: '参数快照已保存，正在调用当前步骤生成接口…' } : previous)
+      const result = await (window as any).__executeStep(nextDraft.stepType, requestBody)
+      if (!result?.success) throw new Error(result?.message || '生成请求没有返回成功状态')
+      const payload = result.result || {}
+      const previewUrl = payload.asset?.url
+        || payload.data?.scenes?.[0]?.url
+        || payload.data?.portraits?.[0]?.url
+        || payload.data?.results?.[0]?.lastFrameUrl
+        || payload.videoUrl
+        || payload.combinedVideoUrl
+      setRun((previous) => ({ ...previous, status: 'completed', message: payload.message || '步骤请求已经完成，最新资产已写入项目。', completedAt: new Date().toISOString(), previewUrl, previewType: nextDraft.kind === 'video' ? 'video' : 'image' }))
+    } catch (error: any) {
+      setRun((previous) => ({ ...previous, status: 'failed', message: error?.message || '生成失败', completedAt: new Date().toISOString(), error: error?.message }))
+    }
+  }, [executeStoryboardDraft, projectId])
 
   useEffect(() => {
     ;(window as any).__openInspector = openInspector
@@ -1057,68 +1132,34 @@ function WorkflowInspectorDrawerWrapper({
     }
   }, [openInspector, buildConfirmFromCurrentStep, buildFeedbackFromStep, openRetryEditForStoryboard])
 
-  useEffect(() => {
-    if (!currentStep) return
-    if (currentStep.status !== 'PROCESSING' && confirmData) {
-      setConfirmData(null)
-    }
-  }, [currentStep?.status])
-
   return (
     <>
       {/* 副工作台入口按钮 — 始终可见
           对比度：amber-600(#d97706) on white/90 只有约 3.1:1，低于 WCAG AA 的 4.5:1，
           加上竖排文字后在亮屏上会"发白看不清"。改用 amber-800 + 不透明底 + 深色边框。 */}
       <button
-        onClick={() => openInspector('task-queue')}
+        onClick={openInspector}
         className="fixed right-0 top-1/3 z-40 rounded-l-xl border border-r-0 border-amber-300 bg-white px-3 py-4 text-xs font-bold text-amber-800 shadow-md transition hover:bg-amber-50 hover:pr-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
         style={{ writingMode: 'vertical-rl' }}
-        title="打开副工作台"
+        title="打开生成工作台"
       >
-        副工作台
+        生成工作台
       </button>
       <WorkflowInspectorDrawer
         isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
         projectId={projectId}
-        steps={steps}
-        activeView={activeView}
-        onViewChange={setActiveView}
-        confirmData={confirmData}
-        feedbackData={feedbackData}
-        retryEditData={retryEditData}
-        onRetryRegenerate={executeRetryRegenerate}
-        onRetryEditOriginal={executeRetryEditOriginal}
+        onClose={() => setIsOpen(false)}
+        draft={draft}
+        run={run}
+        onDraftChange={setDraft}
+        onSubmit={submitDraft}
         onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
-        onLocateTaskStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
-        onConfirmGenerate={async () => {
-          // 必须在请求真正发出之后再关抽屉。
-          // 原实现第一行就 setIsOpen(false) 且不 await：
-          // 抽屉里 GenerationConfirmView 的 `confirming` 状态只存在 1 帧就随卸载销毁，
-          // 用户点下去完全看不到"生成中"，于是反复点击。
-          if (!confirmData) {
-            setIsOpen(false)
-            return
-          }
-          if (!(window as any).__executeStep) {
-            setIsOpen(false)
-            ;(window as any).__showToast?.({ kind: 'error', message: '执行入口未就绪，请刷新页面后重试' })
-            return
-          }
-          try {
-            await (window as any).__executeStep(confirmData.stepType, pendingBody || undefined)
-          } finally {
-            // executeStep 内部已经维护 executing / toast / lastError，
-            // 这里只在它结束后收起抽屉
-            setIsOpen(false)
-          }
-        }}
       />
     </>
   )
 }
 
-function getInputDeps(stepType: string, project: any): string[] {
+function getInputDeps(stepType: string): string[] {
   const map: Record<string, string[]> = {
     IDEATION: [],
     FRAMEWORK: ['原始元构思'],
@@ -1131,20 +1172,6 @@ function getInputDeps(stepType: string, project: any): string[] {
     VIDEO_DIRECT: ['起始帧 + 尾帧 (from keyframes)', '风格基准'],
   }
   return map[stepType] || []
-}
-
-function buildStages(step: any): Array<{ name: string; status: 'completed' | 'processing' | 'failed' | 'pending'; progress?: number; error?: string }> {
-  const out = step.outputData || {}
-  const isFailed = step.status === 'FAILED'
-  const isCompleted = step.status === 'COMPLETED'
-  const isProcessing = step.status === 'PROCESSING'
-
-  return [
-    { name: '参数计算', status: 'completed' },
-    { name: '提示词生成', status: isFailed && !out.prompts ? 'failed' : isCompleted || out.prompts ? 'completed' : 'processing' },
-    { name: '模型调用', status: isFailed ? 'failed' : isProcessing ? 'processing' : isCompleted ? 'completed' : 'pending' },
-    { name: '资产写入', status: isFailed ? 'failed' : isCompleted ? 'completed' : isProcessing ? 'processing' : 'pending' },
-  ]
 }
 
 /* ============================================================
@@ -1407,7 +1434,7 @@ function StepContent({
   if ((step.stepType === 'KEYFRAMES' || step.stepType === 'VIDEO_DIRECT') && !isAvailable) {
     const storyboardStep = project?.steps?.find((s: any) => s.stepType === 'STORYBOARD')
     const shots = storyboardStep?.outputData?.shots || []
-    isAvailable = shots.some((shot: any) => Boolean(shot?.firstFrameUrl || shot?.referenceImageUrl))
+    isAvailable = hasStoryboardImage(shots)
   }
 
   switch (step.stepType) {
@@ -1529,10 +1556,6 @@ function StepContent({
           readOnly={readOnly}
         />
       )
-    case 'VIDEO_RENDER':
-    case 'CAMERA':
-    case 'REVIEW':
-      return <PlaceholderPanel step={step} readOnly={readOnly} />
     default:
       return <p className="text-stone-500">暂无内容</p>
   }
@@ -2161,7 +2184,7 @@ function IdeationPanel({
     setImporting(true)
     try {
       // 先上传图片（逐张），收集 asset 引用
-      const firstFrameMap: Record<string, { url: string; assetId: string }> = {}
+      const firstFrameMap: Record<string, { url: string; assetId: string; storageKey?: string }> = {}
       if (xlsxImageFiles.length > 0) {
         console.log(`[IMPORT] 开始上传 ${xlsxImageFiles.length} 张图片`)
         for (let i = 0; i < xlsxImageFiles.length; i++) {
@@ -2182,7 +2205,11 @@ function IdeationPanel({
           if (imgRes.ok) {
             const imgData = await imgRes.json()
             if (imgData.url && imgData.shotId && !firstFrameMap[imgData.shotId]) {
-              firstFrameMap[imgData.shotId] = { url: imgData.url, assetId: imgData.assetId }
+              firstFrameMap[imgData.shotId] = {
+                url: imgData.url,
+                assetId: imgData.assetId,
+                storageKey: imgData.storageKey,
+              }
             }
           }
           console.log(`[IMPORT] 图片 ${i + 1}/${xlsxImageFiles.length} 上传${imgRes.ok ? '成功' : '失败'}`)
@@ -4559,36 +4586,51 @@ function CharacterPanel({
   const [dragOverCharacterId, setDragOverCharacterId] = useState<string | null>(null)
   const [assigningCharacterId, setAssigningCharacterId] = useState<string | null>(null)
   const [justAssignedCharacterId, setJustAssignedCharacterId] = useState<string | null>(null)
+  const { data: characterBindingsData, mutate: mutateCharacterBindings } = useSWR(
+    `/api/projects/${projectId}/asset-bindings?targetType=CHARACTER`,
+    fetcher,
+    { revalidateOnFocus: false }
+  )
+  const characterBindings: any[] = characterBindingsData?.bindings || []
+  const removeCharacterBinding = useCallback(async (bindingId: string) => {
+    const response = await fetch(`/api/projects/${projectId}/asset-bindings/${bindingId}`, { method: 'DELETE' })
+    if (response.ok) await mutateCharacterBindings()
+  }, [projectId, mutateCharacterBindings])
   const promptSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedPromptsRef = useRef<any[]>(step.outputData?.prompts || [])
 
-  const assignReferenceToCharacter = useCallback(async (input: {
+  const assignPriorityReferenceToCharacter = useCallback(async (input: {
     characterId: string
     assetId?: string
-    referenceAssetId?: string
-    referenceUrl: string
+    userAssetId?: string
   }) => {
     setAssigningCharacterId(input.characterId)
     try {
-      const res = await fetch(`/api/projects/${projectId}/steps/character/assign-reference`, {
+      const res = await fetch(`/api/projects/${projectId}/asset-bindings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          targetType: 'CHARACTER',
+          targetKey: input.characterId,
+          referenceRole: 'IDENTITY',
+          assetId: input.assetId,
+          userAssetId: input.userAssetId,
+        }),
       })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok || !data.success) {
+      if (!res.ok || !data.binding) {
         throw new Error(data.message || data.error || `HTTP ${res.status}`)
       }
       setJustAssignedCharacterId(input.characterId)
       setTimeout(() => setJustAssignedCharacterId((prev) => prev === input.characterId ? null : prev), 2200)
-      setToast?.({ kind: 'success', message: '参考图已设为角色图' })
-      await mutate()
+      setToast?.({ kind: 'success', message: '已设为该角色的优先身份素材' })
+      await mutateCharacterBindings()
     } catch (e: any) {
-      onError('设置角色参考图失败：' + (e?.message || e))
+      onError('设置角色优先素材失败：' + (e?.message || e))
     } finally {
       setAssigningCharacterId(null)
     }
-  }, [projectId, mutate, onError, setToast])
+  }, [projectId, mutateCharacterBindings, onError, setToast])
 
   useEffect(() => {
     function findCharacterFromEl(el: Element | null): { characterId: string | null; assetId?: string } {
@@ -4610,9 +4652,13 @@ function CharacterPanel({
     function handleCustomDrop(e: any) {
       const item = e.detail?.item
       const el = document.elementFromPoint(e.detail?.clientX || 0, e.detail?.clientY || 0)
-      const { characterId, assetId } = findCharacterFromEl(el)
+      const { characterId } = findCharacterFromEl(el)
       if (characterId && item?.url) {
-        assignReferenceToCharacter({ characterId, assetId, referenceAssetId: item.id, referenceUrl: item.url })
+        assignPriorityReferenceToCharacter({
+          characterId,
+          userAssetId: item.userAssetId || (item.sourceType === 'USER_ASSET' ? item.id : undefined),
+          assetId: item.assetId || (item.sourceType !== 'USER_ASSET' ? item.id : undefined),
+        })
       }
       setDragOverCharacterId(null)
     }
@@ -4629,7 +4675,7 @@ function CharacterPanel({
       window.removeEventListener('customdrop', handleCustomDrop as EventListener)
       window.removeEventListener('customdragend', handleDragEnd as EventListener)
     }
-  }, [assignReferenceToCharacter])
+  }, [assignPriorityReferenceToCharacter])
 
   // PROMPT_READY：提示词预览（必须在 PROCESSING 之前判断）
   if (step.status === 'PENDING' && step.outputData?.prompts?.length > 0) {
@@ -4797,6 +4843,7 @@ function CharacterPanel({
           const isDragTarget = characterId && dragOverCharacterId === characterId
           const isAssigning = characterId && assigningCharacterId === characterId
           const justAssigned = characterId && justAssignedCharacterId === characterId
+          const priorityBindings = characterBindings.filter((binding) => binding.targetKey === characterId)
           const cardRatio = asset.metadata?.aspectRatio || '16:9'
           // 默认 gpt-image-1（除非用户手动选择其他模型）
           const cardModel = IMAGE_MODELS.primary
@@ -4828,7 +4875,7 @@ function CharacterPanel({
                 {(isAssigning || justAssigned) && (
                   <div className="absolute inset-0 z-30 flex items-center justify-center bg-emerald-50/80 text-xs font-medium text-emerald-700">
                     {isAssigning ? <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}
-                    {isAssigning ? '设置中' : '已替换'}
+                    {isAssigning ? '设置中' : '已设为优先素材'}
                   </div>
                 )}
               </div>
@@ -4839,6 +4886,7 @@ function CharacterPanel({
                 <p className="text-xs text-stone-400 line-clamp-2">
                   {asset.metadata?.chineseDesc || asset.metadata?.characterId}
                 </p>
+                {priorityBindings.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{priorityBindings.map((binding, index) => <span key={binding.id} className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-1 text-[10px] font-medium text-emerald-700">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={binding.url} alt="" className="h-4 w-4 rounded-full object-cover" />{index === 0 ? '优先素材' : '辅助参考'}{!readOnly && <button type="button" onClick={() => removeCharacterBinding(binding.id)} className="ml-0.5 text-emerald-500 hover:text-red-600" title="移除参考"><X className="h-3 w-3" /></button>}</span>)}</div>}
                 {/* Round 6 Phase 2+5：可展开/可编辑的英文提示词 */}
                 {asset.metadata?.llmPrompt && (
                   <div className="mt-2">
@@ -4879,6 +4927,7 @@ function CharacterPanel({
             const isDragTarget = dragOverCharacterId === f.characterId
             const isAssigning = assigningCharacterId === f.characterId
             const justAssigned = justAssignedCharacterId === f.characterId
+            const priorityBindings = characterBindings.filter((binding) => binding.targetKey === f.characterId)
             return (
               <div
                 key={`failed-${f.characterId}`}
@@ -4907,6 +4956,7 @@ function CharacterPanel({
                 <div className="p-3">
                   <p className="text-sm font-medium text-stone-800">{f.characterName}</p>
                   <p className="text-xs text-stone-500 line-clamp-2">{f.chineseDesc || f.role}</p>
+                  {priorityBindings.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{priorityBindings.map((binding) => <span key={binding.id} className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-1 text-[10px] font-medium text-emerald-700">优先素材</span>)}</div>}
                   <button
                     onClick={() => handleRegenerate(undefined, f.characterId, project.selectedAspectRatio)}
                     disabled={isRetrying || !!regeneratingId}
@@ -5478,6 +5528,19 @@ function StoryboardPanel({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ shotId, actNumber: actNum, refs: newRefs }),
         }).catch(err => console.warn('[DRAG-REF] 持久化失败:', err))
+        const bindingSource = item.userAssetId || item.sourceType === 'USER_ASSET'
+          ? { userAssetId: item.userAssetId || item.id }
+          : { assetId: item.assetId || item.id }
+        fetch(`/api/projects/${projectId}/asset-bindings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetType: 'SHOT',
+            targetKey: `${actNum ?? ''}:${shotId}`,
+            referenceRole: 'GENERAL',
+            ...bindingSource,
+          }),
+        }).catch(err => console.warn('[DRAG-REF] 资产绑定失败:', err))
       }
       setDragOverShotId(null)
     }
@@ -5489,10 +5552,10 @@ function StoryboardPanel({
     window.addEventListener('customdragend', handleDragEnd as EventListener)
 
     // [DRAG-REF] 监听参考图拖拽事件，转换为 customdragmove/customdrop
-    let currentRefItem: { url: string; id: string } | null = null
+    let currentRefItem: { url: string; id: string; sourceType?: string; userAssetId?: string; assetId?: string } | null = null
     function handleRefDragStart(e: Event) {
       const detail = (e as CustomEvent).detail
-      currentRefItem = { url: detail.url, id: detail.id }
+      currentRefItem = { url: detail.url, id: detail.id, sourceType: detail.sourceType, userAssetId: detail.userAssetId, assetId: detail.assetId }
     }
     function handleRefDragOver(e: DragEvent) {
       if (!currentRefItem) return
@@ -6570,18 +6633,6 @@ function KeyframesPanel({
           <CostBadge cost={DEFAULT_GENERATE_COST} />
         </div>
       </div>
-    </div>
-  )
-}
-
-function PlaceholderPanel({ step, readOnly }: { step: any; readOnly?: boolean }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 bg-stone-50 py-16">
-      <FileText className="h-10 w-10 text-stone-300" />
-      <p className="mt-4 text-sm font-medium text-stone-500">
-        {STEP_LABELS[step.stepType]} — 开发中
-      </p>
-      <p className="mt-1 text-xs text-stone-400">该功能将在后续版本上线</p>
     </div>
   )
 }

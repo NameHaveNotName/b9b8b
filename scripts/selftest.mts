@@ -16,6 +16,12 @@ import assert from 'node:assert/strict'
 import { isBlockedIp, assertSsrfSafe } from '../lib/ssrf-guard.ts'
 import { safeSegment, resolveUploadExtension, isUploadSizeAllowed } from '../lib/upload-safety.ts'
 import { calculateBatchCost, GENERATION_COSTS } from '../lib/points-config.ts'
+import {
+  computeProjectStateFromSteps,
+  getStepDisplayState,
+  hasConceptImage,
+  hasStoryboardImage,
+} from '../lib/workflow-state.ts'
 
 let passed = 0
 let failed = 0
@@ -178,6 +184,68 @@ check('count=0 时费用为 0', () => {
 })
 check('负数 count 不会产生负费用', () => {
   assert.ok(calculateBatchCost(GENERATION_COSTS.KEYFRAME, -3) >= 0)
+})
+
+console.log('\n== 分镜后续步骤解锁 ==')
+
+check('导入首帧可解锁尾帧与直生视频', () => {
+  assert.equal(hasStoryboardImage([{ shotId: 's1', firstFrameUrl: 'https://example.com/first.png' }]), true)
+})
+
+check('参考图模式的分镜图也可解锁后续步骤', () => {
+  assert.equal(hasStoryboardImage([{ shotId: 's1', referenceImageUrl: 'https://example.com/ref.png' }]), true)
+})
+
+check('导入表中的通用图片字段可解锁后续步骤', () => {
+  assert.equal(hasStoryboardImage([{ shotId: 's1', imageUrl: 'https://example.com/imported.png' }]), true)
+})
+
+check('只有分镜文字时不解锁图像后续步骤', () => {
+  assert.equal(hasStoryboardImage([{ shotId: 's1', description: '只有文字' }]), false)
+})
+
+console.log('\n== 九步显示与解锁规则 ==')
+
+const workflowState = computeProjectStateFromSteps([])
+
+check('概念图完成但宣传片未完成时，概念图仍可编辑', () => {
+  const state = { ...workflowState, stepConceptDone: true }
+  assert.equal(getStepDisplayState('concept', state).isHidden, false)
+})
+
+check('宣传片完成后概念图进入只读', () => {
+  const state = { ...workflowState, stepTrailerDone: true }
+  assert.equal(getStepDisplayState('concept', state).isHidden, true)
+})
+
+check('概念步骤完成但没有图片时不解锁宣传片', () => {
+  const state = { ...workflowState, stepConceptDone: true }
+  assert.equal(getStepDisplayState('trailer', state).isUnlocked, false)
+})
+
+check('概念图结果资产可解锁宣传片', () => {
+  const state = computeProjectStateFromSteps([{
+    stepType: 'CONCEPT',
+    status: 'PROCESSING',
+    resultAssets: [{ type: 'IMAGE', url: 'https://example.com/concept.png' }],
+  }])
+  assert.equal(hasConceptImage({ resultAssets: [{ type: 'IMAGE', url: 'x' }] }), true)
+  assert.equal(getStepDisplayState('trailer', state).isUnlocked, true)
+})
+
+check('概念图占位资产不解锁宣传片', () => {
+  const state = computeProjectStateFromSteps([{
+    stepType: 'CONCEPT',
+    status: 'COMPLETED',
+    resultAssets: [{ type: 'IMAGE', url: 'data:image/png;base64,mock', metadata: { isMock: true } }],
+  }])
+  assert.equal(getStepDisplayState('trailer', state).isUnlocked, false)
+})
+
+check('分镜和生成尾帧不因下游完成进入只读', () => {
+  const state = { ...workflowState, stepEndingDone: true, stepDirectDone: true }
+  assert.equal(getStepDisplayState('storyboard', state).isHidden, false)
+  assert.equal(getStepDisplayState('ending', state).isHidden, false)
 })
 
 console.log('\n== 贡献度去重口径 ==')

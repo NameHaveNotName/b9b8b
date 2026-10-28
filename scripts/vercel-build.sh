@@ -1,5 +1,7 @@
 #!/bin/sh
 
+set -eu
+
 # 下载源允许逐个失败，但最终二进制和数据库契约必须验证成功。
 
 # 尝试定位 ffmpeg-static 提供的二进制；若缺失则下载 johnvansickle 静态构建
