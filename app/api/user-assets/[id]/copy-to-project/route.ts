@@ -3,16 +3,12 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
-import { prisma } from '@/lib/prisma'
-import { ensureUserAssetsTable } from '@/lib/ensure-user-assets'
-
-const MAX_REFERENCES = 10
+import { ensureProjectAssetSnapshot } from '@/lib/project-asset-snapshots'
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  await ensureUserAssetsTable()
 
   const body = await req.json().catch(() => ({}))
   const projectId = typeof body.projectId === 'string' ? body.projectId : ''
@@ -21,38 +17,14 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const access = await checkProjectPermission(projectId)
   if (!access.allowed) return access.response
 
-  const userAsset = await prisma.userAsset.findFirst({
-    where: {
-      id: params.id,
-      ...(user.isAdmin ? {} : { userId: user.id }),
-    },
-  })
-  if (!userAsset) return NextResponse.json({ error: 'ASSET_404' }, { status: 404 })
-
-  const existingCount = await prisma.asset.count({
-    where: { projectId, type: 'REFERENCE', stepId: null },
-  })
-  if (existingCount >= MAX_REFERENCES) {
-    return NextResponse.json({ error: 'REFERENCE_LIMIT', message: `项目参考图最多 ${MAX_REFERENCES} 张` }, { status: 400 })
+  try {
+    const snapshot = await ensureProjectAssetSnapshot({ projectId, userAssetId: params.id, actorId: user.id })
+    return NextResponse.json({ reference: snapshot.asset, duplicate: snapshot.duplicate }, { status: snapshot.duplicate ? 200 : 201 })
+  } catch (error: any) {
+    if (error?.message === 'ASSET_404') return NextResponse.json({ error: 'ASSET_404' }, { status: 404 })
+    if (error?.message === 'ASSET_REVISION_404' || error?.message === 'ASSET_MEDIA_404') {
+      return NextResponse.json({ error: error.message, message: '资产版本或媒体附件不存在' }, { status: 409 })
+    }
+    throw error
   }
-
-  const asset = await prisma.asset.create({
-    data: {
-      projectId,
-      createdById: user.id,
-      type: 'REFERENCE',
-      mimeType: userAsset.mimeType,
-      storageKey: `user-asset:${userAsset.id}`,
-      url: userAsset.url,
-      metadata: {
-        source: 'user-asset-library',
-        userAssetId: userAsset.id,
-        kind: userAsset.kind,
-        title: userAsset.title,
-        description: userAsset.description,
-      },
-    },
-  })
-
-  return NextResponse.json({ reference: asset }, { status: 201 })
 }

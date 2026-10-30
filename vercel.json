@@ -3,6 +3,9 @@
   "outputDirectory": ".next",
   "installCommand": "npm install",
   "framework": "nextjs",
+  "crons": [
+    { "path": "/api/cron/purge-assets", "schedule": "30 19 * * *" }
+  ],
   "functions": {
     "app/api/projects/[id]/steps/framework/route.ts": {
       "maxDuration": 300

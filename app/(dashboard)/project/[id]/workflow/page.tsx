@@ -857,6 +857,12 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
     const projectReferences = bodyRefs.length > 0
       ? []
       : await fetch(`/api/projects/${projectId}/references`).then((response) => response.ok ? response.json() : null).then((payload) => payload?.references || []).catch(() => [])
+    const assetConstraints = ['IDEATION', 'FRAMEWORK'].includes(targetStepType)
+      ? await fetch(`/api/projects/${projectId}/asset-usages?targetStep=${targetStepType}`)
+          .then((response) => response.ok ? response.json() : null)
+          .then((payload) => (payload?.constraints || []).map((item: any) => ({ id: item.id, title: item.title, contentType: item.asset?.contentType || '', strength: item.strength, mergeStrategy: item.mergeStrategy, payload: item.payloadSnapshot || {} })))
+          .catch(() => [])
+      : []
     const references: GenerationDraft['references'] = bodyRefs
       .filter((url: unknown) => typeof url === 'string' && url)
       .map((url: string, index: number) => ({ url, label: `请求参考图 ${index + 1}`, type: 'other' as const, removable: true }))
@@ -921,7 +927,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       targetLabel: STEP_LABELS[targetStepType] || targetStepType,
       inputDeps: getInputDeps(targetStepType),
       model: resolvedModel,
-      modelEditable: kind === 'image',
+      modelEditable: kind === 'image' || kind === 'video',
       aspectRatio: body?.aspectRatio || out.aspectRatio || project.selectedAspectRatio || '16:9',
       aspectRatioEditable: kind === 'image' || kind === 'video',
       prompt,
@@ -930,7 +936,8 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       prompts: editablePrompts,
       references,
       referencesResolved: true,
-      referencesEditable: kind === 'image' || kind === 'video',
+      referencesEditable: ['STYLE', 'CHARACTER', 'CONCEPT', 'STORYBOARD', 'KEYFRAMES'].includes(targetStepType),
+      assetConstraints,
       pointCost: estimatedPointCost,
       isRetry: currentStep.status === 'COMPLETED' || currentStep.status === 'FAILED',
       requestBody: body || {},
@@ -1054,7 +1061,9 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
     const refs = data.references
       .filter((ref) => ref.type !== 'original')
       .map((ref) => ref.url)
-    setRun({ status: 'running', message: mode === 'edit-original' ? '正在整理原图、修改意见和参考图并调用供应商…' : '正在整理最终提示词和参考图并调用供应商…', startedAt: new Date().toISOString(), requestSnapshot: data })
+    const submittedDraft = { ...data, submittedAt: new Date().toISOString() }
+    setDraft(submittedDraft)
+    setRun({ status: 'running', message: mode === 'edit-original' ? '正在整理原图、修改意见和参考图并调用供应商…' : '正在整理最终提示词和参考图并调用供应商…', startedAt: submittedDraft.submittedAt, requestSnapshot: submittedDraft })
     window.dispatchEvent(new CustomEvent('storyboard-generation-state', { detail: {
       key: targetKey,
       state: { status: 'processing', shotId: data.targetId, actNumber: data.actNumber, startedAt: new Date().toISOString(), message: '请求已受理，正在准备生成' },
@@ -1076,7 +1085,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
         }),
       })
       const result = await res.json()
-      const taskId = await attachRequestSnapshot(data, mode)
+      const taskId = await attachRequestSnapshot(submittedDraft, mode)
       if (taskId) setRun((previous) => previous ? { ...previous, taskId } : previous)
       if (result?.duplicate && result.operationStatus !== 'SUCCEEDED') {
         await refreshProject()
@@ -1102,9 +1111,10 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
   }, [projectId, nextRetryActionId, clearRetryActionId, refreshProject, showToast, attachRequestSnapshot])
 
   const submitDraft = useCallback(async (nextDraft: GenerationDraft, mode: 'generate' | 'edit-original') => {
-    setDraft(nextDraft)
+    const submittedDraft = { ...nextDraft, submittedAt: new Date().toISOString() }
+    setDraft(submittedDraft)
     if (nextDraft.stepType === 'STORYBOARD' && nextDraft.targetId) {
-      await executeStoryboardDraft(nextDraft, mode)
+      await executeStoryboardDraft(submittedDraft, mode)
       return
     }
     const requestBody = {
@@ -1115,7 +1125,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       ...(nextDraft.promptEditable && nextDraft.prompt ? { promptOverride: nextDraft.prompt } : {}),
       ...(nextDraft.referencesResolved ? { refImages: nextDraft.references.filter((ref) => ref.type !== 'original' && ref.removable).map((ref) => ref.url) } : {}),
     }
-    setRun({ status: 'running', message: nextDraft.prompts?.length ? `正在保存并冻结 ${nextDraft.prompts.length} 条提示词…` : '正在冻结本次请求参数…', startedAt: new Date().toISOString(), requestSnapshot: nextDraft })
+    setRun({ status: 'running', message: submittedDraft.prompts?.length ? `正在保存并冻结 ${submittedDraft.prompts.length} 条提示词…` : '正在冻结本次请求参数…', startedAt: submittedDraft.submittedAt, requestSnapshot: submittedDraft })
     try {
       if (nextDraft.prompts?.length && ['STYLE', 'CHARACTER', 'CONCEPT', 'KEYFRAMES'].includes(nextDraft.stepType)) {
         const route = API_STEP_MAP[nextDraft.stepType]
@@ -1132,7 +1142,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       setRun((previous) => previous ? { ...previous, message: '参数快照已保存，正在调用当前步骤生成接口…' } : previous)
       const result = await executeStep(nextDraft.stepType, requestBody)
       if (!result?.success) throw new Error(result?.message || '生成请求没有返回成功状态')
-      const taskId = await attachRequestSnapshot(nextDraft, mode)
+      const taskId = await attachRequestSnapshot(submittedDraft, mode)
       const payload = result.result || {}
       const previewUrl = payload.asset?.url
         || payload.data?.scenes?.[0]?.url
@@ -1142,7 +1152,8 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
         || payload.combinedVideoUrl
       setRun((previous) => ({ ...previous, taskId: taskId || previous?.taskId, status: 'completed', message: payload.message || '步骤请求已经完成，最新资产已写入项目。', completedAt: new Date().toISOString(), previewUrl, previewType: nextDraft.kind === 'video' ? 'video' : 'image' }))
     } catch (error: any) {
-      setRun((previous) => ({ ...previous, status: 'failed', message: error?.message || '生成失败', completedAt: new Date().toISOString(), error: error?.message }))
+      const taskId = await attachRequestSnapshot(submittedDraft, mode).catch(() => null)
+      setRun((previous) => ({ ...previous, taskId: taskId || previous?.taskId, status: 'failed', message: error?.message || '生成失败', completedAt: new Date().toISOString(), error: error?.message }))
     }
   }, [attachRequestSnapshot, executeStoryboardDraft, executeStep, projectId])
 

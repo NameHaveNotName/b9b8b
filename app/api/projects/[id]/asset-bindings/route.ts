@@ -4,8 +4,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { ensureUserAssetsTable } from '@/lib/ensure-user-assets'
-import { ensureAssetBindingsTable, resolveBindingUrl } from '@/lib/asset-bindings'
+import { resolveBindingUrl } from '@/lib/asset-bindings'
+import { ensureProjectAssetSnapshot } from '@/lib/project-asset-snapshots'
 
 const TARGET_TYPES = new Set(['PROJECT', 'STEP', 'CHARACTER', 'SCENE', 'SHOT', 'TASK'])
 const REFERENCE_ROLES = new Set(['IDENTITY', 'ENVIRONMENT', 'STYLE', 'PRODUCT', 'COMPOSITION', 'GENERAL'])
@@ -30,8 +30,6 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
   const params = await props.params
   const access = await checkProjectPermission(params.id)
   if (!access.allowed) return access.response
-  await ensureUserAssetsTable()
-  await ensureAssetBindingsTable()
   const { searchParams } = new URL(req.url)
   const targetType = searchParams.get('targetType') || undefined
   const targetKey = searchParams.get('targetKey') || undefined
@@ -49,22 +47,29 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   if (!user) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   const access = await checkProjectPermission(params.id)
   if (!access.allowed) return access.response
-  await ensureUserAssetsTable()
-  await ensureAssetBindingsTable()
 
   const body = await req.json().catch(() => ({}))
   const targetType = typeof body.targetType === 'string' ? body.targetType.toUpperCase() : ''
   const targetKey = typeof body.targetKey === 'string' ? body.targetKey.trim() : ''
   const referenceRole = REFERENCE_ROLES.has(body.referenceRole) ? body.referenceRole : 'GENERAL'
-  const userAssetId = typeof body.userAssetId === 'string' ? body.userAssetId : null
-  const assetId = typeof body.assetId === 'string' ? body.assetId : null
-  if (!TARGET_TYPES.has(targetType) || !targetKey || (!userAssetId && !assetId) || (userAssetId && assetId)) {
+  const requestedUserAssetId = typeof body.userAssetId === 'string' ? body.userAssetId : null
+  let assetId = typeof body.assetId === 'string' ? body.assetId : null
+  const userAssetId: string | null = null
+  if (!TARGET_TYPES.has(targetType) || !targetKey || (!requestedUserAssetId && !assetId) || (requestedUserAssetId && assetId)) {
     return NextResponse.json({ error: 'VALIDATION_001', message: '绑定目标或资产来源无效' }, { status: 400 })
   }
 
-  if (userAssetId) {
-    const source = await prisma.userAsset.findFirst({ where: { id: userAssetId, ...(user.isAdmin ? {} : { userId: user.id }) } })
-    if (!source) return NextResponse.json({ error: 'ASSET_404' }, { status: 404 })
+  if (requestedUserAssetId) {
+    try {
+      const snapshot = await ensureProjectAssetSnapshot({ projectId: params.id, userAssetId: requestedUserAssetId, actorId: user.id })
+      assetId = snapshot.asset.id
+    } catch (error: any) {
+      if (error?.message === 'ASSET_404') return NextResponse.json({ error: 'ASSET_404' }, { status: 404 })
+      if (error?.message === 'ASSET_REVISION_404' || error?.message === 'ASSET_MEDIA_404') {
+        return NextResponse.json({ error: error.message, message: '资产版本或媒体附件不存在' }, { status: 409 })
+      }
+      throw error
+    }
   }
   if (assetId) {
     const source = await prisma.asset.findFirst({ where: { id: assetId, projectId: params.id } })

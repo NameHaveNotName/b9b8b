@@ -10,7 +10,7 @@ import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { getImageGenerationCost } from '@/lib/points-config'
 import { ASSET_LIBRARY_TEMPLATES, buildAssetPromptInstruction, getAssetTemplate } from '@/lib/asset-library'
-import { ensureUserAssetsTable } from '@/lib/ensure-user-assets'
+import { createUserAssetWithInitialRevision, hashAssetContent } from '@/lib/user-asset-revisions'
 
 function parseKind(value: unknown) {
   return value === 'CHARACTER' || value === 'ENVIRONMENT' ? value : null
@@ -23,7 +23,6 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const userId = await getCurrentUserId()
   if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  await ensureUserAssetsTable()
 
   const body = await req.json().catch(() => ({}))
   const kind = parseKind(body.kind)
@@ -31,50 +30,76 @@ export async function POST(req: NextRequest) {
   const description = typeof body.description === 'string' ? body.description.trim() : ''
   const title = typeof body.title === 'string' ? body.title.trim() : ''
   const imageModel = typeof body.imageModel === 'string' ? body.imageModel : 'gpt-image-1'
+  const requestedAspectRatio = typeof body.aspectRatio === 'string' && body.aspectRatio.trim()
+    ? body.aspectRatio.trim().slice(0, 20)
+    : (kind === 'CHARACTER' ? '3:4' : '16:9')
   const referenceAssetIds = Array.isArray(body.referenceAssetIds)
     ? body.referenceAssetIds.filter((id: any) => typeof id === 'string')
     : []
   const saveToLibrary = body.saveToLibrary !== false
+  const prepareOnly = body.action === 'prepare'
 
   if (!kind) return NextResponse.json({ error: 'VALIDATION_001', message: '请选择人物形象或环境图片' }, { status: 400 })
   const template = getAssetTemplate(templateId, kind)
   if (!template) return NextResponse.json({ error: 'VALIDATION_002', message: '模板不存在' }, { status: 400 })
 
-  const points = await checkPoints(getImageGenerationCost(imageModel), undefined, 'generation.user_asset', 'IMAGE')
-  if (!points.ok) {
-    return NextResponse.json({ error: 'POINTS_001', message: `点数不足，需要 ${points.cost} 点` }, { status: 402 })
-  }
-
-  const userRefs = referenceAssetIds.length
+  const unorderedUserRefs = referenceAssetIds.length
     ? await prisma.userAsset.findMany({
-        where: { id: { in: referenceAssetIds }, userId },
+        where: { id: { in: referenceAssetIds }, userId, deletedAt: null },
       })
     : []
+  const userRefById = new Map(unorderedUserRefs.map((asset: any) => [asset.id, asset]))
+  const userRefs = referenceAssetIds.map((id: string) => userRefById.get(id)).filter(Boolean) as typeof unorderedUserRefs
 
   const referenceImages = [
     ...template.referenceUrls,
     ...userRefs.map((asset: any) => asset.url).filter(Boolean),
   ]
 
-  let finalPrompt = ''
-  try {
-    const textClient = await getTextClient()
-    finalPrompt = await textClient.generate(
-      buildAssetPromptInstruction({
-        kind,
-        template,
-        userDescription: description,
-        hasUserRefs: referenceImages.length > 0,
-      }),
-      { temperature: 0.25, maxTokens: 900 }
-    )
-    finalPrompt = String(finalPrompt || '').replace(/^```[a-z]*|```$/g, '').trim()
-  } catch (e: any) {
-    console.warn('[USER-ASSET-GENERATE] final prompt text generation failed:', e?.message || e)
+  let finalPrompt = typeof body.finalPrompt === 'string' ? body.finalPrompt.trim().slice(0, 12000) : ''
+  if (!finalPrompt) {
+    try {
+      const textClient = await getTextClient()
+      finalPrompt = await textClient.generate(
+        buildAssetPromptInstruction({
+          kind,
+          template,
+          userDescription: description,
+          hasUserRefs: referenceImages.length > 0,
+        }),
+        { temperature: 0.25, maxTokens: 900 }
+      )
+      finalPrompt = String(finalPrompt || '').replace(/^```[a-z]*|```$/g, '').trim()
+    } catch (e: any) {
+      console.warn('[USER-ASSET-GENERATE] final prompt text generation failed:', e?.message || e)
+    }
   }
 
   if (!finalPrompt) {
     finalPrompt = `${template.prompt}\n\nUser request: ${description || title || template.description}\n\nGenerate one coherent ${kind === 'CHARACTER' ? 'character design' : 'environment image'}. Avoid extra people, malformed anatomy, unreadable text, logos, watermark, collage, and split-screen.`
+  }
+
+  if (prepareOnly) {
+    return NextResponse.json({
+      prepared: {
+        kind,
+        title: title || template.name,
+        description,
+        templateId: template.id,
+        templateName: template.name,
+        finalPrompt,
+        imageModel,
+        aspectRatio: requestedAspectRatio,
+        referenceAssetIds: userRefs.map((asset: any) => asset.id),
+        referenceImages,
+      },
+      cost: getImageGenerationCost(imageModel),
+    })
+  }
+
+  const points = await checkPoints(getImageGenerationCost(imageModel), undefined, 'generation.user_asset', 'IMAGE')
+  if (!points.ok) {
+    return NextResponse.json({ error: 'POINTS_001', message: `点数不足，需要 ${points.cost} 点` }, { status: 402 })
   }
 
   try {
@@ -83,7 +108,7 @@ export async function POST(req: NextRequest) {
       prompt: finalPrompt,
       quality: 'medium',
       referenceImages: referenceImages.length ? referenceImages : undefined,
-      aspectRatio: kind === 'CHARACTER' ? '3:4' : '16:9',
+      aspectRatio: requestedAspectRatio,
       watermark: false,
       sequentialImageGeneration: 'disabled',
       maxImages: 1,
@@ -118,13 +143,13 @@ export async function POST(req: NextRequest) {
           mimeType: 'image/png',
           storageKey,
           url,
-          metadata: { templateName: template.name, referenceAssetIds, referenceImages, model, quality: 'medium', revisedPrompt },
+          metadata: { templateName: template.name, referenceAssetIds, referenceImages, model, aspectRatio: requestedAspectRatio, quality: 'medium', revisedPrompt },
         },
         cost: points.cost,
       })
     }
 
-    const asset = await prisma.userAsset.create({
+    const asset = await createUserAssetWithInitialRevision({
       data: {
         userId,
         kind,
@@ -143,8 +168,11 @@ export async function POST(req: NextRequest) {
           model,
           quality: 'medium',
           revisedPrompt,
+          aspectRatio: requestedAspectRatio,
         },
       },
+      contentHash: hashAssetContent(buffer),
+      generationSnapshot: { templateName: template.name, referenceAssetIds, referenceImages, model, aspectRatio: requestedAspectRatio, finalPrompt, quality: 'medium', revisedPrompt },
     })
 
     await deductPointsAndLog(userId, points.cost, 'generate', {

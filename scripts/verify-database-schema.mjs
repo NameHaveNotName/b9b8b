@@ -12,7 +12,9 @@ const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
 try {
   await Promise.all([
     prisma.project.findFirst({ select: { id: true, groupId: true } }),
-    prisma.userAsset.findFirst({ select: { id: true, storageKey: true } }),
+    prisma.userAsset.findFirst({ select: { id: true, storageKey: true, contentType: true, currentRevisionId: true, deletedAt: true, purgeAfter: true } }),
+    prisma.userAssetRevision.findFirst({ select: { id: true, userAssetId: true, ownerId: true, contentType: true, generationSnapshot: true } }),
+    prisma.userAssetAttachment.findFirst({ select: { id: true, revisionId: true, role: true, storageKey: true } }),
     prisma.group.findFirst({ select: { id: true, costMode: true } }),
     prisma.groupMembership.findFirst({ select: { id: true, status: true } }),
     prisma.groupPointTransfer.findFirst({ select: { id: true, groupId: true } }),
@@ -30,7 +32,9 @@ try {
       },
     }),
     prisma.providerCallAttempt.findFirst({ select: { id: true, operationId: true, provider: true } }),
-    prisma.asset.findFirst({ select: { id: true, createdById: true, origin: true } }),
+    prisma.asset.findFirst({ select: { id: true, createdById: true, origin: true, contentType: true, sourceUserAssetRevisionId: true, deletedAt: true, purgeAfter: true } }),
+    prisma.projectAssetConstraint.findFirst({ select: { id: true, projectId: true, assetId: true, targetStep: true, payloadSnapshot: true } }),
+    prisma.assetBinding.findFirst({ select: { id: true, assetId: true, userAssetId: true } }),
     prisma.videoSegment.findFirst({ select: { id: true, createdById: true } }),
     prisma.operationResult.findFirst({
       select: {

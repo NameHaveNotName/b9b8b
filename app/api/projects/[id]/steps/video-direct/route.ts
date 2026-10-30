@@ -332,7 +332,7 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
   // 异步视频生成：先扣点，再启动后台任务
   await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, assetId: segmentId, success: true })
 
-  const defaultAspectRatio = await getProjectDefaultAspectRatio(projectId)
+  const defaultAspectRatio = body?.aspectRatio || await getProjectDefaultAspectRatio(projectId)
   waitUntil((async () => {
     const outcome = await backgroundGenerateDirectSegment(
       segmentId, projectId, segment.prompt, firstFrameUrl, lastFrameUrl,
@@ -415,7 +415,7 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
   await deductPointsAndLog(userId, claimedCost, 'generate', { projectId, workflowStepId: stepId, success: true })
 
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
-  const defaultAspectRatio = await getProjectDefaultAspectRatio(projectId)
+  const defaultAspectRatio = body?.aspectRatio || await getProjectDefaultAspectRatio(projectId)
 
   const operationId = getCurrentOperationId()
   waitUntil((async () => {

@@ -39,6 +39,14 @@ export interface GenerationDraft {
   references: GenerationReference[]
   referencesResolved?: boolean
   referencesEditable?: boolean
+  assetConstraints?: Array<{
+    id: string
+    title: string
+    contentType: string
+    strength: string
+    mergeStrategy: string
+    payload: Record<string, any>
+  }>
   originalImageUrl?: string | null
   editInstruction?: string
   model: string
@@ -49,6 +57,8 @@ export interface GenerationDraft {
   inputDeps: string[]
   isRetry?: boolean
   requestBody?: Record<string, any>
+  /** 客户端实际提交时刻，用于把快照关联到正确的 OperationLog。 */
+  submittedAt?: string
 }
 
 export interface GenerationRun {

@@ -27,9 +27,16 @@ function sanitizeSnapshot(raw: any) {
       label: cleanText(ref?.label, 300),
       type: cleanText(ref?.type, 40),
     })).filter((ref: any) => ref.url) : [],
+    assetConstraints: Array.isArray(raw.assetConstraints) ? raw.assetConstraints.slice(0, 20).map((item: any) => ({
+      id: cleanText(item?.id, 200), title: cleanText(item?.title, 300),
+      contentType: cleanText(item?.contentType, 60), strength: cleanText(item?.strength, 20),
+      mergeStrategy: cleanText(item?.mergeStrategy, 40),
+      payload: item?.payload && typeof item.payload === 'object' ? item.payload : {},
+    })) : [],
     model: cleanText(raw.model, 200),
     aspectRatio: cleanText(raw.aspectRatio, 40),
     mode: cleanText(raw.mode, 40),
+    submittedAt: cleanText(raw.submittedAt, 60),
   }
 }
 
@@ -57,11 +64,15 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const stepType = cleanText(body.stepType, 40).toUpperCase()
   if (!snapshot || !stepType) return NextResponse.json({ error: 'VALIDATION_001' }, { status: 400 })
 
+  const submittedAtMs = snapshot.submittedAt ? Date.parse(snapshot.submittedAt) : Number.NaN
+  const lowerBound = Number.isFinite(submittedAtMs)
+    ? new Date(submittedAtMs - 5_000)
+    : new Date(Date.now() - 10 * 60 * 1000)
   const recent = await prisma.operationLog.findMany({
     where: {
       projectId,
       userId: access.user.id,
-      startedAt: { gte: new Date(Date.now() - 10 * 60 * 1000) },
+      startedAt: { gte: lowerBound },
     },
     orderBy: { startedAt: 'desc' },
     take: 20,

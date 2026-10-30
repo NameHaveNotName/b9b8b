@@ -8,11 +8,12 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
-import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { extractJsonFromMarkdown } from '@/lib/prompts'
 import { runDeepening } from '@/lib/framework-deepen'
 import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
+import { getStepAssetConstraints } from '@/lib/asset-constraints'
 
 const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: string; shots: string; desc: string }> = {
   sketch: { label: '速写', range: '1-3分钟', acts: '1-2幕', shots: '10-20镜', desc: '极快节奏，单一场景/单一冲突' },
@@ -178,6 +179,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
     ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].framework
     : ''
+  const assetConstraints = await getStepAssetConstraints(params.id, 'FRAMEWORK')
+  const combinedInstructions = [tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
 
   const references = await getProjectReferences(params.id).catch(() => [])
   const hasRefs = references.length > 0 && references.some(r => r.url)
@@ -190,7 +193,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       : '【用户上传了视觉参考图，请仔细查看。请在框架设计时充分考虑这些参考图，角色形象、场景氛围、美术风格应与参考素材一致。】\n'
   }
 
-  const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, hasRefs ? visualRefBlock : '', tagInstructions)
+  const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, hasRefs ? visualRefBlock : '', combinedInstructions)
     const textClient = await getTextClient()
 
     let fullText: string
@@ -238,6 +241,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       environments: Array.isArray(fw.environments) ? fw.environments : [],
       overallPacing: fw.overallPacing || '',
       visualStyle: fw.styleGuide || '',
+      assetConstraints: assetConstraints.snapshots,
     }
 
     // 更新项目表：保存框架数据和选定的方向标题

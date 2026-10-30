@@ -4,7 +4,6 @@ import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { ensureAssetBindingsTable } from '@/lib/asset-bindings'
 
 /**
  * 持久化分镜卡片的"最高优先级参考"（用户拖入的素材）。
@@ -81,7 +80,6 @@ export async function DELETE(req: Request, props: { params: Promise<{ id: string
   const key = actNumber != null ? `${shotId}_${actNumber}` : shotId
   delete shotExtraRefs[key]
 
-  await ensureAssetBindingsTable()
   await prisma.assetBinding.deleteMany({
     where: { projectId: params.id, targetType: 'SHOT', targetKey: `${actNumber ?? ''}:${shotId}` },
   })

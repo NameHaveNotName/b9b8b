@@ -12,6 +12,7 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { createStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
+import { getStepAssetConstraints } from '@/lib/asset-constraints'
 
 export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -101,6 +102,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
       ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].ideation
       : ''
+    const assetConstraints = await getStepAssetConstraints(params.id, 'IDEATION')
+    const combinedInstructions = [tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
 
     let resultText: string
     if (hasRefs) {
@@ -122,7 +125,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       const prompt = loadPromptTemplate('ideation', {
         USER_INPUT: project.rawIdea,
         VISUAL_REFERENCES: visualRefBlock,
-        PROJECT_TAG_INSTRUCTIONS: tagInstructions,
+        PROJECT_TAG_INSTRUCTIONS: combinedInstructions,
       })
       resultText = await textClient.generateVision({
         prompt,
@@ -135,7 +138,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       const prompt = loadPromptTemplate('ideation', {
         USER_INPUT: project.rawIdea,
         VISUAL_REFERENCES: '',
-        PROJECT_TAG_INSTRUCTIONS: tagInstructions,
+        PROJECT_TAG_INSTRUCTIONS: combinedInstructions,
       })
       resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 12000 })
     }
@@ -165,7 +168,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       )
     }
 
-    const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, projectTag: projectTag || undefined, rawText: resultText.slice(0, 3000) }
+    const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, projectTag: projectTag || undefined, assetConstraints: assetConstraints.snapshots, rawText: resultText.slice(0, 3000) }
     await completeStep(step.id, result)
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
 

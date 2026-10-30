@@ -97,6 +97,7 @@ if [ "$VERCEL_ENV" = "production" ]; then
   else
     echo "Running prisma migrate deploy..."
     timeout 180 npx prisma migrate deploy
+    node scripts/migrate-legacy-asset-bindings.mjs
     node scripts/verify-database-schema.mjs
   fi
 fi

@@ -6,8 +6,8 @@ import { readFile } from 'fs/promises'
 import { getCurrentUser } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { ensureUserAssetsTable } from '@/lib/ensure-user-assets'
 import { getSignedFileUrl, uploadFile } from '@/lib/r2'
+import { addUserAssetRevision, createUserAssetWithInitialRevision, hashAssetContent } from '@/lib/user-asset-revisions'
 
 const KINDS = new Set(['CHARACTER', 'ENVIRONMENT', 'STYLE', 'OBJECT', 'BRAND', 'REFERENCE'])
 
@@ -21,9 +21,9 @@ function inferKind(stepType?: string | null) {
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  await ensureUserAssetsTable()
   const body = await req.json().catch(() => ({}))
   const assetId = typeof body.assetId === 'string' ? body.assetId : ''
+  const targetUserAssetId = typeof body.targetUserAssetId === 'string' ? body.targetUserAssetId : ''
   if (!assetId) return NextResponse.json({ error: 'VALIDATION_001' }, { status: 400 })
 
   const projectAsset = await prisma.asset.findUnique({
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (!access.allowed) return access.response
 
   const duplicate = await prisma.userAsset.findFirst({
-    where: { userId: user.id, metadata: { path: ['sourceAssetId'], equals: projectAsset.id } },
+    where: { userId: user.id, deletedAt: null, metadata: { path: ['sourceAssetId'], equals: projectAsset.id } },
   })
   if (duplicate) return NextResponse.json({ asset: duplicate, duplicate: true })
 
@@ -67,7 +67,23 @@ export async function POST(req: NextRequest) {
   const storageKey = `users/${user.id}/assets/project_${projectAsset.id}_${Date.now()}.${extension}`
   await uploadFile(storageKey, buffer, projectAsset.mimeType)
   const url = await getSignedFileUrl(storageKey)
-  const asset = await prisma.userAsset.create({
+  if (targetUserAssetId) {
+    try {
+      const added = await addUserAssetRevision({
+        userAssetId: targetUserAssetId, ownerId: user.id, mimeType: projectAsset.mimeType,
+        storageKey, url, prompt: metadata.prompt || metadata.llmPrompt || null,
+        title, description: typeof body.description === 'string' ? body.description.trim() : null,
+        contentHash: hashAssetContent(buffer),
+        metadata: { tags, latestSourceProjectId: projectAsset.projectId, latestSourceAssetId: projectAsset.id },
+        generationSnapshot: { sourceProjectId: projectAsset.projectId, sourceAssetId: projectAsset.id, sourceStepType: sourceStep?.stepType || null, model: metadata.modelUsed || metadata.model || null, prompt: metadata.prompt || metadata.llmPrompt || null, references: metadata.referenceSnapshot || metadata.referenceImages || null },
+      })
+      return NextResponse.json({ ...added, addedRevision: true }, { status: 201 })
+    } catch (error: any) {
+      if (error?.message === 'ASSET_404') return NextResponse.json({ error: 'ASSET_404', message: '目标个人资产不存在' }, { status: 404 })
+      throw error
+    }
+  }
+  const asset = await createUserAssetWithInitialRevision({
     data: {
       userId: user.id,
       kind,
@@ -84,6 +100,15 @@ export async function POST(req: NextRequest) {
         sourceAssetId: projectAsset.id,
         sourceStepType: sourceStep?.stepType || null,
       },
+    },
+    contentHash: hashAssetContent(buffer),
+    generationSnapshot: {
+      sourceProjectId: projectAsset.projectId,
+      sourceAssetId: projectAsset.id,
+      sourceStepType: sourceStep?.stepType || null,
+      model: metadata.modelUsed || metadata.model || null,
+      prompt: metadata.prompt || metadata.llmPrompt || null,
+      references: metadata.referenceSnapshot || metadata.referenceImages || null,
     },
   })
   return NextResponse.json({ asset }, { status: 201 })

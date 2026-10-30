@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { deleteFile } from '@/lib/r2'
+
+const RETENTION_MS = 72 * 60 * 60 * 1000
 
 export async function PATCH(
   req: NextRequest,
@@ -21,6 +22,13 @@ export async function PATCH(
     }
 
     const body = await req.json()
+    if (body.action === 'restore') {
+      const restored = await prisma.asset.update({
+        where: { id: params.assetId },
+        data: { deletedAt: null, purgeAfter: null, deletedById: null, purgeCompletedAt: null },
+      })
+      return NextResponse.json({ reference: restored })
+    }
     const existingMeta: any = asset.metadata || {}
     if (body.labels !== undefined) {
       existingMeta.labels = Array.isArray(body.labels) ? body.labels.slice(0, 10) : []
@@ -54,15 +62,14 @@ export async function DELETE(
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
     }
 
-    try {
-      await deleteFile(asset.storageKey)
-    } catch (e: any) {
-      console.warn('[REFERENCES-DELETE] File deletion failed:', e?.message)
+    const activeBindings = await prisma.assetBinding.count({ where: { assetId: asset.id, enabled: true } })
+    if (activeBindings > 0) {
+      return NextResponse.json({ error: 'ASSET_IN_USE', message: `该素材仍有 ${activeBindings} 个有效绑定，请先解除绑定` }, { status: 409 })
     }
-
-    await prisma.asset.delete({ where: { id: params.assetId } })
-    console.log(`[REFERENCES-DELETE] Deleted reference asset ${params.assetId}`)
-    return NextResponse.json({ success: true })
+    const deletedAt = new Date()
+    const purgeAfter = new Date(deletedAt.getTime() + RETENTION_MS)
+    await prisma.asset.update({ where: { id: params.assetId }, data: { deletedAt, purgeAfter, deletedById: userId } })
+    return NextResponse.json({ success: true, deletedAt, purgeAfter })
   } catch (err: any) {
     console.error('[REFERENCES-DELETE]', err?.message || err)
     return NextResponse.json({ error: 'WORKFLOW_001', detail: err?.message || 'Unknown error' }, { status: 500 })

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { uploadFile, getSignedFileUrl, deleteFile } from '@/lib/r2'
+import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { safeSegment } from '@/lib/upload-safety'
 import { assertSsrfSafe, safeFetch } from '@/lib/ssrf-guard'
 
@@ -19,10 +19,8 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
     if (!permission.allowed) {
       return permission.response
     }
-    const project = permission.project
-
     const refs = await prisma.asset.findMany({
-      where: { projectId: params.id, type: 'REFERENCE', stepId: null },
+      where: { projectId: params.id, type: 'REFERENCE', stepId: null, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     })
 
@@ -42,10 +40,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     if (!permission.allowed) {
       return permission.response
     }
-    const project = permission.project
-
     const existingCount = await prisma.asset.count({
-      where: { projectId: params.id, type: 'REFERENCE', stepId: null },
+      where: { projectId: params.id, type: 'REFERENCE', stepId: null, deletedAt: null },
     })
     if (existingCount >= MAX_REFERENCES) {
       return NextResponse.json({ error: '已达到最大参考图数量（10张）' }, { status: 400 })
@@ -110,7 +106,6 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 400 })
     }
 
-    const ext = contentType.split('/')[1] || 'png'
     const storageKey = `projects/${params.id}/references/${Date.now()}_${safeSegment(filename, 'reference')}`
     await uploadFile(storageKey, buffer, contentType)
     const url = await getSignedFileUrl(storageKey)

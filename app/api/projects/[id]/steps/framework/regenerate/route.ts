@@ -7,11 +7,12 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
-import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { extractJsonFromMarkdown } from '@/lib/prompts'
 import { claimStepForGeneration, completeStep, failStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 import { runDeepening } from '@/lib/framework-deepen'
+import { getStepAssetConstraints } from '@/lib/asset-constraints'
 
 const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: string; shots: string; desc: string }> = {
   sketch: { label: '速写', range: '1-3分钟', acts: '1-2幕', shots: '10-20镜', desc: '极快节奏，单一场景/单一冲突' },
@@ -146,6 +147,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
     ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].framework
     : ''
+  const assetConstraints = await getStepAssetConstraints(params.id, 'FRAMEWORK')
+  const combinedInstructions = [tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
 
   const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK + GENERATION_COSTS.FRAMEWORK_DEEPEN_ALL, params.id, 'generation.framework', 'TEXT')
   if (!pointsCheck.ok) {
@@ -176,7 +179,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       orderBy: { versionNumber: 'desc' },
     })
     const creativeSource = currentIteration?.creativeContent || project.rawIdea
-    const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, tagInstructions)
+    const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, combinedInstructions)
     const textClient = await getTextClient()
     const fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000 })
 
@@ -207,6 +210,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       environments: Array.isArray(fw.environments) ? fw.environments : [],
       overallPacing: fw.overallPacing || '',
       visualStyle: fw.styleGuide || '',
+      assetConstraints: assetConstraints.snapshots,
     }
 
     await prisma.project.update({

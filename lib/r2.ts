@@ -196,6 +196,31 @@ export async function getSignedFileUrl(key: string, expiresIn: number = 3600 * 2
   }
 }
 
+export async function downloadFile(key: string): Promise<Buffer> {
+  if (isMockMode) {
+    const localPath = path.join(MOCK_STORAGE_ROOT, key)
+    return fs.readFile(localPath)
+  }
+
+  const client = isR2Mode ? R2 : supabaseS3Client
+  const bucket = isR2Mode ? process.env.R2_BUCKET_NAME : process.env.SUPABASE_STORAGE_BUCKET
+  if (!client || !bucket) throw new Error('STORAGE_002: 存储未配置')
+  try {
+    const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+    const bytes = await response.Body?.transformToByteArray()
+    if (!bytes) throw new Error('empty body')
+    return Buffer.from(bytes)
+  } catch (error: any) {
+    throw new Error(`STORAGE_002: 文件读取失败 - ${error.message}`)
+  }
+}
+
+export async function copyFile(sourceKey: string, destinationKey: string, contentType: string) {
+  const buffer = await downloadFile(sourceKey)
+  await uploadFile(destinationKey, buffer, contentType)
+  return { key: destinationKey, buffer }
+}
+
 export async function deleteFile(key: string) {
   if (isMockMode) {
     try {
