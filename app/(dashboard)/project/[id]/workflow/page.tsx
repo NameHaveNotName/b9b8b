@@ -329,37 +329,38 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         const url = isRegenerate
           ? `/api/projects/${params.id}/steps/${apiPath}/regenerate`
           : `/api/projects/${params.id}/steps/${apiPath}`
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: body ? { 'Content-Type': 'application/json' } : undefined,
-          body: body ? JSON.stringify(body) : undefined,
-        })
-
-        // 调试日志：响应状态
-        console.log(`[executeStep] ${stepType} response status:`, res.status)
-
-        // 生成是长请求，期间的并发会话刷新可能瞬时返回 401。
-        // 不在 mutation 中导航，避免已登录用户被登录页送回仪表盘。
-        if (res.status === 401) {
-          setLastError('会话校验暂时失败，请留在当前页刷新后重试')
-          return { success: false, message: '会话校验暂时失败，请刷新后重试' }
-        }
-
-        // 防御：超时或服务器崩溃可能导致响应为空/非 JSON
         let result: any
-        try {
-          result = await res.json()
-        } catch (parseErr) {
-          const text = await res.text().catch(() => '')
-          console.error(`[executeStep] ${stepType} non-JSON response:`, text.slice(0, 500))
-          const isTimeout = res.status === 504 || res.status === 502 || /timeout|timed out/gi.test(text)
-          throw new Error(
-            isTimeout
-              ? '服务器响应超时，请稍后重试（框架生成可能需要 30–120 秒）'
-              : `服务器返回无效响应 (HTTP ${res.status})`
-          )
+        let requestBody = body
+        for (let phaseRequest = 0; phaseRequest < (stepType === 'IDEATION' ? 8 : 1); phaseRequest += 1) {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: requestBody ? { 'Content-Type': 'application/json' } : undefined,
+            body: requestBody ? JSON.stringify(requestBody) : undefined,
+          })
+
+          console.log(`[executeStep] ${stepType} response status:`, res.status)
+          if (res.status === 401) {
+            setLastError('会话校验暂时失败，请留在当前页刷新后重试')
+            return { success: false, message: '会话校验暂时失败，请刷新后重试' }
+          }
+
+          try {
+            result = await res.json()
+          } catch (parseErr) {
+            const text = await res.text().catch(() => '')
+            console.error(`[executeStep] ${stepType} non-JSON response:`, text.slice(0, 500))
+            const isTimeout = res.status === 504 || res.status === 502 || /timeout|timed out/gi.test(text)
+            throw new Error(isTimeout ? '当前阶段响应超时，已完成阶段会保留；可稍后从中断处继续' : `服务器返回无效响应 (HTTP ${res.status})`)
+          }
+          console.log(`[executeStep] ${stepType} response:`, JSON.stringify(result).slice(0, 500))
+          if (!result?.success || !result?.continueRequired) break
+          requestBody = { ...(requestBody || {}), pipelineRunId: result.pipelineRunId }
+          setToast({ kind: 'success', message: String(result.message || '当前阶段已保存，继续下一阶段').slice(0, 120) })
+          await mutate()
         }
-        console.log(`[executeStep] ${stepType} response:`, JSON.stringify(result).slice(0, 500))
+
+        if (!result) throw new Error('生成流程没有返回结果')
+        if (result.continueRequired) throw new Error('创意扩散阶段数异常，已停止自动续跑以避免重复调用')
 
         if (!result.success) {
           if (result.error === 'POINTS_001') {
@@ -378,6 +379,8 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
             AUTH_002: '没有访问权限',
             STORAGE_001: '未找到可用的风格参考图',
             ALREADY_RUNNING: '该任务已在进行中',
+            PIPELINE_CANCELLED: '该任务已取消，请重新开始',
+            PIPELINE_RUN_MISMATCH: '检测到另一条创意扩散任务，请刷新后继续',
           }
           const code = String(result.error || '未知错误')
           const friendly = errorLabel[code] || code
@@ -952,6 +955,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       || body?.videoModel
       || out.imageModel
       || out.modelId
+      || out.agentPipeline?.textModel
       || (kind === 'text' ? TEXT_MODELS.IDEATION : kind === 'video' ? VIDEO_MODELS.direct.primary : 'gpt-image-1')
     const promptsCanBeSaved = editablePrompts?.length > 0
       && ['STYLE', 'CHARACTER', 'CONCEPT', 'KEYFRAMES'].includes(targetStepType)
@@ -977,7 +981,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       assetConstraints,
       pointCost: estimatedPointCost,
       isRetry: currentStep.status === 'COMPLETED' || currentStep.status === 'FAILED',
-      requestBody: body || {},
+      requestBody: { ...(body || {}), ...(out.agentPipeline?.runId ? { pipelineRunId: out.agentPipeline.runId } : {}) },
     })
     setRun(null)
     openInspector()

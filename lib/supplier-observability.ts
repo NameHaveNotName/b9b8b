@@ -44,6 +44,20 @@ export function getCurrentOperationId() {
   return operationContext.getStore()?.operationId
 }
 
+export async function markCurrentOperationInterrupted(errorMessage: string) {
+  const operationId = getCurrentOperationId()
+  if (!operationId) return
+  await prisma.operationLog.updateMany({
+    where: { id: operationId, status: { notIn: ['SUCCEEDED', 'CANCELLED'] } },
+    data: {
+      status: 'INTERRUPTED',
+      success: false,
+      errorMessage: safeMessage(errorMessage),
+      completedAt: new Date(),
+    },
+  }).catch((error) => console.error('[supplier-ledger] mark interrupted failed:', safeMessage(error)))
+}
+
 export function withSupplierCallContext<T>(
   context: SupplierCallContext,
   action: () => Promise<T>,
@@ -438,6 +452,8 @@ export async function trackedSupplierFetch(
       where: { id: context.operationId },
       data: {
         status: 'RUNNING',
+        completedAt: null,
+        errorMessage: null,
         // A transport-level inference must never erase the more precise product
         // action recorded by checkPoints (for example keyframe vs concept art).
         ...(operation?.category === 'OTHER' ? { category } : {}),

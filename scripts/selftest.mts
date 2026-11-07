@@ -102,13 +102,20 @@ import {
   validateScopedChangeOperations,
 } from '../lib/scoped-change.ts'
 import { buildStoryCanvasUnits, parseCreativeDurationSeconds } from '../lib/story-canvas.ts'
-import { runCreativeAgentPipeline } from '../lib/creative-agent-pipeline.ts'
+import {
+  createCreativeAgentCheckpoint,
+  finalizeCreativeAgentRun,
+  getNextCreativeAgentPhase,
+  runCreativeAgentPhase,
+  runCreativeAgentPipeline,
+} from '../lib/creative-agent-pipeline.ts'
 import { diffText } from '../lib/text-diff.ts'
 import { canReserveSeriesBudget, selectApplicableSeriesApproval } from '../lib/series-generation-policy.ts'
 import {
   buildScopedMediaCancellationWhere,
   buildScopedOperationCancellationWhere,
   buildScopedUnitCancellationWhere,
+  operationWasCharged,
 } from '../lib/step-cancellation-scope.ts'
 import {
   buildGenerationUnitTimeline,
@@ -1152,8 +1159,14 @@ check('取消退款同时绑定项目与 workflowStepId', () => {
     workflowStepId: 'step-writer',
     pointsRefunded: 0,
     pointsCost: { gt: 0 },
-    status: { in: ['SUBMITTED', 'RUNNING'] },
+    status: { in: ['SUBMITTED', 'RUNNING', 'INTERRUPTED'] },
   })
+})
+
+check('取消尚未扣点的分阶段任务只释放预留，不会增加余额', () => {
+  assert.equal(operationWasCharged(null), false)
+  assert.equal(operationWasCharged(undefined), false)
+  assert.equal(operationWasCharged(0), true)
 })
 
 check('系列生成批准严格绑定申请人、单集、有效期和剩余额度', () => {
@@ -1404,6 +1417,32 @@ await checkAsync('固定创意 Agent 拓扑执行 7 次普通文本和 3 次联�
   assert.equal(run.artifacts.conceptCandidates.length, 3)
   assert.equal(run.sources.length, 12)
   assert.equal(run.status, 'AWAITING_CONFIRMATION')
+})
+
+await checkAsync('创意 Agent 分阶段保存后从下一阶段继续且不重复调用', async () => {
+  let calls = 0
+  const adapters = {
+    text: async () => {
+      calls += 1
+      return JSON.stringify({ summary: `阶段 ${calls}`, title: `候选 ${calls}` })
+    },
+    search: async () => {
+      calls += 1
+      return { text: `研究 ${calls}`, sources: [] }
+    },
+  }
+  let checkpoint = createCreativeAgentCheckpoint({
+    goal: '为一款虚构的高科技产品制作可信且适合短视频平台传播的宣传片',
+    creativeBrief: '所有功效都需要事实依据。',
+  })
+  const cumulativeCalls: number[] = []
+  while (getNextCreativeAgentPhase(checkpoint)) {
+    checkpoint = await runCreativeAgentPhase(JSON.parse(JSON.stringify(checkpoint)), adapters)
+    cumulativeCalls.push(calls)
+  }
+  assert.deepEqual(cumulativeCalls, [1, 4, 5, 8, 9, 10])
+  assert.equal(finalizeCreativeAgentRun(checkpoint).status, 'AWAITING_CONFIRMATION')
+  assert.equal(checkpoint.completedPhases.length, 6)
 })
 
 console.log('\n== 框定范围修改与并发保护 ==')

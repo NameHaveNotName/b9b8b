@@ -31,6 +31,7 @@ function stageFor(operation: any) {
   }
   if (rawStatus === 'FAILED') return { status: 'failed', stage: 'failed', message: operation.errorMessage || '生成失败' }
   if (rawStatus === 'CANCELLED') return { status: 'failed', stage: 'cancelled', message: '任务已取消' }
+  if (rawStatus === 'INTERRUPTED') return { status: 'interrupted', stage: 'interrupted', message: operation.errorMessage || '当前阶段执行中断，可从未完成阶段继续' }
   if (stale) return { status: 'interrupted', stage: 'interrupted', message: '任务心跳已中断，可按原配置恢复或重试' }
   if (!lastAttempt) return { status: 'running', stage: 'submitted', message: '请求已入库，等待供应商调用' }
   if (lastAttempt.status === 'RUNNING') {

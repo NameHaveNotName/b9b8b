@@ -6,10 +6,12 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { WORKFLOW_STEP_TYPES } from '@/lib/workflow-steps'
 import { prisma } from '@/lib/prisma'
 import { refundPointsAndLog } from '@/lib/points'
+import { releaseSeriesGenerationAuthorization } from '@/lib/series-generation-authorization'
 import {
   buildScopedMediaCancellationWhere,
   buildScopedOperationCancellationWhere,
   buildScopedUnitCancellationWhere,
+  operationWasCharged,
 } from '@/lib/step-cancellation-scope'
 
 /**
@@ -35,12 +37,23 @@ async function refundCancelledOperation(
       pointsCost: true,
       billingSource: true,
       billingGroupId: true,
+      balanceAfter: true,
     },
   })
 
   let total = 0
   for (const op of pending) {
     try {
+      // checkPoints 只预留系列审批额度，真正点数在成功交付时才扣除。
+      // balanceAfter 为空表示尚未扣点：取消时只释放预留并终结账本，绝不能“退款”增加余额。
+      if (!operationWasCharged(op.balanceAfter)) {
+        await releaseSeriesGenerationAuthorization(op.id)
+        await prisma.operationLog.updateMany({
+          where: { id: op.id, status: { in: ['SUBMITTED', 'RUNNING', 'INTERRUPTED'] } },
+          data: { status: 'CANCELLED', success: false, errorMessage: '用户已取消生成', completedAt: new Date() },
+        })
+        continue
+      }
       await refundPointsAndLog(op.userId || fallbackUserId, op.pointsCost, {
         projectId,
         workflowStepId: stepId,

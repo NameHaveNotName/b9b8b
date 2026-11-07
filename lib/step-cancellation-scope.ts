@@ -2,6 +2,10 @@ const MEDIA_STEP_NAMES = new Set(['TRAILER', 'VIDEO_DIRECT'])
 
 export type CancellableMediaStepName = 'TRAILER' | 'VIDEO_DIRECT'
 
+export function operationWasCharged(balanceAfter: number | null | undefined) {
+  return typeof balanceAfter === 'number'
+}
+
 /**
  * 只有确实拥有独立视频/配音行的工作流步骤才允许释放媒体。
  * 其他步骤返回 null，取消步骤状态时不会退化成 projectId 级批量更新。
@@ -35,6 +39,6 @@ export function buildScopedOperationCancellationWhere(
     workflowStepId,
     pointsRefunded: 0,
     pointsCost: { gt: 0 },
-    status: { in: ['SUBMITTED', 'RUNNING'] },
+    status: { in: ['SUBMITTED', 'RUNNING', 'INTERRUPTED'] },
   }
 }
