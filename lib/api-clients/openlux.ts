@@ -1,7 +1,13 @@
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
-import { IMAGE_MODELS, MODEL_SIZE_MAP, VIDEO_MODELS } from '@/lib/models-config'
+import {
+  IMAGE_MODELS,
+  MODEL_SIZE_MAP,
+  VIDEO_MODELS,
+  getCheapestNativeVideoResolution,
+} from '@/lib/models-config'
 import { generateTextMinimax, MinimaxTextError } from './minimax-text'
 import { trackedSupplierFetch } from '@/lib/supplier-observability'
+import { buildSeedanceVideoRequest } from '@/lib/video-request-formats'
 import fs from 'fs'
 import path from 'path'
 
@@ -275,6 +281,61 @@ export async function generateText(
     max_tokens: maxTokens,
   })
   return data.choices[0].message.content
+}
+
+export interface WebSearchSource {
+  url: string
+  title?: string
+  snippet?: string
+  publishedAt?: string
+  copyrightStatus: 'UNCONFIRMED'
+}
+
+export interface WebSearchResult {
+  text: string
+  sources: WebSearchSource[]
+}
+
+/**
+ * OpenLux 的 OpenAI 兼容联网检索入口。
+ * 只返回文字与引用元数据，不下载网页图片，也不猜测图片版权状态。
+ */
+export async function generateSearchText(
+  prompt: string,
+  options: { model?: string; maxTokens?: number; maxSources?: number } = {},
+): Promise<WebSearchResult> {
+  const data = await openLuxFetch('/v1/chat/completions', {
+    model: options.model || 'gpt-5-search-api',
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: options.maxTokens ?? 6000,
+    web_search_options: { search_context_size: 'medium' },
+  })
+  const message = data?.choices?.[0]?.message
+  const text = typeof message?.content === 'string' ? message.content : ''
+  if (!text.trim()) throw new Error('OPENLUX_SEARCH_EMPTY_RESPONSE')
+
+  const rawCandidates = [
+    ...(Array.isArray(message?.annotations) ? message.annotations : []),
+    ...(Array.isArray(message?.citations) ? message.citations : []),
+    ...(Array.isArray(data?.citations) ? data.citations : []),
+  ]
+  const sources: WebSearchSource[] = []
+  const seen = new Set<string>()
+  for (const item of rawCandidates) {
+    const citation = item?.url_citation || item
+    const url = typeof citation?.url === 'string' ? citation.url.trim() : ''
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue
+    seen.add(url)
+    sources.push({
+      url,
+      title: typeof citation?.title === 'string' ? citation.title : undefined,
+      snippet: typeof citation?.snippet === 'string' ? citation.snippet : undefined,
+      publishedAt: typeof citation?.published_at === 'string' ? citation.published_at : typeof citation?.publishedAt === 'string' ? citation.publishedAt : undefined,
+      copyrightStatus: 'UNCONFIRMED',
+    })
+    if (sources.length >= (options.maxSources ?? 12)) break
+  }
+  return { text, sources }
 }
 
 // ==================== 多模态文本生成（Vision）====================
@@ -2968,6 +3029,85 @@ export interface GenerateDirectVideoResult {
 }
 
 /**
+ * Seedance 2.x 专属异步协议。
+ *
+ * 格式来源经过两层只读校验：OpenLux 控制台模型元数据，以及对专属端点的
+ * 缺字段探针。通用 /v1/videos/generations 明确拒绝 Seedance，不能复用。
+ */
+async function generateSeedanceVideo(params: GenerateDirectVideoParams): Promise<GenerateDirectVideoResult> {
+  if (!API_KEY) throw new Error('OPENLUX_API_KEY not configured')
+  const model = params.model || 'doubao-seedance-2-0-260128'
+  if (params.lastFrameUrl) {
+    console.warn('[SEEDANCE] 当前已验证协议仅启用 first_frame；尾帧等待专属格式确认')
+  }
+
+  const body = buildSeedanceVideoRequest({
+    model,
+    prompt: (params.prompt || '').slice(0, PROMPT_MAX_LEN),
+    firstFrameUrl: params.firstFrameUrl,
+    aspectRatio: params.aspectRatio,
+    duration: params.duration ?? 5,
+    resolution: getCheapestNativeVideoResolution(model, '480p') as '480p' | '720p' | '1080p',
+  })
+  const endpoint = `${BASE_URL}/api/v3/contents/generations/tasks`
+  const response = await trackedSupplierFetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout ? AbortSignal.timeout(60_000) : undefined,
+  })
+  const responseText = await response.text()
+  if (!response.ok) throw new OpenLuxHttpError(response.status, responseText)
+
+  let submitted: any
+  try {
+    submitted = JSON.parse(responseText)
+  } catch {
+    throw new Error(`Seedance submit non-JSON: ${responseText.slice(0, 200)}`)
+  }
+  const taskId = submitted?.task_id || submitted?.id || submitted?.task?.id || submitted?.data?.task_id
+  if (!taskId) throw new Error(`Seedance submit missing task_id: ${responseText.slice(0, 300)}`)
+
+  const deadline = Date.now() + (params.pollTimeoutSec ?? 300) * 1000
+  const interval = params.pollIntervalMs ?? 5000
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, interval))
+    const poll = await trackedSupplierFetch(
+      `${BASE_URL}/api/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`,
+      {
+        headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' },
+        signal: AbortSignal.timeout ? AbortSignal.timeout(30_000) : undefined,
+      }
+    )
+    const pollText = await poll.text()
+    if (!poll.ok) {
+      console.warn(`[SEEDANCE] poll status=${poll.status}: ${pollText.slice(0, 200)}`)
+      continue
+    }
+    let data: any
+    try {
+      data = JSON.parse(pollText)
+    } catch {
+      continue
+    }
+    const task = data?.task || data?.data || data
+    const status = String(task?.status || data?.status || '').toLowerCase()
+    const videoUrl = task?.content?.url || task?.content?.video_url || task?.video_url || task?.url
+    if (['succeeded', 'success', 'completed'].includes(status) && videoUrl) {
+      return { videoUrl, model, taskId }
+    }
+    if (['failed', 'error', 'cancelled', 'canceled'].includes(status)) {
+      throw new Error(`Seedance task ${taskId} failed: ${pollText.slice(0, 300)}`)
+    }
+  }
+  throw new Error(`Seedance task ${taskId} timeout after ${params.pollTimeoutSec ?? 300}s`)
+}
+
+/**
  * 直生视频统一入口：首帧（+ 尾帧）→ 视频。
  * 按 model 分流到对应供应商端点，失败抛错由调用方兜底（Ken Burns / ffmpeg）。
  */
@@ -2988,7 +3128,12 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
 
   console.log(`[VIDEO-DIRECT] 生成直生视频 model=${model} hasLastFrame=${hasLastFrame} aspectRatio=${aspectRatio}`)
 
-  // 0) OpenLux Vidu Q2 Turbo：默认首帧图生视频。
+  // 0) Seedance 2.x：专属 contents/generations/tasks 异步协议。
+  if (m.includes('seedance-2')) {
+    return generateSeedanceVideo({ ...params, model, aspectRatio, duration, pollTimeoutSec, pollIntervalMs })
+  }
+
+  // 1) OpenLux Vidu：简单短镜头走单首帧图生视频。
   if (m.includes('vidu')) {
     if (hasLastFrame) {
       console.warn('[VIDEO-DIRECT] /ent/v2/img2video 仅使用首帧，忽略尾帧')
@@ -2998,7 +3143,8 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
       imageUrl: firstFrameUrl,
       model,
       duration,
-      resolution: '720p',
+      // Preserve the cheapest native tier verified for this exact model.
+      resolution: getCheapestNativeVideoResolution(model, '720p') as '540p' | '720p' | '1080p',
       pollTimeoutSec: Math.min(pollTimeoutSec, 240),
       pollIntervalMs,
     })
@@ -3015,7 +3161,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
       prompt,
       imageUrl: firstFrameUrl,
       model,
-      resolution: '480P',
+      resolution: getCheapestNativeVideoResolution(model, '480p').toUpperCase(),
       promptExtend: false,
       audio: false,
       pollTimeoutSec,
@@ -3032,7 +3178,7 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
       prompt: prompt.slice(0, PROMPT_MAX_LEN),
       first_frame_image: firstFrameB64,
       duration: duration === 10 ? 10 : 6,
-      resolution: '1080P',
+      resolution: getCheapestNativeVideoResolution(model, '1080p').toUpperCase(),
       prompt_optimizer: false,
       fast_pretreatment: true,
       callback_url: '',

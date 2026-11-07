@@ -8,7 +8,7 @@ import { waitUntil } from '@vercel/functions'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
-import { canExecuteStep } from '@/lib/workflow-executor'
+import { canExecuteStep, isStepCancelled } from '@/lib/workflow-executor'
 import { mergeStepOutputData } from '@/lib/workflow-executor'
 import { startHeartbeat } from '@/lib/generation-heartbeat'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
@@ -16,6 +16,11 @@ import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/point
 import { attachOperationResults, finalizeCurrentSupplierOperation, getCurrentOperationId } from '@/lib/supplier-observability'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { refreshShotsUrls } from '@/lib/resolve-media-url'
+import { resolveDurationForModel, resolveVideoModelForShot } from '@/lib/models-config'
+import {
+  markGenerationUnitFailedForLegacySegment,
+  recordGeneratedClipForLegacySegment,
+} from '@/lib/video-production-state'
 
 /** 获取 storyboard shots 和 keyframes */
 async function getStoryboardAndKeyframes(projectId: string) {
@@ -33,6 +38,28 @@ async function getStoryboardAndKeyframes(projectId: string) {
   const { shots: keyframes } = await refreshShotsUrls(rawKeyframes)
 
   return { shots, keyframes }
+}
+
+/** Use a user-confirmed recovery candidate without rewriting the storyboard source asset. */
+async function getConfirmedReferenceOverride(legacySegmentId: string): Promise<string | null> {
+  const item = await prisma.generationUnitItem.findFirst({
+    where: { legacySegmentId },
+    include: { generationUnit: { select: { referenceAssets: true } } },
+    orderBy: { createdAt: 'desc' },
+  })
+  const referenceAssets = item?.generationUnit.referenceAssets as any
+  const images = Array.isArray(referenceAssets?.images) ? referenceAssets.images : []
+  const recovered = images.find((image: any) => typeof image?.replacementAssetId === 'string')
+  if (!recovered) return null
+  const asset = await prisma.userAsset.findFirst({
+    where: { id: recovered.replacementAssetId, deletedAt: null },
+    select: { storageKey: true },
+  })
+  if (asset?.storageKey) {
+    const { getSignedFileUrl } = await import('@/lib/r2')
+    return getSignedFileUrl(asset.storageKey)
+  }
+  return typeof recovered.url === 'string' ? recovered.url : null
 }
 
 /**
@@ -61,6 +88,7 @@ async function resetStaleGeneratingSegments(projectId: string, staleMinutes = 15
 
 /** 后台生成单个 segment */
 async function backgroundGenerateDirectSegment(
+  stepId: string,
   segmentId: string,
   projectId: string,
   prompt: string,
@@ -76,6 +104,9 @@ async function backgroundGenerateDirectSegment(
     prisma.videoSegment.updateMany({ where: { id: segmentId }, data: { updatedAt: new Date() } })
   )
   try {
+    if (await isStepCancelled(stepId)) {
+      return { success: false, errorMessage: '用户已取消' }
+    }
     console.log(`[DIRECT-SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
     const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
     const result = await generateOneVideoSegment({
@@ -89,8 +120,11 @@ async function backgroundGenerateDirectSegment(
       aspectRatio,
     })
 
-    await prisma.videoSegment.update({
-      where: { id: segmentId },
+    if (await isStepCancelled(stepId)) {
+      return { success: false, errorMessage: '用户已取消' }
+    }
+    const accepted = await prisma.videoSegment.updateMany({
+      where: { id: segmentId, status: 'generating' },
       data: {
         videoUrl: result.url,
         storageKey: result.storageKey,
@@ -99,6 +133,9 @@ async function backgroundGenerateDirectSegment(
         isMock: result.isMock,
       },
     })
+    if (accepted.count !== 1) {
+      return { success: false, errorMessage: '任务已取消或已被其他执行结果终结' }
+    }
 
     const asset = await prisma.asset.create({
       data: {
@@ -117,17 +154,28 @@ async function backgroundGenerateDirectSegment(
       },
     })
 
+    await recordGeneratedClipForLegacySegment({
+      projectId,
+      legacySegmentId: segmentId,
+      modelId: videoModel,
+      videoUrl: result.url,
+      storageKey: result.storageKey,
+      durationMs: result.duration * 1000,
+      isMock: result.isMock,
+    })
+
     console.log(`[DIRECT-SEGMENT-BG] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
     return { success: true, resultId: asset.id, isMock: result.isMock }
   } catch (e: any) {
     console.error(`[DIRECT-SEGMENT-BG] 失败 segmentId=${segmentId}:`, e?.message)
-    await prisma.videoSegment.update({
-      where: { id: segmentId },
+    await prisma.videoSegment.updateMany({
+      where: { id: segmentId, status: 'generating' },
       data: {
         status: 'failed',
         errorMessage: (e?.message || '生成失败').slice(0, 200),
       },
     })
+    await markGenerationUnitFailedForLegacySegment(segmentId, e?.message || '生成失败')
     return { success: false, errorMessage: (e?.message || '生成失败').slice(0, 500) }
   } finally {
     stopHeartbeat()
@@ -188,7 +236,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'VIDEO_DIRECT' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -212,7 +260,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   // -------------------- 新版：生成 Segment Prompts --------------------
   if (action === 'generate-segment-prompts') {
-    return handleGenerateDirectPrompts(params.id, step.id, userId)
+    return handleGenerateDirectPrompts(params.id, step.id, userId, videoModel)
   }
 
   // -------------------- 新版：单段生成 --------------------
@@ -243,7 +291,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 // ============================================================
 
 /** 生成 Segment Prompts */
-async function handleGenerateDirectPrompts(projectId: string, stepId: string, userId: string) {
+async function handleGenerateDirectPrompts(projectId: string, stepId: string, userId: string, videoModel?: string) {
   const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION, projectId, 'generation.video_direct_prompts', 'TEXT')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
@@ -256,7 +304,7 @@ async function handleGenerateDirectPrompts(projectId: string, stepId: string, us
     }
 
     const { generateSegmentPrompts } = await import('@/lib/video-segment-utils')
-    const segments = await generateSegmentPrompts(projectId, 'VIDEO_DIRECT', shots, userId)
+    const segments = await generateSegmentPrompts(projectId, 'VIDEO_DIRECT', shots, userId, videoModel)
 
     await mergeStepOutputData(stepId, {
       segmentPromptsGenerated: true,
@@ -308,7 +356,8 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
 
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
   const shot = shots[segment.sequence] || shots.find((s: any) => s.shotId === segment.shotId)
-  const firstFrameUrl = shot?.firstFrameUrl || shot?.referenceImageUrl || shot?.imageUrl || ''
+  const firstFrameUrl = await getConfirmedReferenceOverride(segment.id)
+    || shot?.firstFrameUrl || shot?.referenceImageUrl || shot?.imageUrl || ''
   if (!firstFrameUrl) {
     return NextResponse.json({ error: 'NO_IMAGE', message: '该分镜没有可用的首帧' }, { status: 400 })
   }
@@ -333,10 +382,13 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
   await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId, workflowStepId: stepId, assetId: segmentId, success: true })
 
   const defaultAspectRatio = body?.aspectRatio || await getProjectDefaultAspectRatio(projectId)
+  const resolvedVideoModel = resolveVideoModelForShot(shot, body?.videoModel)
+  const resolvedDuration = resolveDurationForModel(resolvedVideoModel, segment.duration || shot?.duration || 5)
   waitUntil((async () => {
     const outcome = await backgroundGenerateDirectSegment(
+      stepId,
       segmentId, projectId, segment.prompt, firstFrameUrl, lastFrameUrl,
-      segment.duration || 5, body?.videoModel, defaultAspectRatio,
+      resolvedDuration, resolvedVideoModel, defaultAspectRatio,
       userId,
     )
     // isMock 表示真实模型全部失败后回落到了本地 Ken Burns 渲染，
@@ -424,7 +476,8 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
     let mockCount = 0
     for (const segment of segmentsToRun) {
       const shot = shots.find((s: any) => s.shotId === segment.shotId)
-      const firstFrameUrl = shot?.firstFrameUrl || shot?.referenceImageUrl || shot?.imageUrl || ''
+      const firstFrameUrl = await getConfirmedReferenceOverride(segment.id)
+        || shot?.firstFrameUrl || shot?.referenceImageUrl || shot?.imageUrl || ''
       if (!firstFrameUrl) {
         await prisma.videoSegment.update({
           where: { id: segment.id },
@@ -436,14 +489,17 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
 
       const kf = keyframes.find((k: any) => k.shotId === segment.shotId)
       const lastFrameUrl = kf?.lastFrameUrl || null
+      const resolvedVideoModel = resolveVideoModelForShot(shot, body?.videoModel)
+      const resolvedDuration = resolveDurationForModel(resolvedVideoModel, segment.duration || shot?.duration || 5)
       const outcome = await backgroundGenerateDirectSegment(
+        stepId,
         segment.id,
         projectId,
         segment.prompt,
         firstFrameUrl,
         lastFrameUrl,
-        segment.duration || 5,
-        body?.videoModel,
+        resolvedDuration,
+        resolvedVideoModel,
         defaultAspectRatio,
         userId,
       )
@@ -592,7 +648,7 @@ async function handleGenerateDirectBgm(projectId: string, stepId: string, userId
 // ============================================================
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
 
   const step = await prisma.workflowStep.findUnique({

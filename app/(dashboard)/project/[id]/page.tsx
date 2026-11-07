@@ -2,8 +2,8 @@ export const dynamic = 'force-dynamic'
 
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import { getCurrentUser } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
+import { checkProjectPermission } from '@/lib/project-permission'
 import { projectDetailSelect } from '@/lib/db/project-select'
 import {
   Lightbulb,
@@ -60,10 +60,9 @@ function formatDate(date: Date): string {
 export default async function ProjectPage(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
-    const user = await getCurrentUser()
-    if (!user) {
-      redirect('/login')
-    }
+    const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
+    if (!access.allowed) redirect('/dashboard')
+    const { user } = access
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },
@@ -74,18 +73,7 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
       notFound()
     }
 
-    const isOwner = project.userId === user.id || user.isAdmin
-    const membership = !isOwner && project.groupId
-      ? await prisma.groupMembership.findUnique({
-          where: { groupId_userId: { groupId: project.groupId, userId: user.id } },
-          select: { status: true },
-        })
-      : null
-
-    // 小组项目对 ACTIVE 成员开放；个人项目仍仅限所有者和系统管理员。
-    if (!isOwner && membership?.status !== 'ACTIVE') redirect('/dashboard')
-
-    const availableGroups = isOwner && !project.groupId
+    const availableGroups = access.isOwner && !project.groupId
       ? await prisma.groupMembership.findMany({
           where: { userId: user.id, status: 'ACTIVE' },
           select: { group: { select: { id: true, name: true } } },
@@ -101,6 +89,11 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
 
     return (
       <div className="mx-auto max-w-7xl">
+        {access.isSeriesAccess && (
+          <div className="mb-6 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+            你正通过系列职责查看本集。项目总览保持只读；进入工作流后，只能编辑职责允许的步骤。
+          </div>
+        )}
         {/* 空状态提示 */}
         {completedCount === 0 && (
           <div className="mb-6 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -114,7 +107,11 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
           {/* 左栏：项目信息 */}
           <div className="space-y-4">
             <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
-              <EditableTitle projectId={project.id} initialTitle={project.title} />
+              {access.isSeriesAccess ? (
+                <h1 className="text-xl font-semibold text-stone-900">{project.title}</h1>
+              ) : (
+                <EditableTitle projectId={project.id} initialTitle={project.title} />
+              )}
 
               <div className="mt-4">
                 <IdeaAnchor text={project.rawIdea} />

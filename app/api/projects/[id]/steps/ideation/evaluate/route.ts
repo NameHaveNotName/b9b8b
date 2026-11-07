@@ -8,6 +8,7 @@ import { getTextClient } from '@/lib/api-clients'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
+import { getBusinessGoalPrompt } from '@/lib/business-goals'
 
 interface EvaluationResult {
   retentionScore: number
@@ -21,7 +22,8 @@ async function evaluateCreative(
   currentCreative: string,
   previousCreative: string,
   previousScore: number | null,
-  selectedImprovement: string
+  selectedImprovement: string,
+  businessGoalInstructions?: string,
 ): Promise<EvaluationResult> {
   const textClient = await getTextClient()
 
@@ -41,6 +43,8 @@ async function evaluateCreative(
 - 剧本格式、对白质量
 
 你只评估：故事钩子强度、世界观辨识度、情绪基调、核心意象、概念独特性。
+
+${businessGoalInstructions || ''}
 
 【用户原始创意输入】
 ${originalInput}
@@ -122,7 +126,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     if (!project) {
       return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
-    const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'IDEATION' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -137,12 +141,17 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       )
     }
 
+    const ideationOutput = (await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId: params.id, stepType: 'IDEATION' } },
+      select: { outputData: true },
+    }))?.outputData as any
     const evaluation = await evaluateCreative(
       originalInput,
       currentCreative,
       previousCreative || '',
       previousScore ?? null,
-      selectedImprovement || ''
+      selectedImprovement || '',
+      getBusinessGoalPrompt(ideationOutput?.businessGoal, 'ideation'),
     )
 
     // 如果有 iterationId，更新对应记录的评估结果

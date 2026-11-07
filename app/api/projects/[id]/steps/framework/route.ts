@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
+import { getBusinessGoalPrompt } from '@/lib/business-goals'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
 import { runDeepening } from '@/lib/framework-deepen'
 import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
@@ -99,7 +100,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'FRAMEWORK' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -132,6 +133,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   const ideationOutput = (ideationStep.outputData as any) || {}
+  if (ideationOutput.agentRun && ideationOutput.creativePlanConfirmed !== true) {
+    return NextResponse.json(
+      { error: 'CREATIVE_PLAN_NOT_CONFIRMED', message: '请先确认完整创作方案，再进入框架搭建' },
+      { status: 400 },
+    )
+  }
   const directions = ideationOutput.directions || []
   const selectedDirection = directions[directionIndex]
   if (!selectedDirection) {
@@ -176,11 +183,16 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   })
   const outputData: any = ideationStep?.outputData || {}
   const projectTag = outputData?.projectTag || ''
+  const businessGoal = outputData?.businessGoal || ''
   const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
     ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].framework
     : ''
   const assetConstraints = await getStepAssetConstraints(params.id, 'FRAMEWORK')
-  const combinedInstructions = [tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
+  const goalInstructions = getBusinessGoalPrompt(businessGoal, 'framework')
+  const creativePlanInstructions = outputData?.agentRun?.artifacts?.creativePlan
+    ? `【用户已确认的完整创作方案】\n${JSON.stringify(outputData.agentRun.artifacts.creativePlan)}`
+    : ''
+  const combinedInstructions = [goalInstructions, creativePlanInstructions, tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
 
   const references = await getProjectReferences(params.id).catch(() => [])
   const hasRefs = references.length > 0 && references.some(r => r.url)
@@ -260,7 +272,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     waitUntil(
       (async () => {
         try {
-          await runDeepening(params.id, step.id, framework, projectTag)
+          await runDeepening(params.id, step.id, framework, projectTag, businessGoal)
         } catch (e: any) {
           console.error('[FRAMEWORK] 后台深化失败:', e.message)
         }
@@ -323,7 +335,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'FRAMEWORK' })
   if (!permission.allowed) {
     return permission.response
   }

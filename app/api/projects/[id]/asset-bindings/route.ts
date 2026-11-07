@@ -28,7 +28,7 @@ async function serialize(binding: any) {
 
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
   const { searchParams } = new URL(req.url)
   const targetType = searchParams.get('targetType') || undefined
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const params = await props.params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'STYLE' })
   if (!access.allowed) return access.response
 
   const body = await req.json().catch(() => ({}))

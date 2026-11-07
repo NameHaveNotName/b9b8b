@@ -9,7 +9,7 @@ import { uploadFile, uploadThumbnail, getSignedFileUrl, deleteFile } from '@/lib
 import { generateImage } from '@/lib/api-clients/openlux'
 import { getTextClient } from '@/lib/api-clients'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
-import { IMAGE_MODELS } from '@/lib/models-config'
+import { IMAGE_MODELS, getPromptLanguageInstruction } from '@/lib/models-config'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
@@ -17,6 +17,7 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { setCurrentOperationTarget, finalizeCurrentSupplierOperation } from '@/lib/supplier-observability'
 import { mergeStepOutputData } from '@/lib/workflow-executor'
 import { getBoundReferences } from '@/lib/asset-bindings'
+import { getBusinessGoalPrompt } from '@/lib/business-goals'
 
 const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 
@@ -31,6 +32,8 @@ async function generateStoryboardImagePrompt(textClient: any, input: {
   previousDescription?: string
   nextDescription?: string
   referencePolicy: string
+  /** 目标生图模型：决定 imagePrompt 用中文还是英文撰写 */
+  imageModel: string
 }): Promise<{ imagePrompt: string; negativePrompt?: string }> {
   const prompt = loadPromptTemplate('storyboard-image-prompt', {
     CURRENT_DESCRIPTION: input.currentDescription || '',
@@ -43,6 +46,7 @@ async function generateStoryboardImagePrompt(textClient: any, input: {
     PREVIOUS_DESCRIPTION: input.previousDescription || '',
     NEXT_DESCRIPTION: input.nextDescription || '',
     REFERENCE_POLICY: input.referencePolicy || '',
+    LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(input.imageModel),
   })
 
   const text = await textClient.generate(prompt, { temperature: 0.35, maxTokens: 1200 })
@@ -119,7 +123,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'STORYBOARD' })
   if (!access.allowed) {
     return access.response
   }
@@ -155,6 +159,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   const outputData = (step.outputData || {}) as any
+  const ideationOutput = (await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId: params.id, stepType: 'IDEATION' } },
+    select: { outputData: true },
+  }))?.outputData as any
+  const businessGoalInstructions = getBusinessGoalPrompt(ideationOutput?.businessGoal, 'storyboard')
   const shots: any[] = outputData.shots || []
   const shotAssets: any[] = outputData.shotAssets || []
   const shotPrompts: any[] = outputData.shotPrompts || []
@@ -377,7 +386,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     let generatedNegativePrompt = ''
     try {
       const textClientForImagePrompt = await getTextClient()
-      const referencePolicy = `Reference image counts: topPriority=${finalExtraRefUrls.length}, characters=${characterImageUrls.length}, style=${styleRefUrl ? 1 : 0}, previousShot=${previousShotImageUrl ? 1 : 0}, userReferences=${userRefUrls.length}. Top-priority reference images are mandatory visual constraints and should be followed first. Use character/style references for appearance and style only. Use previous-shot reference only for shared continuity; never copy its unrelated scene objects into the current shot.`
+      const referencePolicy = `${businessGoalInstructions}\n\nReference image counts: topPriority=${finalExtraRefUrls.length}, characters=${characterImageUrls.length}, style=${styleRefUrl ? 1 : 0}, previousShot=${previousShotImageUrl ? 1 : 0}, userReferences=${userRefUrls.length}. Top-priority reference images are mandatory visual constraints and should be followed first. Use character/style references for appearance and style only. Use previous-shot reference only for shared continuity; never copy its unrelated scene objects into the current shot.`
       const imagePromptResult = await generateStoryboardImagePrompt(textClientForImagePrompt, {
         currentDescription: currentDesc,
         originalPrompt: shotPrompt.prompt || shotPrompt.englishPrompt || '',
@@ -389,6 +398,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         previousDescription: previousShotDesc || '',
         nextDescription: nextShotDesc,
         referencePolicy,
+        imageModel: newModel,
       })
       generatedImagePrompt = imagePromptResult.imagePrompt
       generatedNegativePrompt = imagePromptResult.negativePrompt || ''

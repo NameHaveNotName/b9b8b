@@ -20,7 +20,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'CHARACTER' })
   if (!access.allowed) {
     return access.response
   }

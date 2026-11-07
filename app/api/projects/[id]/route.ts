@@ -9,10 +9,8 @@ import { computeProjectStateFromSteps } from '@/lib/workflow-state'
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
-    const access = await checkProjectPermission(params.id)
+    const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
     if (!access.allowed) return access.response
-    const { user, isOwner } = access
-
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       select: projectDetailSelect,
@@ -55,7 +53,16 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
       selectedAspectRatio,
     }
 
-    return NextResponse.json({ project: projectWithDerivedState })
+    return NextResponse.json({
+      project: {
+        ...projectWithDerivedState,
+        collaborationAccess: {
+          isSeriesAccess: access.isSeriesAccess,
+          seriesRole: access.seriesRole || null,
+          editableStepTypes: access.editableStepTypes || [],
+        },
+      },
+    })
   } catch (error: any) {
     console.error(`[GET /api/projects/${params.id}] error:`, error)
     return NextResponse.json(

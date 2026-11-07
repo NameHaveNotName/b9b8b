@@ -9,7 +9,7 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { claimStepForGeneration, completeStep, failStep, canExecuteStep, mergeStepOutputData } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
-import { IMAGE_MODELS } from '@/lib/models-config'
+import { IMAGE_MODELS, getPromptLanguageInstruction } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { refreshShotsUrls } from '@/lib/resolve-media-url'
@@ -25,7 +25,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'KEYFRAMES' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -97,8 +97,9 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       try {
         const ref = await getStyleRefUrl(params.id)
         styleRefUrl = ref.styleRefUrl
+        // 移除硬编码胶片词 fallback，改用与所选风格解耦的中性高质量画风词
         selectedStylePrompt = ref.stylePrompt ||
-          'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
+          'high-quality cinematic visual style, coherent lighting and color palette, clean sharp details'
       } catch (refErr: any) {
         console.error('[KEYFRAMES-PROMPT] 风格图提取失败：', refErr?.message)
         return NextResponse.json(
@@ -107,17 +108,38 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         )
       }
 
+      const promptImageModel = body?.imageModel || (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
       const prompts = []
       const keyRefs = await getProjectReferences(params.id).catch(() => [])
       const keyRefLabels = keyRefs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
       const keyRefHint = keyRefs.length > 0
-        ? `\n【参考图】${keyRefs.length} 张用户参考图${keyRefLabels.length > 0 ? `（标签：${keyRefLabels.join('、')}）` : ''}。生成 imagePrompt 时可以直接引用参考图中的人物，无需重新描述外貌。`
+        ? `\n【参考图】${keyRefs.length} 张用户参考图${keyRefLabels.length > 0 ? `（标签：${keyRefLabels.join('、')}）` : ''}。尾帧需保持与参考图一致的角色外观与服装颜色分区。`
         : ''
 
+      // 读取分镜首帧提示词（shotPrompts），让尾帧基于首帧画面真实内容演进，而不是只看分镜描述
+      const storyboardStepForPrompt = await prisma.workflowStep.findUnique({
+        where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } }
+      })
+      const shotPromptsMap = new Map<string, string>()
+      const shotPromptsArray = ((storyboardStepForPrompt?.outputData as any)?.shotPrompts || []) as any[]
+      for (const sp of shotPromptsArray) {
+        if (sp?.shotId && sp?.prompt) {
+          shotPromptsMap.set(String(sp.shotId), String(sp.prompt))
+        }
+      }
+
       for (const shot of shotsWithFirstFrame) {
+        const firstFramePrompt = shotPromptsMap.get(String(shot.shotId)) || ''
+        const userInputBlock = [
+          `分镜描述：${shot.description || `${shot.shotId} - ${shot.sceneName}`}`,
+          firstFramePrompt ? `首帧画面提示词（必须继承其中的角色身份、服装、空间结构与光线方向）：${firstFramePrompt}` : '',
+          keyRefHint,
+        ].filter(Boolean).join('\n\n')
+
         const lastPrompt = loadPromptTemplate('keyframe-last', {
           STYLE_REF: selectedStylePrompt,
-          USER_INPUT: (shot.description || `${shot.shotId} - ${shot.sceneName}`) + keyRefHint,
+          USER_INPUT: userInputBlock,
+          LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(promptImageModel),
         })
         const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024 })
         const parsedLast = extractJsonFromMarkdown(lastPromptText)
@@ -207,21 +229,21 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       )
     }
 
-    try {
-      let styleRefUrl: string
-      let selectedStylePrompt: string
       try {
-        const ref = await getStyleRefUrl(params.id)
-        styleRefUrl = ref.styleRefUrl
-        selectedStylePrompt = ref.stylePrompt ||
-          'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
-      } catch (refErr: any) {
-        console.error('[KEYFRAMES-IMAGE] 风格图提取失败：', refErr?.message)
-        return NextResponse.json(
-          { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图 URL' },
-          { status: 400 }
-        )
-      }
+        let styleRefUrl: string
+        let selectedStylePrompt: string
+        try {
+          const ref = await getStyleRefUrl(params.id)
+          styleRefUrl = ref.styleRefUrl
+          selectedStylePrompt = ref.stylePrompt ||
+            'high-quality cinematic visual style, coherent lighting and color palette, clean sharp details'
+        } catch (refErr: any) {
+          console.error('[KEYFRAMES-IMAGE] 风格图提取失败：', refErr?.message)
+          return NextResponse.json(
+            { error: 'STORAGE_001', message: refErr?.message || '未找到有效风格参考图 URL' },
+            { status: 400 }
+          )
+        }
 
       const imageClient = await getImageClient()
       // 收集角色参考图（用于多图参考：风格图 + 角色图）
@@ -392,6 +414,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         const lastPrompt = loadPromptTemplate('keyframe-last', {
           STYLE_REF: selectedStylePrompt,
           USER_INPUT: (shot.description || `${shot.shotId} - ${shot.sceneName}`) + defaultRefHint,
+          LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(IMAGE_MODELS.primary),
         })
         const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024 })
         const parsedLast = extractJsonFromMarkdown(lastPromptText)
@@ -502,7 +525,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'KEYFRAMES' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -541,7 +564,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
 
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
 
   const step = await prisma.workflowStep.findUnique({

@@ -26,7 +26,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'FRAMEWORK' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -52,6 +52,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   })
   const ideationOutput = (ideationStep?.outputData as any) || {}
   const projectTag = ideationOutput?.projectTag || ''
+  const businessGoal = ideationOutput?.businessGoal || ''
 
   const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK, params.id, 'generation.framework_deepen', 'TEXT')
   if (!pointsCheck.ok) {
@@ -73,7 +74,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
             }),
           }
         }
-        nextFramework = await deepenCharacters(nextFramework, step.id, projectTag)
+        nextFramework = await deepenCharacters(nextFramework, step.id, projectTag, businessGoal)
         break
 
       case 'story':
@@ -86,8 +87,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
             return rest
           }),
         }
-        nextFramework = await deepenSynopsis(nextFramework, step.id, projectTag)
-        nextFramework = await deepenActs(nextFramework, step.id, projectTag)
+        nextFramework = await deepenSynopsis(nextFramework, step.id, projectTag, businessGoal)
+        nextFramework = await deepenActs(nextFramework, step.id, projectTag, businessGoal)
         break
 
       case 'environments':
@@ -97,7 +98,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           environments: [],
           environmentsDeepened: [],
         }
-        nextFramework = await extractAndDeepenEnvironments(nextFramework, step.id, projectTag)
+        nextFramework = await extractAndDeepenEnvironments(nextFramework, step.id, projectTag, businessGoal)
         break
     }
 

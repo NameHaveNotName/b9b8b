@@ -16,6 +16,7 @@ import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { logOperation } from '@/lib/operations'
 import { getCurrentOperationId } from '@/lib/supplier-observability'
+import { getStylePoolPromptLanguageInstruction } from '@/lib/models-config'
 
 const styleQueue = createQueue('style-generation')
 
@@ -53,6 +54,7 @@ async function generateStylePrompts(
     CHARACTERS: characterBlock,
     VISUAL_REFERENCES: visualRefBlock,
     ASPECT_RATIO: aspectRatio,
+    LANGUAGE_INSTRUCTION: getStylePoolPromptLanguageInstruction(),
   })
 
   const textClient = await getTextClient()
@@ -138,7 +140,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'STYLE' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -438,6 +440,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       CHARACTERS: characterBlockCompat,
       VISUAL_REFERENCES: visualRefBlockCompat,
       ASPECT_RATIO: aspectRatioCompat,
+      LANGUAGE_INSTRUCTION: getStylePoolPromptLanguageInstruction(),
     })
     const textClient = await getTextClient()
     let resultText: string
@@ -581,7 +584,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
 
   const step = await prisma.workflowStep.findUnique({
@@ -626,7 +629,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'STYLE' })
   if (!permission.allowed) {
     return permission.response
   }

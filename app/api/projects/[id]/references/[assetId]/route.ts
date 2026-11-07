@@ -13,7 +13,7 @@ export async function PATCH(
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    const permission = await checkProjectPermission(params.id)
+    const permission = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'STYLE' })
     if (!permission.allowed) return permission.response
 
     const asset = await prisma.asset.findUnique({ where: { id: params.assetId } })
@@ -54,7 +54,7 @@ export async function DELETE(
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    const permission = await checkProjectPermission(params.id)
+    const permission = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'STYLE' })
     if (!permission.allowed) return permission.response
 
     const asset = await prisma.asset.findUnique({ where: { id: params.assetId } })

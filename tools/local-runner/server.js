@@ -5,13 +5,27 @@ const fsp = require('fs/promises')
 const path = require('path')
 const { URL } = require('url')
 const { spawn } = require('child_process')
+const {
+  buildServerOriginAllowlist,
+  cookieAfterServerChange,
+  createControlToken,
+  isAllowedHost,
+  normalizeAllowedServerUrl,
+  validateApiRequest,
+} = require('./security')
 
 const PORT = Number(process.env.LOCAL_RUNNER_PORT || 4317)
 const ROOT = path.resolve(__dirname, '..', '..')
-const STATE_DIR = path.join(ROOT, '.local-runner')
+const STATE_DIR = path.resolve(process.env.LOCAL_RUNNER_STATE_DIR || path.join(ROOT, '.local-runner'))
 const STATE_FILE = path.join(STATE_DIR, 'state.json')
+const COOKIE_FILE = path.join(STATE_DIR, 'session-cookie.secret')
 const DEFAULT_SERVER = 'https://b9b8b.vercel.app'
 const AUTH_DEBUG_PORT = Number(process.env.LOCAL_RUNNER_AUTH_PORT || 9223)
+const CONTROL_TOKEN = createControlToken()
+const ALLOWED_SERVER_ORIGINS = buildServerOriginAllowlist(
+  DEFAULT_SERVER,
+  process.env.LOCAL_RUNNER_ALLOWED_ORIGINS,
+)
 
 const STEP_LABELS = {
   IDEATION: '创意扩散',
@@ -99,14 +113,24 @@ async function loadState() {
   try {
     const raw = await fsp.readFile(STATE_FILE, 'utf8')
     const saved = JSON.parse(raw)
+    const legacyCookie = String(saved.config?.cookie || '')
+    let storedCookie = ''
+    try { storedCookie = await fsp.readFile(COOKIE_FILE, 'utf8') } catch {}
     state = {
       ...initialState(),
       ...saved,
-      config: { ...initialState().config, ...(saved.config || {}) },
+      config: { ...initialState().config, ...(saved.config || {}), cookie: storedCookie || legacyCookie },
       runner: { ...initialState().runner, ...(saved.runner || {}), running: false },
       downloads: { ...initialState().downloads, ...(saved.downloads || {}) },
       logs: saved.logs || [],
     }
+    try {
+      state.config.serverUrl = normalizeServerUrl(state.config.serverUrl)
+    } catch {
+      state.config.serverUrl = DEFAULT_SERVER
+      state.config.cookie = ''
+    }
+    if (legacyCookie) await saveState()
   } catch {
     state = initialState()
   }
@@ -115,7 +139,20 @@ async function loadState() {
 async function saveState() {
   await ensureStateDir()
   state.runner.updatedAt = new Date().toISOString()
-  await fsp.writeFile(STATE_FILE, JSON.stringify(state, null, 2), 'utf8')
+  const cookie = String(state.config.cookie || '')
+  const persisted = {
+    ...state,
+    config: { ...state.config, cookie: '' },
+  }
+  await fsp.writeFile(STATE_FILE, JSON.stringify(persisted, null, 2), 'utf8')
+  if (cookie) {
+    await fsp.writeFile(COOKIE_FILE, cookie, { encoding: 'utf8', mode: 0o600 })
+    await fsp.chmod(COOKIE_FILE, 0o600).catch(() => {})
+  } else {
+    await fsp.unlink(COOKIE_FILE).catch((error) => {
+      if (error.code !== 'ENOENT') throw error
+    })
+  }
 }
 
 function log(message, level = 'info') {
@@ -148,8 +185,7 @@ function resetLocalProgress(message, options = {}) {
 }
 
 function normalizeServerUrl(input) {
-  const value = String(input || DEFAULT_SERVER).trim().replace(/\/+$/, '')
-  return value || DEFAULT_SERVER
+  return normalizeAllowedServerUrl(input, DEFAULT_SERVER, ALLOWED_SERVER_ORIGINS)
 }
 
 function parseProjectId(input) {
@@ -1128,10 +1164,14 @@ function htmlPage() {
   </div>
 <script>
 const $ = (id) => document.getElementById(id)
+const CONTROL_TOKEN = ${JSON.stringify(CONTROL_TOKEN)}
 async function api(path, body) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)
-  const res = await fetch(path, {method: body ? 'POST' : 'GET', headers:{'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined, signal: controller.signal}).finally(() => clearTimeout(timer))
+  const isPost = body !== undefined
+  const headers = {'X-Local-Runner-Token': CONTROL_TOKEN}
+  if (isPost) headers['Content-Type'] = 'application/json'
+  const res = await fetch(path, {method: isPost ? 'POST' : 'GET', headers, body: isPost ? JSON.stringify(body) : undefined, signal: controller.signal}).finally(() => clearTimeout(timer))
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || data.message || res.status)
   return data
@@ -1267,6 +1307,9 @@ async function handleApi(req, res, url) {
     }
     if (req.method === 'POST' && url.pathname === '/api/config') {
       const body = await readBody(req)
+      const previousServerOrigin = new URL(state.config.serverUrl).origin
+      const nextServerUrl = normalizeServerUrl(body.serverUrl || state.config.serverUrl)
+      const serverOriginChanged = new URL(nextServerUrl).origin !== previousServerOrigin
       const previousProjectId = state.config.projectId
       const nextProjectUrl = body.projectUrl || state.config.projectUrl
       const nextProjectId = parseProjectId(body.projectUrl || body.projectId || state.config.projectUrl || state.config.projectId)
@@ -1274,8 +1317,8 @@ async function handleApi(req, res, url) {
       state.config = {
         ...state.config,
         ...body,
-        cookie: typeof body.cookie === 'string' && body.cookie.trim() ? body.cookie.trim() : state.config.cookie,
-        serverUrl: normalizeServerUrl(body.serverUrl),
+        cookie: cookieAfterServerChange(state.config.cookie, body.cookie, serverOriginChanged),
+        serverUrl: nextServerUrl,
         projectUrl: nextProjectUrl,
         projectId: nextProjectId,
       }
@@ -1373,21 +1416,31 @@ async function handleApi(req, res, url) {
 async function main() {
   await loadState()
   const server = http.createServer(async (req, res) => {
+    if (!isAllowedHost(req.headers.host, PORT)) return sendJson(res, 400, { error: 'invalid host' })
     const url = new URL(req.url, `http://localhost:${PORT}`)
-    if (url.pathname.startsWith('/api/')) return handleApi(req, res, url)
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    if (url.pathname.startsWith('/api/')) {
+      const rejection = validateApiRequest(req, PORT, CONTROL_TOKEN)
+      if (rejection) return sendJson(res, rejection.status, { error: rejection.error })
+      return handleApi(req, res, url)
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': 'nosniff',
+    })
     res.end(htmlPage())
   })
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
-      console.error(`端口 ${PORT} 已被占用。本地工具可能已经在运行，请直接打开：http://localhost:${PORT}`)
+      console.error(`端口 ${PORT} 已被占用。本地工具可能已经在运行，请直接打开：http://127.0.0.1:${PORT}`)
       console.error(`如需重启，请先关闭旧的本地工具终端，或结束占用 ${PORT} 端口的 node 进程。`)
       process.exit(1)
     }
     throw e
   })
-  server.listen(PORT, () => {
-    console.log(`AI影视本地顺序生成助手已启动：http://localhost:${PORT}`)
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`AI影视本地顺序生成助手已启动：http://127.0.0.1:${PORT}`)
     console.log('关闭这个终端窗口会停止本地助手；服务器上的已启动任务不会被取消。')
   })
 }

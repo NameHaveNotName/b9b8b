@@ -8,7 +8,8 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
-import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
+import { generateSearchText } from '@/lib/api-clients/openlux'
+import { runCreativeAgentPipeline } from '@/lib/creative-agent-pipeline'
 import { createStep, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
@@ -25,7 +26,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'IDEATION' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -44,6 +45,16 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   // 工作指令.txt（2026-06-02）：如果请求体传了 creativeInput，先保存到 project.rawIdea
   const body = await _req.json().catch(() => ({}))
   const creativeInput = body?.creativeInput
+  const previousBusinessGoal = (step.outputData as any)?.businessGoalText || (step.outputData as any)?.businessGoal
+  const businessGoalText = String(body?.businessGoalText || body?.businessGoal || previousBusinessGoal || '').trim()
+
+  // 必须在清空旧输出之前验证；旧项目未选目标时，重置不能先破坏已有结果再报错。
+  if (body?.force === true && businessGoalText.length < 10) {
+    return NextResponse.json(
+      { error: 'BUSINESS_GOAL_REQUIRED', message: '重新生成前请先用至少 10 个字描述本片要达成的目标' },
+      { status: 400 },
+    )
+  }
 
   // 强制重新生成：重置步骤状态并清除历史输出
   if (body?.force === true && step.status === 'COMPLETED') {
@@ -64,7 +75,14 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     return NextResponse.json({ success: true, data: step!.outputData, cached: true })
   }
 
-  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_DIFFUSION, params.id, 'generation.idea_diffusion', 'TEXT')
+  if (businessGoalText.length < 10 || businessGoalText.length > 2000) {
+    return NextResponse.json(
+      { error: 'BUSINESS_GOAL_REQUIRED', message: '请用 10—2000 个字描述本片要达成的目标' },
+      { status: 400 },
+    )
+  }
+
+  const pointsCheck = await checkPoints(GENERATION_COSTS.IDEA_AGENT_PIPELINE, params.id, 'generation.idea_agent_pipeline', 'TEXT')
   if (!pointsCheck.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
   }
@@ -103,72 +121,26 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].ideation
       : ''
     const assetConstraints = await getStepAssetConstraints(params.id, 'IDEATION')
-    const combinedInstructions = [tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
-
-    let resultText: string
-    if (hasRefs) {
-      const refUrls = references.filter(r => r.url).map(r => r.url)
-      const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
-      console.log(`[IDEATION-VISION] Using multimodal with ${refUrls.length} reference images, labels:`, refLabels, 'tag:', projectTag || 'none')
-
-      const visualRefBlock = refLabels.length > 0
-        ? `【用户上传了 ${refUrls.length} 张视觉参考图。用户标注的标签：${refLabels.join('、')}。\n` +
-          `【角色外观要求】\n` +
-          `你必须在 characters[].description 中描述角色的实际外貌特征，包括：颜色、体型、着装/纹样、标志性视觉元素。\n` +
-          `请根据图片内容或标签名称推断角色外观（例如标签含"宝"可推断为圆润可爱型，含"贝"可推断为贝壳/海洋元素），禁止只用"风格定位：..."替代外观描述。\n` +
-          `对场景/风格元素，必须在 styleGuide 中体现参考图的视觉特征。`
-        : `【用户上传了 ${refUrls.length} 张视觉参考图。\n` +
-          `【角色外观要求】\n` +
-          `你必须在 characters[].description 中描述角色的实际外貌特征（颜色、体型、标志性元素），禁止只用角色定位/性格来填充。\n` +
-          `styleGuide 必须体现参考图中的视觉风格特征。`
-
-      const prompt = loadPromptTemplate('ideation', {
-        USER_INPUT: project.rawIdea,
-        VISUAL_REFERENCES: visualRefBlock,
-        PROJECT_TAG_INSTRUCTIONS: combinedInstructions,
-      })
-      resultText = await textClient.generateVision({
-        prompt,
-        imageUrls: refUrls,
-        imageLabels: refLabels,
-        temperature: 0.8,
-        maxTokens: 12000,
-      })
-    } else {
-      const prompt = loadPromptTemplate('ideation', {
-        USER_INPUT: project.rawIdea,
-        VISUAL_REFERENCES: '',
-        PROJECT_TAG_INSTRUCTIONS: combinedInstructions,
-      })
-      resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 12000 })
-    }
-
-    // 调试日志
-    console.log('[IDEATION] resultText length:', resultText.length)
-    console.log('[IDEATION] resultText preview:', resultText.slice(0, 200))
-
-    const parsed = extractJsonFromMarkdown(resultText)
-    const directions = parsed.directions || []
-    const framework = parsed.framework || {}
-    const storyLength = parsed.storyLength || 'short'
-    const storyLengthLabel = parsed.storyLengthLabel || '短篇 · 3-5分钟'
-    const storyLengthDesc = parsed.storyLengthDesc || ''
-
-    console.log('[IDEATION] parsed directions:', JSON.stringify(directions).slice(0, 500))
-    console.log('[IDEATION-DEBUG] 解析出的方向数量:', Array.isArray(directions) ? directions.length : '非数组')
-    console.log('[IDEATION-DEBUG] 第一个方向:', directions?.[0])
-    console.log('[IDEATION-DEBUG] 推荐分档:', storyLength, storyLengthLabel)
-
-    // 防止 LLM 不遵守 prompt 只输出 1 个方向(2026-05-04 用户报告问题)
-    if (!Array.isArray(directions) || directions.length < 3) {
-      throw new Error(
-        `IDEATION_INSUFFICIENT_DIRECTIONS: LLM 返回方向数量不足。期望>=3,实际=${
-          Array.isArray(directions) ? directions.length : '非数组'
-        }。请重试或检查 prompts/ideation.txt。`
-      )
-    }
-
-    const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, projectTag: projectTag || undefined, assetConstraints: assetConstraints.snapshots, rawText: resultText.slice(0, 3000) }
+    const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
+    const creativeBrief = [project.rawIdea, tagInstructions, assetConstraints.promptBlock, hasRefs ? `已有参考资产标签：${refLabels.join('、') || '未标注'}` : ''].filter(Boolean).join('\n\n')
+    const agentRun = await runCreativeAgentPipeline(
+      { goal: businessGoalText, creativeBrief, referenceLabels: refLabels },
+      {
+        text: prompt => textClient.generate(prompt, { maxTokens: 8192 }),
+        search: prompt => generateSearchText(prompt, { model: 'gpt-5-search-api', maxTokens: 6000, maxSources: 12 }),
+      },
+    )
+    const directions = agentRun.artifacts.conceptCandidates.map((candidate: any) => ({
+      title: candidate.title || candidate.label || '创意方向',
+      description: candidate.summary || candidate.coreIdea || '',
+      keywords: [candidate.label, candidate.audienceValue].filter(Boolean).slice(0, 4),
+    }))
+    const framework = {}
+    const storyLength = 'short'
+    const storyLengthLabel = '短篇 · 3-5分钟'
+    const storyLengthDesc = 'AI 将在正式框架阶段结合完整创作方案进一步判断。'
+    const resultText = JSON.stringify(agentRun.artifacts.creativePlan)
+    const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, businessGoal: businessGoalText, businessGoalText, creativePlanConfirmed: false, agentRun, projectTag: projectTag || undefined, assetConstraints: assetConstraints.snapshots, rawText: resultText.slice(0, 3000) }
     await completeStep(step.id, result)
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
 
@@ -180,7 +152,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       await prisma.asset.update({
         where: { id: existingAsset.id },
         data: {
-          metadata: { content: resultText, directions, framework, storyLength, storyLengthLabel, storyLengthDesc, stepType: 'IDEATION' },
+          metadata: { content: resultText, directions, framework, storyLength, storyLengthLabel, storyLengthDesc, businessGoalText, agentRun, stepType: 'IDEATION' } as any,
         },
       })
     } else {
@@ -193,7 +165,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           mimeType: 'application/json',
           storageKey: `projects/${params.id}/texts/ideation-data.json`,
           url: '',
-          metadata: { content: resultText, directions, framework, storyLength, storyLengthLabel, storyLengthDesc, stepType: 'IDEATION' },
+          metadata: { content: resultText, directions, framework, storyLength, storyLengthLabel, storyLengthDesc, businessGoalText, agentRun, stepType: 'IDEATION' } as any,
         },
       })
     }
@@ -219,13 +191,13 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'IDEATION' })
   if (!permission.allowed) {
     return permission.response
   }
 
   const body = await req.json().catch(() => ({}))
-  const { directions, storyLength, storyLengthLabel, storyLengthDesc, projectTag } = body
+  const { directions, storyLength, storyLengthLabel, storyLengthDesc, projectTag, businessGoal, businessGoalText, confirmCreativePlan } = body
 
   const step = await prisma.workflowStep.findUnique({
     where: { projectId_stepType: { projectId: params.id, stepType: 'IDEATION' } }
@@ -251,6 +223,23 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   }
   if (projectTag !== undefined) {
     nextOutput.projectTag = projectTag || ''
+  }
+  const nextGoal = businessGoalText !== undefined ? businessGoalText : businessGoal
+  if (nextGoal !== undefined) {
+    const normalizedGoal = String(nextGoal).trim()
+    if (normalizedGoal.length < 10 || normalizedGoal.length > 2000) {
+      return NextResponse.json({ error: 'BUSINESS_GOAL_INVALID', message: '视频目标需为 10—2000 个字' }, { status: 400 })
+    }
+    nextOutput.businessGoal = normalizedGoal
+    nextOutput.businessGoalText = normalizedGoal
+    if (normalizedGoal !== existingOutput.businessGoalText) nextOutput.creativePlanConfirmed = false
+  }
+  if (confirmCreativePlan === true) {
+    if (!existingOutput.agentRun?.artifacts?.creativePlan) {
+      return NextResponse.json({ error: 'CREATIVE_PLAN_MISSING', message: '尚无可确认的完整创作方案' }, { status: 400 })
+    }
+    nextOutput.creativePlanConfirmed = true
+    nextOutput.creativePlanConfirmedAt = new Date().toISOString()
   }
 
   await prisma.workflowStep.update({

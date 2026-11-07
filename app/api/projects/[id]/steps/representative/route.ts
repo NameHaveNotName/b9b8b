@@ -10,6 +10,7 @@ import { claimStepForGeneration, mergeStepOutputData, canExecuteStep } from '@/l
 import { getStyleRefUrl } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
+import { getPromptLanguageInstruction } from '@/lib/models-config'
 
 export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -22,7 +23,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'CHARACTER' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -118,7 +119,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         .map((cid: string) => characters.find((c: any) => c.id === cid)?.name || '未知角色')
         .join(',')
 
-      // 用 concept 模板生成代表画面提示词
+      // 用 concept 模板生成代表画面提示词（生图固定走 gpt-image-1，语言跟随该模型）
       const prompt = loadPromptTemplate('concept', {
         USER_INPUT: JSON.stringify({
           framework,
@@ -126,7 +127,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           shotDescription: shot.description,
           keyAction: shot.keyAction,
           characters: charNames,
-        })
+        }),
+        LANGUAGE_INSTRUCTION: getPromptLanguageInstruction('gpt-image-1'),
       })
       const promptText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 2048 })
 
@@ -196,7 +198,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
 
   const step = await prisma.workflowStep.findUnique({

@@ -98,7 +98,7 @@ import type { VideoClient, TrailerSegment } from './video'
 import { prisma } from '../prisma'
 import { generateText, generateVideoFromImage, generateMusic, generateMusicMinimax, decodeMinimaxHexToFile, generateDirectVideo as generateDirectVideoOpenLux, resolveImageToBase64 } from './openlux'
 import { generateMusicQwen } from './dashscope'
-import { TEXT_MODELS, VIDEO_MODELS, MUSIC_MODELS } from '../models-config'
+import { TEXT_MODELS, VIDEO_MODELS, MUSIC_MODELS, getPromptLanguageInstruction } from '../models-config'
 import {
   ensureDir,
   removeDir,
@@ -331,17 +331,17 @@ async function generateVideoPromptForConcept(args: {
   const promptTemplate = [
     `基于以下影视项目信息，为第${actNum}幕第${sceneNum}个场景生成一段视频生成提示词。`,
     `该视频将作为宣传片的第${segIndex + 1}个共${segCount}个${segDuration}秒片段。`,
+    getPromptLanguageInstruction((VIDEO_MODELS as any).trailer?.primary || VIDEO_MODELS.direct.primary),
     ``,
     `故事梗概：${(storyBrief || '').slice(0, 400)}`,
     `场景画面描述：${String(sceneDesc).slice(0, 500)}`,
     `场景氛围：${mood}`,
     ``,
     `要求：`,
-    `- 提示词必须用英文`,
     `- 必须描述镜头运动（如 slow push-in / gentle pan / static with subtle light change / dolly forward）`,
     `- 必须描述画面动态（如 character breathing / smoke drifting / water rippling / hair moving in wind）`,
     `- 必须保持与概念图一致的色调和光影`,
-    `- 严格输出 JSON（不要任何额外解释）：{"videoPrompt": "英文提示词", "cameraMotion": "镜头运动描述", "duration": ${segDuration}}`,
+    `- 严格输出 JSON（不要任何额外解释）：{"videoPrompt": "视频提示词（语言按语言指令）", "cameraMotion": "镜头运动描述", "duration": ${segDuration}}`,
   ].join('\n')
 
   let txt = ''

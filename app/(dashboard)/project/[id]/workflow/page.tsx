@@ -29,6 +29,9 @@ import {
 import TopStepper from './_components/TopStepper'
 import TrailerPanel from './_components/TrailerPanel'
 import VideoDirectPanel from './_components/VideoDirectPanel'
+import ScopedChangePanel from './_components/ScopedChangePanel'
+import FrameworkInlineTextEditor from '@/components/workflow/FrameworkInlineTextEditor'
+import StoryMainCanvas from './_components/StoryMainCanvas'
 import IdeaAnchor from '@/components/workflow/IdeaAnchor'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer'
 import { VISIBLE_STEP_TYPES } from '@/lib/workflow'
@@ -245,9 +248,18 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
     steps[steps.length - 1]?.stepType
 
   const currentStep = steps.find((s: any) => s.stepType === currentActive)
+  const isSeriesAccess = project?.collaborationAccess?.isSeriesAccess === true
+  const editableSeriesSteps: string[] = Array.isArray(project?.collaborationAccess?.editableStepTypes)
+    ? project.collaborationAccess.editableStepTypes
+    : []
+  const canEditCurrentStep = !isSeriesAccess || Boolean(currentStep && editableSeriesSteps.includes(currentStep.stepType))
 
   const executeStep = useCallback(
     async (stepType: string, body?: any) => {
+      if (project?.collaborationAccess?.isSeriesAccess && !project.collaborationAccess.editableStepTypes?.includes(stepType)) {
+        setLastError('当前系列职责只能查看此步骤')
+        return { success: false, message: '当前系列职责只能查看此步骤' }
+      }
       const apiPath = API_STEP_MAP[stepType]
       if (!apiPath) return { success: false, message: '未找到步骤执行接口' }
       setExecuting(stepType)
@@ -398,7 +410,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         setExecuting(null)
       }
     },
-    [params.id, mutate, executing, selectedIdx]
+    [params.id, mutate, executing, selectedIdx, project]
   )
 
   // 中断步骤
@@ -413,12 +425,14 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         const result = await res.json()
         if (!res.ok || !result.success) {
           setToast({ kind: 'error', message: `中断失败：${result.error || '未知错误'}` })
-          return
+          return false
         }
         setToast({ kind: 'success', message: '已中断' })
         await mutate()
+        return true
       } catch (e: any) {
         setToast({ kind: 'error', message: '中断失败：' + e.message })
+        return false
       }
     },
     [params.id, mutate]
@@ -590,16 +604,24 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         <p className="mt-1 text-sm text-stone-500">工作流看板 — 共 {VISIBLE_STEP_TYPES.length} 步</p>
       </div>
 
+      {isSeriesAccess && (
+        <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+          系列职责：{project.collaborationAccess.seriesRole || '成员'}。当前步骤{canEditCurrentStep ? '可编辑' : '仅可查看'}。
+        </div>
+      )}
+
       {/* 建议动作 */}
       {project && steps.length > 0 && (
         <SuggestionBar steps={steps} project={project} activeStep={currentActive} onLocate={(t) => setActiveStepType(t)} />
       )}
 
       {/* ReferenceBar */}
-      <ReferenceBar
-        projectId={params.id}
-        defaultExpanded={currentActive === 'IDEATION'}
-      />
+      {(!isSeriesAccess || editableSeriesSteps.includes('STYLE')) && (
+        <ReferenceBar
+          projectId={params.id}
+          defaultExpanded={currentActive === 'IDEATION'}
+        />
+      )}
 
       {/* TopStepper */}
       <TopStepper
@@ -616,6 +638,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
             step={currentStep}
             project={project}
             executing={executing}
+            readOnly={!canEditCurrentStep}
             onExecute={() => {
               workbenchRef.current?.configure({}, currentStep.stepType)
             }}
@@ -680,6 +703,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
           )}
 
           <div className="mt-6">
+            <StoryMainCanvas step={currentStep} />
             <StepContent
               step={currentStep}
               project={project}
@@ -697,13 +721,22 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
               readOnly={(() => {
                 const stepId = prismaTypeToStepId(currentStep.stepType)
                 const displayState = stepId ? getStepDisplayState(stepId, project) : null
-                return displayState?.isHidden ?? false
+                return !canEditCurrentStep || (displayState?.isHidden ?? false)
               })()}
               selectedIdx={selectedIdx}
               setSelectedIdx={setSelectedIdx}
               onEditStoryboard={(payload) => workbenchRef.current?.editStoryboard(payload)}
             />
           </div>
+
+          {canEditCurrentStep && currentStep.stepType !== 'FRAMEWORK' && (
+            <ScopedChangePanel
+              projectId={params.id}
+              step={currentStep}
+              onApplied={mutate}
+              onMessage={setToast}
+            />
+          )}
 
           {/* 决策提示栏：已选视觉基准时显示 */}
           {currentStep.stepType === 'STYLE' && project.selectedStyleId && (
@@ -767,19 +800,12 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
       )}
 
       {/* 浮动生成任务面板 */}
-      <FloatingGenerationPanel
+      {canEditCurrentStep && <FloatingGenerationPanel
         steps={steps}
         projectId={params.id}
-        onViewDetails={(s) => workbenchRef.current?.showResult(s)}
-        onViewResult={(s) => { setActiveStepType(s.stepType); mutate() }}
-        onOpenAssetLibrary={(s) => { window.location.href = `/project/${params.id}/assets` }}
-        onLocateStep={(t) => {
-          setActiveStepType(t)
-          workbenchRef.current?.configure()
-        }}
-        onOpenWorkbench={() => workbenchRef.current?.open()}
-      />
-      <WorkflowInspectorDrawerWrapper
+        onLocateStep={(t) => setActiveStepType(t)}
+      />}
+      {canEditCurrentStep && <WorkflowInspectorDrawerWrapper
         ref={workbenchRef}
         projectId={params.id}
         currentStep={currentStep}
@@ -788,7 +814,8 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         executeStep={executeStep}
         refreshProject={mutate}
         showToast={setToast}
-      />
+        cancelStep={handleCancel}
+      />}
     </div>
   )
 }
@@ -801,6 +828,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
   executeStep: (stepType: string, body?: any) => Promise<any>
   refreshProject: () => Promise<any>
   showToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
+  cancelStep: (stepType: string) => Promise<boolean>
 }>(function WorkflowInspectorDrawerWrapper({
   projectId,
   currentStep,
@@ -809,6 +837,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
   executeStep,
   refreshProject,
   showToast,
+  cancelStep,
 }, ref) {
   const [isOpen, setIsOpen] = useState(false)
   const [draft, setDraft] = useState<GenerationDraft | null>(null)
@@ -816,6 +845,13 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
   const retryActionsRef = useRef(new Set<string>())
 
   const openInspector = useCallback(() => setIsOpen(true), [])
+  const closeInspector = useCallback(() => setIsOpen(false), [])
+  const cancelInspectorRun = useCallback(async () => {
+    if (!draft?.stepType || run?.status !== 'running') return
+    const cancelled = await cancelStep(draft.stepType)
+    if (!cancelled) return
+    setRun(previous => previous ? { ...previous, status: 'interrupted', message: '用户已取消任务；副工作台仍可关闭或查看记录。', completedAt: new Date().toISOString() } : previous)
+  }, [cancelStep, draft?.stepType, run?.status])
 
   // 点击"生成/重新生成"时打开副工作台 + 构建实际参数
   const buildConfirmFromCurrentStep = useCallback(async (body?: any, overrideStepType?: string) => {
@@ -890,7 +926,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       }
     }
     const costMap: Record<string, number> = {
-      IDEATION: GENERATION_COSTS.IDEA_DIFFUSION,
+      IDEATION: GENERATION_COSTS.IDEA_AGENT_PIPELINE,
       FRAMEWORK: GENERATION_COSTS.FRAMEWORK,
       STYLE: GENERATION_COSTS.STYLE_UNIFY,
       CHARACTER: GENERATION_COSTS.CHARACTER_DESIGN,
@@ -1166,25 +1202,24 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
 
   return (
     <>
-      {/* 副工作台入口按钮 — 始终可见
-          对比度：amber-600(#d97706) on white/90 只有约 3.1:1，低于 WCAG AA 的 4.5:1，
-          加上竖排文字后在亮屏上会"发白看不清"。改用 amber-800 + 不透明底 + 深色边框。 */}
+      {/* 主入口负责打开右侧副工作台；浮动任务条只显示状态与定位。 */}
       <button
         onClick={openInspector}
-        className="fixed right-0 top-1/3 z-40 rounded-l-xl border border-r-0 border-amber-300 bg-white px-3 py-4 text-xs font-bold text-amber-800 shadow-md transition hover:bg-amber-50 hover:pr-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-        style={{ writingMode: 'vertical-rl' }}
+        className="fixed right-0 top-1/2 z-40 inline-flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-xl border border-r-0 border-amber-300 bg-stone-900 px-2.5 py-4 text-xs font-semibold text-white shadow-lg transition hover:bg-stone-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
         title="打开生成工作台"
       >
-        生成工作台
+        <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+        <span className="[writing-mode:vertical-rl]">生成与执行</span>
       </button>
       <WorkflowInspectorDrawer
         isOpen={isOpen}
         projectId={projectId}
-        onClose={() => setIsOpen(false)}
+        onClose={closeInspector}
         draft={draft}
         run={run}
         onDraftChange={setDraft}
         onSubmit={submitDraft}
+        onCancelRun={cancelInspectorRun}
         onLocateStep={(t) => { setActiveStepType(t); setIsOpen(false) }}
       />
     </>
@@ -1253,6 +1288,7 @@ function StepHeader({
   step,
   project,
   executing,
+  readOnly,
   onExecute,
   onRetry,
   onCancel,
@@ -1263,6 +1299,7 @@ function StepHeader({
   step: any
   project: any
   executing: string | null
+  readOnly?: boolean
   onExecute: () => void
   onRetry: () => void
   onCancel: () => void
@@ -1315,7 +1352,7 @@ function StepHeader({
 
         {/* 可执行且未完成：显示开始执行按钮 */}
         {/* STORYBOARD PENDING 状态且无 prompts 时不显示（入口是模式选择界面） */}
-        {!isHidden && isAvailable && step.status === 'PENDING' && !(
+        {!readOnly && !isHidden && isAvailable && step.status === 'PENDING' && !(
           step.stepType === 'STORYBOARD' && !(step.outputData?.prompts?.length > 0)
         ) && (
           <div className="flex items-center gap-2">
@@ -1352,7 +1389,7 @@ function StepHeader({
         )}
 
         {/* 处理中：显示中断按钮 */}
-        {!isHidden && step.status === 'PROCESSING' && (
+        {!readOnly && !isHidden && step.status === 'PROCESSING' && (
           <button
             onClick={onCancel}
             disabled={isExecuting && executing !== step.stepType}
@@ -1364,7 +1401,7 @@ function StepHeader({
         )}
 
         {/* 失败：显示重试按钮 */}
-        {!isHidden && step.status === 'FAILED' && (
+        {!readOnly && !isHidden && step.status === 'FAILED' && (
           <button
             onClick={onRetry}
             disabled={isExecuting}
@@ -1384,7 +1421,7 @@ function StepHeader({
         {/* 已完成：显示操作按钮 */}
         {isDone && (
           <>
-            {step.stepType === 'FRAMEWORK' && onImport && !isHidden && (
+            {!readOnly && step.stepType === 'FRAMEWORK' && onImport && !isHidden && (
               <button
                 onClick={onImport}
                 className="flex items-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
@@ -1393,7 +1430,7 @@ function StepHeader({
                 重新导入
               </button>
             )}
-            {!isHidden && (
+            {!readOnly && !isHidden && (
               <button
                 onClick={onRetry}
                 disabled={isExecuting}
@@ -1654,6 +1691,55 @@ function ProjectTagSelector({
   )
 }
 
+function BusinessGoalInput({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-stone-700">这部片要达成什么目标？</span>
+        <span className="text-xs text-stone-400">必填，AI 会自行判断任务类型</span>
+      </div>
+      <textarea
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        maxLength={2000}
+        rows={4}
+        placeholder="例如：完成某品牌官方任务，标志和产品信息不能出错；面向小红书年轻用户，讲清产品解决的问题，并形成愿意收藏和讨论的两分钟内容。"
+        className="w-full resize-y rounded-lg border border-stone-200 bg-white p-3 text-sm leading-relaxed text-stone-800 placeholder:text-stone-300 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
+      />
+      <div className="flex justify-between text-[11px] text-stone-400"><span>系统会固定执行目标分析、三路研究、三路创意、评审和归纳。</span><span>{value.length}/2000</span></div>
+      {value.length > 0 && value.trim().length < 10 && <p className="text-xs text-amber-600">请至少写 10 个字。</p>}
+    </div>
+  )
+}
+
+function CreativeAgentProgress({ run }: { run: any }) {
+  if (!run?.stages?.length) return null
+  return (
+    <div className="rounded-xl border border-stone-200 bg-stone-50/60 p-4">
+      <div className="mb-3 flex items-center justify-between"><span className="text-sm font-semibold text-stone-800">创意 Agent 执行记录</span><span className="text-xs text-stone-400">共 {run.sources?.length || 0} 个有效来源</span></div>
+      <div className="space-y-2">
+        {run.stages.map((stage: any) => (
+          <details key={stage.id} className="rounded-lg border border-stone-200 bg-white px-3 py-2">
+            <summary className="cursor-pointer list-none text-sm text-stone-700"><span className="mr-2 text-green-600">✓</span>{stage.label}<span className="ml-2 text-xs text-stone-400">{stage.summary}</span></summary>
+            <div className="mt-3 space-y-2 border-t border-stone-100 pt-3">
+              {stage.children?.map((child: any) => <div key={child.id} className="rounded bg-stone-50 p-2 text-xs text-stone-600"><span className="font-medium">{child.label}：</span>{child.summary}</div>)}
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-stone-950 p-3 text-[11px] leading-relaxed text-stone-200">{JSON.stringify(stage.output, null, 2)}</pre>
+            </div>
+          </details>
+        ))}
+      </div>
+      {run.sources?.length > 0 && <details className="mt-3 text-xs text-stone-500"><summary className="cursor-pointer">查看研究来源</summary><div className="mt-2 space-y-1">{run.sources.map((source: any) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer" className="block truncate text-blue-600 hover:underline">{source.title || source.url}</a>)}</div></details>}
+      <p className="mt-3 text-[11px] text-stone-400">候选图片只保留链接，版权状态一律视为未确认；系统不会自动下载或加入资产库。</p>
+    </div>
+  )
+}
+
 function StoryLengthSelector({
   value,
   onChange,
@@ -1729,6 +1815,10 @@ function IdeationPanel({
     step.outputData?.storyLength || 'short'
   )
   const [projectTag, setProjectTag] = useState<string>(step.outputData?.projectTag || '')
+  const [businessGoal, setBusinessGoal] = useState<string>(step.outputData?.businessGoalText || step.outputData?.businessGoal || '')
+  const [confirmingPlan, setConfirmingPlan] = useState(false)
+  const [planFeedback, setPlanFeedback] = useState('')
+  const [revisingPlan, setRevisingPlan] = useState(false)
   const [savingTag, setSavingTag] = useState(false)
   // 工作指令.txt（2026-06-02）：创意输入区域
   const [creativeInput, setCreativeInput] = useState<string>(project.rawIdea || '')
@@ -1755,6 +1845,7 @@ function IdeationPanel({
   const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
   const tagSaveRef = useRef<NodeJS.Timeout | null>(null)
+  const businessGoalSaveRef = useRef<NodeJS.Timeout | null>(null)
   const inputSaveRef = useRef<NodeJS.Timeout | null>(null)
   const isExecuting = executing === step.stepType
   const directions = step.outputData?.directions || []
@@ -1794,6 +1885,13 @@ function IdeationPanel({
       setProjectTag(step.outputData.projectTag || '')
     }
   }, [step.outputData?.projectTag])
+
+  useEffect(() => {
+    const savedGoal = step.outputData?.businessGoalText || step.outputData?.businessGoal
+    if (savedGoal !== undefined && savedGoal !== businessGoal) {
+      setBusinessGoal(savedGoal || '')
+    }
+  }, [step.outputData?.businessGoalText, step.outputData?.businessGoal])
 
   function handleUpdateDirection(index: number, field: 'title' | 'description', value: string) {
     const newDirections = [...localDirections]
@@ -2335,13 +2433,40 @@ function IdeationPanel({
     }, 300)
   }
 
+  async function saveBusinessGoal(key: string) {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/steps/ideation`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ businessGoalText: key }),
+      })
+      if (!res.ok) throw new Error('保存失败')
+      await mutate()
+    } catch (e: any) {
+      console.error('[TEXT-EDIT-IDEATION] 保存 businessGoal 失败:', e.message)
+      setBusinessGoal(step.outputData?.businessGoal || '')
+    }
+  }
+
+  function handleBusinessGoalChange(key: string) {
+    setBusinessGoal(key)
+    if (businessGoalSaveRef.current) clearTimeout(businessGoalSaveRef.current)
+    if (key.trim().length < 10) return
+    businessGoalSaveRef.current = setTimeout(() => saveBusinessGoal(key), 300)
+  }
+
   async function handleResetIdeation() {
     if (!confirm('确定要重新进行创意扩散吗？这将清除当前的所有创意方向。')) return
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/ideation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: true }),
+        body: JSON.stringify({
+          force: true,
+          creativeInput: creativeInput.trim(),
+          projectTag: projectTag || undefined,
+          businessGoalText: businessGoal || undefined,
+        }),
       })
       const data = await res.json()
       if (!res.ok || data.error) {
@@ -2521,7 +2646,7 @@ function IdeationPanel({
   )
 
   if (step.status === 'PENDING') {
-    const canGenerate = creativeInput.trim().length >= 10
+    const canGenerate = creativeInput.trim().length >= 10 && businessGoal.trim().length >= 10
     const isImportedFramework = project.frameworkSource === 'imported' || project.frameworkSource === 'mixed'
     return (
       <div className="space-y-6">
@@ -2625,12 +2750,17 @@ function IdeationPanel({
           )}
         </div>
 
+        <BusinessGoalInput value={businessGoal} onChange={handleBusinessGoalChange} />
         <ProjectTagSelector value={projectTag} onChange={handleProjectTagChange} />
 
         <div className="flex justify-center">
           <div className="relative inline-block">
             <button
-              onClick={() => onExecute('IDEATION', { creativeInput: creativeInput.trim(), projectTag: projectTag || undefined })}
+              onClick={() => onExecute('IDEATION', {
+                creativeInput: creativeInput.trim(),
+                projectTag: projectTag || undefined,
+                businessGoalText: businessGoal,
+              })}
               disabled={isExecuting || !canGenerate}
               className="flex items-center gap-2 rounded-lg bg-stone-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -2646,7 +2776,7 @@ function IdeationPanel({
                 </>
               )}
             </button>
-            <CostBadge cost={DEFAULT_GENERATE_COST} />
+            <CostBadge cost={GENERATION_COSTS.IDEA_AGENT_PIPELINE} />
           </div>
         </div>
         {previewModal}
@@ -2702,7 +2832,62 @@ function IdeationPanel({
         </div>
 
         <StoryLengthSelector value={localStoryLength} onChange={handleStoryLengthChange} />
+        <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+          <p className="text-xs font-medium text-stone-500">本次视频目标</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-stone-800">{businessGoal}</p>
+          <p className="mt-2 text-[11px] text-stone-400">如需改目标，请使用“重新创意扩散”，避免旧研究结论与新目标混用。</p>
+        </div>
         <ProjectTagSelector value={projectTag} onChange={handleProjectTagChange} />
+        <CreativeAgentProgress run={step.outputData?.agentRun} />
+        {step.outputData?.agentRun && !readOnly && (
+          <div className="rounded-lg border border-stone-200 bg-white p-4">
+            <label className="text-sm font-medium text-stone-800">对完整方案提出修改意见</label>
+            <p className="mt-1 text-xs text-stone-500">只会调用一个修订 Agent，不会重跑联网研究和前面的多 Agent 流程。</p>
+            <textarea
+              value={planFeedback}
+              onChange={event => setPlanFeedback(event.target.value)}
+              maxLength={2000}
+              rows={3}
+              placeholder="例如：保留开场和事实约束，但把主角改成产品本身，并降低搞笑元素。"
+              className="mt-3 w-full resize-y rounded-lg border border-stone-200 p-3 text-sm focus:border-amber-400 focus:outline-none"
+            />
+            <button
+              type="button"
+              disabled={revisingPlan || planFeedback.trim().length < 2}
+              onClick={async () => {
+                setRevisingPlan(true)
+                try {
+                  const response = await fetch(`/api/projects/${projectId}/steps/ideation/creative-plan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback: planFeedback.trim() }) })
+                  const payload = await response.json().catch(() => ({}))
+                  if (!response.ok) throw new Error(payload.message || '方案修改失败')
+                  setPlanFeedback('')
+                  await mutate()
+                } catch (error: any) { onError(error.message || '方案修改失败') } finally { setRevisingPlan(false) }
+              }}
+              className="mt-2 rounded-md border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 disabled:opacity-50"
+            >{revisingPlan ? '修改中…' : '生成修改后的方案'}</button>
+          </div>
+        )}
+        {step.outputData?.agentRun && !step.outputData?.creativePlanConfirmed && !readOnly && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-medium text-amber-900">请先展开“归纳方案”审核完整创作方案。</p>
+            <p className="mt-1 text-xs text-amber-700">确认后才可以进入框架搭建；确认不会自动生成下一步。</p>
+            <button
+              type="button"
+              disabled={confirmingPlan}
+              onClick={async () => {
+                setConfirmingPlan(true)
+                try {
+                  const response = await fetch(`/api/projects/${projectId}/steps/ideation`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmCreativePlan: true }) })
+                  const payload = await response.json().catch(() => ({}))
+                  if (!response.ok) throw new Error(payload.message || '确认失败')
+                  await mutate()
+                } catch (error: any) { onError(error.message || '确认失败') } finally { setConfirmingPlan(false) }
+              }}
+              className="mt-3 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >{confirmingPlan ? '确认中…' : '确认完整创作方案'}</button>
+          </div>
+        )}
         <p className="text-sm text-stone-600">已生成的创意方向（点击卡片选择）：</p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {displayDirections.map((d: any, idx: number) => (
@@ -2742,7 +2927,7 @@ function IdeationPanel({
             <div className="relative inline-block">
               <button
                 onClick={() => onExecute('FRAMEWORK', { directionIndex: selectedIdx })}
-                disabled={isExecuting}
+                disabled={isExecuting || (Boolean(step.outputData?.agentRun) && step.outputData?.creativePlanConfirmed !== true)}
                 className="flex items-center gap-2 rounded-lg bg-amber-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
               >
                 {isExecuting ? (
@@ -3081,12 +3266,14 @@ function ReadOrEdit({
   onSave,
   className,
   placeholder,
+  aiEdit,
 }: {
   readOnly?: boolean
   value: string
   onSave: (val: string) => void
   className?: string
   placeholder?: string
+  aiEdit?: { projectId: string; path: string; onApplied: () => Promise<any> }
 }) {
   if (readOnly) {
     return (
@@ -3094,6 +3281,9 @@ function ReadOrEdit({
         {value || <span className="text-stone-400">{placeholder}</span>}
       </p>
     )
+  }
+  if (aiEdit) {
+    return <FrameworkInlineTextEditor projectId={aiEdit.projectId} path={aiEdit.path} value={value} onSave={onSave} onApplied={aiEdit.onApplied} className={className} placeholder={placeholder} />
   }
   return (
     <ClickToEdit
@@ -3305,6 +3495,7 @@ function FrameworkPanel({
         )}
         <ReadOrEdit
           readOnly={readOnly}
+          aiEdit={{ projectId, path: '/inspiration', onApplied: mutate }}
           value={localOutput.inspiration || ''}
           onSave={(newVal) => updateField('inspiration', newVal)}
           className="text-sm leading-relaxed text-stone-700"
@@ -3315,6 +3506,7 @@ function FrameworkPanel({
       <CollapsibleSection title="背景设定" defaultOpen>
         <ReadOrEdit
           readOnly={readOnly}
+          aiEdit={{ projectId, path: '/background', onApplied: mutate }}
           value={localOutput.background || ''}
           onSave={(newVal) => updateField('background', newVal)}
           className="text-sm leading-relaxed text-stone-700"
@@ -3329,6 +3521,7 @@ function FrameworkPanel({
             <div className="flex-1 min-w-0 flex flex-col justify-center">
               <ReadOrEdit
                 readOnly={readOnly}
+                aiEdit={{ projectId, path: localOutput.visualStyle !== undefined ? '/visualStyle' : '/styleGuide', onApplied: mutate }}
                 value={localOutput.visualStyle || localOutput.styleGuide || ''}
                 onSave={(newVal) => updateField('visualStyle', newVal)}
                 className="text-sm leading-relaxed text-stone-700"
@@ -3352,6 +3545,7 @@ function FrameworkPanel({
         ) : (
           <ReadOrEdit
             readOnly={readOnly}
+            aiEdit={{ projectId, path: localOutput.visualStyle !== undefined ? '/visualStyle' : '/styleGuide', onApplied: mutate }}
             value={localOutput.visualStyle || localOutput.styleGuide || ''}
             onSave={(newVal) => updateField('visualStyle', newVal)}
             className="text-sm leading-relaxed text-stone-700"
@@ -3376,6 +3570,7 @@ function FrameworkPanel({
                   </span>
                   <ReadOrEdit
                     readOnly={readOnly}
+                    aiEdit={{ projectId, path: `/characters/${ci}/name`, onApplied: mutate }}
                     value={c.name || ''}
                     onSave={(newVal) => updateCharacter(ci, { name: newVal })}
                     className="font-medium text-stone-800"
@@ -3383,6 +3578,7 @@ function FrameworkPanel({
                   />
                   <ReadOrEdit
                     readOnly={readOnly}
+                    aiEdit={{ projectId, path: `/characters/${ci}/role`, onApplied: mutate }}
                     value={c.role || ''}
                     onSave={(newVal) => updateCharacter(ci, { role: newVal })}
                     className="text-xs text-stone-500"
@@ -3399,6 +3595,7 @@ function FrameworkPanel({
                       <span className="text-xs text-stone-400">基础设定</span>
                       <ReadOrEdit
                         readOnly={readOnly}
+                        aiEdit={{ projectId, path: `/characters/${ci}/description`, onApplied: mutate }}
                         value={c.description || ''}
                         onSave={(newVal) => {
                           const newChars = [...localOutput.characters]
@@ -3437,6 +3634,7 @@ function FrameworkPanel({
                             <span className="text-xs text-stone-400">形象外貌</span>
                             <ReadOrEdit
                               readOnly={readOnly}
+                              aiEdit={{ projectId, path: `/characters/${ci}/deepened/appearance`, onApplied: mutate }}
                               value={formatFrameworkText(c.deepened.appearance)}
                               onSave={(newVal) => updateCharacterDeepened(ci, 'appearance', newVal)}
                               className="text-sm text-stone-600"
@@ -3449,6 +3647,7 @@ function FrameworkPanel({
                             <span className="text-xs text-stone-400">性格深度</span>
                             <ReadOrEdit
                               readOnly={readOnly}
+                              aiEdit={{ projectId, path: `/characters/${ci}/deepened/personality`, onApplied: mutate }}
                               value={formatFrameworkText(c.deepened.personality)}
                               onSave={(newVal) => updateCharacterDeepened(ci, 'personality', newVal)}
                               className="text-sm text-stone-600"
@@ -3461,6 +3660,7 @@ function FrameworkPanel({
                             <span className="text-xs text-stone-400">口头禅</span>
                             <ReadOrEdit
                               readOnly={readOnly}
+                              aiEdit={{ projectId, path: `/characters/${ci}/deepened/catchphrase`, onApplied: mutate }}
                               value={formatFrameworkText(c.deepened.catchphrase)}
                               onSave={(newVal) => updateCharacterDeepened(ci, 'catchphrase', newVal)}
                               className="text-sm font-medium text-amber-700"
@@ -3477,6 +3677,7 @@ function FrameworkPanel({
                                   <span className="shrink-0 rounded bg-stone-200 px-1.5 py-0.5 text-xs text-stone-600">{target}</span>
                                   <ReadOrEdit
                                     readOnly={readOnly}
+                                    aiEdit={{ projectId, path: `/characters/${ci}/deepened/attitudes/${encodeURIComponent(target)}`, onApplied: mutate }}
                                     value={formatFrameworkText(attitude)}
                                     onSave={(newVal) => updateCharacterAttitude(ci, target, newVal)}
                                     className="min-w-0 flex-1 text-stone-600"
@@ -3492,6 +3693,7 @@ function FrameworkPanel({
                             <span className="text-xs text-stone-400">记忆点</span>
                             <ReadOrEdit
                               readOnly={readOnly}
+                              aiEdit={{ projectId, path: `/characters/${ci}/deepened/memoryPoints`, onApplied: mutate }}
                               value={formatFrameworkText(c.deepened.memoryPoints)}
                               onSave={(newVal) => updateCharacterDeepened(ci, 'memoryPoints', newVal)}
                               className="text-sm font-medium text-stone-700"
@@ -3546,6 +3748,7 @@ function FrameworkPanel({
         ) : (
           <ReadOrEdit
             readOnly={readOnly}
+            aiEdit={{ projectId, path: '/synopsis', onApplied: mutate }}
             value={localOutput.synopsis || ''}
             onSave={(newVal) => updateField('synopsis', newVal)}
             className="text-sm leading-relaxed text-stone-700"
@@ -3579,6 +3782,7 @@ function FrameworkPanel({
                 <span className="text-xs text-stone-400">原始简述</span>
                 <ReadOrEdit
                   readOnly={readOnly}
+                  aiEdit={{ projectId, path: `/acts/${ai}/content`, onApplied: mutate }}
                   value={act.content || ''}
                   onSave={(newVal) => {
                     const newActs = [...localOutput.acts]
@@ -3606,6 +3810,7 @@ function FrameworkPanel({
                     <div className="min-w-0 flex-1">
                       <ReadOrEdit
                         readOnly={readOnly}
+                        aiEdit={{ projectId, path: `/acts/${ai}/keyScenes/${si}`, onApplied: mutate }}
                         value={s || ''}
                         onSave={(newVal) => {
                           const newActs = [...localOutput.acts]
@@ -3688,6 +3893,7 @@ function FrameworkPanel({
                   <div className="mt-2">
                     <ReadOrEdit
                       readOnly={readOnly}
+                      aiEdit={{ projectId, path: `/environments/${ei}`, onApplied: mutate }}
                       value={String(env)}
                       onSave={(newVal) => {
                         const newEnvs = [...(localOutput.environments || [])]
@@ -3721,6 +3927,7 @@ function FrameworkPanel({
       <CollapsibleSection title="整体节奏策略">
         <ReadOrEdit
           readOnly={readOnly}
+          aiEdit={{ projectId, path: '/overallPacing', onApplied: mutate }}
           value={localOutput.overallPacing || ''}
           onSave={(newVal) => updateField('overallPacing', newVal)}
           className="text-sm leading-relaxed text-stone-700"
@@ -3734,6 +3941,7 @@ function FrameworkPanel({
             <span className="text-xs text-stone-400">分档</span>
             <ReadOrEdit
               readOnly={readOnly}
+              aiEdit={{ projectId, path: '/storyLength', onApplied: mutate }}
               value={localOutput.storyLength || ''}
               onSave={(newVal) => updateField('storyLength', newVal)}
               className="text-sm text-stone-700"
@@ -3744,6 +3952,7 @@ function FrameworkPanel({
             <span className="text-xs text-stone-400">预估总时长</span>
             <ReadOrEdit
               readOnly={readOnly}
+              aiEdit={{ projectId, path: '/totalDuration', onApplied: mutate }}
               value={localOutput.totalDuration || ''}
               onSave={(newVal) => updateField('totalDuration', newVal)}
               className="text-sm text-stone-700"
@@ -3818,7 +4027,7 @@ function StylePanel({
         defaultRatio={defaultRatio}
         defaultModel={defaultModel}
         onConfirm={(ratio, model) => onExecute('STYLE', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
-        onRegeneratePrompts={() => onExecute('STYLE', { action: 'generate-prompts' })}
+        onRegeneratePrompts={(model) => onExecute('STYLE', { action: 'generate-prompts', imageModel: model })}
         isExecuting={isExecuting}
         editable={!readOnly}
         projectId={project.id}
@@ -4395,7 +4604,7 @@ function PromptPreviewWithRatio({
   defaultRatio: string
   defaultModel: string
   onConfirm: (ratio: string, model: string) => void
-  onRegeneratePrompts: () => void
+  onRegeneratePrompts: (model: string) => void
   isExecuting: boolean
   editable?: boolean
   projectId?: string
@@ -4410,7 +4619,7 @@ function PromptPreviewWithRatio({
       title={title}
       stepLabel={stepLabel}
       onConfirm={() => onConfirm(selectedRatio, selectedModel)}
-      onRegeneratePrompts={onRegeneratePrompts}
+      onRegeneratePrompts={() => onRegeneratePrompts(selectedModel)}
       isExecuting={isExecuting}
       aspectRatio={selectedRatio}
       onAspectRatioChange={setSelectedRatio}
@@ -4725,7 +4934,7 @@ function CharacterPanel({
         defaultRatio={defaultRatio}
         defaultModel={defaultModel}
         onConfirm={(ratio, model) => onExecute('CHARACTER', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
-        onRegeneratePrompts={() => onExecute('CHARACTER', { action: 'generate-prompts' })}
+        onRegeneratePrompts={(model) => onExecute('CHARACTER', { action: 'generate-prompts', imageModel: model })}
         isExecuting={isExecuting}
         editable={!readOnly}
         projectId={projectId}
@@ -5171,7 +5380,7 @@ function ConceptPanel({
           // 发送全部 202 请求 + 轮询
           startGeneration(step.outputData.prompts.length, ratio, model)
         }}
-        onRegeneratePrompts={() => onExecute('CONCEPT', { action: 'generate-prompts' })}
+        onRegeneratePrompts={(model) => onExecute('CONCEPT', { action: 'generate-prompts', imageModel: model })}
         isExecuting={isExecuting}
         editable={!readOnly}
         projectId={projectId}
@@ -6530,7 +6739,7 @@ function KeyframesPanel({
           defaultRatio={kfDefaultRatio}
           defaultModel={kfDefaultModel}
           onConfirm={(ratio, model) => onExecute('KEYFRAMES', { action: 'generate-images', aspectRatio: ratio, imageModel: model })}
-          onRegeneratePrompts={() => onExecute('KEYFRAMES', { action: 'generate-prompts' })}
+          onRegeneratePrompts={(model) => onExecute('KEYFRAMES', { action: 'generate-prompts', imageModel: model })}
           isExecuting={isExecuting}
           editable={!readOnly}
           projectId={projectId}

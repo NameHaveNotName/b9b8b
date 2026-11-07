@@ -11,9 +11,16 @@ import { prisma } from './prisma'
 import { generateText, generateVideoFromImage, generateDirectVideo as generateDirectVideoOpenLux } from './api-clients/openlux'
 import { loadPromptTemplate, extractJsonFromMarkdown } from './prompts'
 import { getTextClient } from './api-clients'
-import { TEXT_MODELS, VIDEO_MODELS } from './models-config'
+import {
+  TEXT_MODELS,
+  VIDEO_MODELS,
+  getPromptLanguageInstruction,
+  resolveDurationForModel,
+  resolveVideoModelForShot,
+} from './models-config'
 import { uploadFile, getSignedFileUrl } from './r2'
 import { generateTrailerBgm } from './bgm-generator'
+import { replaceProductionPlanFromLegacySegments } from './video-production-state'
 import { makeTempDir } from './temp-utils'
 import { safeFetch } from './ssrf-guard'
 import {
@@ -108,15 +115,16 @@ function safeExtractJson<T = any>(text: string): T | null {
   }
 }
 
-/** 为单个 shot 生成视频提示词 */
+/** 为单个 shot 生成视频提示词（对齐 pareto 动作物理链 + 分段时间轴视听脚本） */
 async function generateVideoPromptForShot(args: {
   storyBrief: string
   acts: any[]
   shot: any
   index: number
   segCount: number
+  videoModel?: string
 }): Promise<{ videoPrompt: string; cameraMotion: string; caption: string }> {
-  const { storyBrief, acts, shot, index, segCount } = args
+  const { storyBrief, acts, shot, index, segCount, videoModel } = args
   const actNum = shot.actNumber || 1
   const act = acts.find((a: any) => a?.actNumber === actNum || a?.actNo === actNum)
   const mood = act?.mood || act?.tone || 'cinematic'
@@ -125,19 +133,21 @@ async function generateVideoPromptForShot(args: {
   const duration = shot.duration || 5
 
   const promptTemplate = [
-    `基于以下影视项目信息，为第${actNum}幕第${index + 1}个场景生成一段视频生成提示词。`,
-    `该视频将作为宣传片的第${index + 1}个共${segCount}个${duration}秒片段。`,
+    `Based on the following short-film/short-drama project, write a video-generation prompt for shot ${index + 1}/${segCount} in act ${actNum}.`,
+    getPromptLanguageInstruction(videoModel || VIDEO_MODELS.direct.primary),
+    `Duration: ${duration} seconds.`,
     ``,
-    `故事梗概：${(storyBrief || '').slice(0, 400)}`,
-    `场景画面描述：${String(sceneDesc).slice(0, 500)}`,
-    `运镜方式：${cameraMove}`,
-    `场景氛围：${mood}`,
+    `Story brief: ${(storyBrief || '').slice(0, 400)}`,
+    `Shot description: ${String(sceneDesc).slice(0, 600)}`,
+    `Camera motion: ${cameraMove}`,
+    `Mood: ${mood}`,
     ``,
-    `要求：`,
-    `- 提示词必须用英文`,
-    `- 必须描述镜头运动（如 slow push-in / gentle pan / static with subtle light change / dolly forward）`,
-    `- 必须描述画面动态（如 character breathing / smoke drifting / water rippling / hair moving in wind）`,
-    `- 严格输出 JSON（不要任何额外解释）：{"videoPrompt": "英文提示词", "cameraMotion": "镜头运动描述"}`,
+    `Production SOP requirements:`,
+    `1. Start from the shot's current starting state, then describe the action physics chain in time order: starting pose → motion direction/path → contact/force point → inertia continuation → grounded ending stable state. Do NOT use abstract result words like "flies away", "fights fiercely", or "suddenly realizes" without describing the visible physical process.`,
+    `2. Use exactly ONE dominant camera movement (e.g. slow push-in to medium close-up, steady tracking rightward, locked-off static camera). State its direction and ending frame size.`,
+    `3. Split time into logical segments within the ${duration}s duration (e.g. 0-2s, 2-4s, 4-${duration}s). For each segment, describe the visible subject motion, prop interaction, facial/eye reaction, and environmental feedback.`,
+    `4. End in a natural stable state that leaves a clean cut-point for the next shot.`,
+    `5. Keep the prompt 80-160 words (中文约 150-300 字). Output ONLY JSON without markdown: {"videoPrompt": "prompt following the language instruction", "cameraMotion": "camera motion description"}`,
   ].join('\n')
 
   let txt = ''
@@ -155,7 +165,7 @@ async function generateVideoPromptForShot(args: {
   const parsed = safeExtractJson<{ videoPrompt?: string; cameraMotion?: string }>(txt)
   const videoPrompt =
     parsed?.videoPrompt ||
-    `Cinematic ${mood} shot, ${cameraMove}, subtle light shifting, atmospheric depth, 35mm film, scene: ${String(sceneDesc).slice(0, 200)}`
+    `Cinematic ${mood} shot, ${cameraMove}, clear action from starting pose through visible physical motion to a grounded stable ending state, scene: ${String(sceneDesc).slice(0, 200)}`
   const finalCameraMotion = parsed?.cameraMotion || cameraMove
 
   return { videoPrompt, cameraMotion: finalCameraMotion, caption: sceneDesc }
@@ -171,6 +181,7 @@ export async function generateSegmentPrompts(
   stepName: 'VIDEO_DIRECT' | 'VIDEO_RENDER',
   shots: any[],
   createdById?: string,
+  videoModel?: string,
 ): Promise<any[]> {
   // 读取框架数据
   const fwStep = await prisma.workflowStep.findUnique({
@@ -193,7 +204,14 @@ export async function generateSegmentPrompts(
   // 并行生成提示词
   const promptResults = await Promise.all(
     shots.map((shot, index) =>
-      generateVideoPromptForShot({ storyBrief, acts, shot, index, segCount: shots.length })
+      generateVideoPromptForShot({
+        storyBrief,
+        acts,
+        shot,
+        index,
+        segCount: shots.length,
+        videoModel: resolveVideoModelForShot(shot, videoModel),
+      })
     )
   )
 
@@ -217,18 +235,27 @@ export async function generateSegmentPrompts(
   )
 
   console.log(`[SEGMENT-PROMPTS] 生成 ${segments.length} 段提示词 stepName=${stepName}`)
+  await replaceProductionPlanFromLegacySegments({
+    projectId,
+    stepName,
+    segments,
+    shots,
+    preferredModel: videoModel,
+    createdById,
+  })
   return segments
 }
 
-/** 为单个概念图生成视频提示词 */
+/** 为单个概念图生成视频提示词（对齐 pareto 动作物理链 + 自然稳定态） */
 async function generateVideoPromptForConcept(args: {
   storyBrief: string
   acts: any[]
   conceptImage: any
   index: number
   segCount: number
+  videoModel?: string
 }): Promise<{ videoPrompt: string; cameraMotion: string; caption: string }> {
-  const { storyBrief, acts, conceptImage, index, segCount } = args
+  const { storyBrief, acts, conceptImage, index, segCount, videoModel } = args
   const meta = (conceptImage?.metadata as any) || {}
   const actNum = meta.actNumber || 1
   const sceneIndex = meta.sceneIndex || index
@@ -241,18 +268,19 @@ async function generateVideoPromptForConcept(args: {
     meta.llmPrompt || meta.prompt || conceptImage?.prompt || `Concept act${actNum} scene${sceneIndex + 1}`
 
   const promptTemplate = [
-    `基于以下影视项目信息，为第${actNum}幕第${sceneIndex + 1}张概念图生成一段视频生成提示词。`,
-    `该视频将作为宣传片的第${index + 1}个共${segCount}个${duration}秒片段。`,
+    `Based on the following short-film/short-drama project, write a video-generation prompt for concept-image ${index + 1}/${segCount} in act ${actNum}.`,
+    getPromptLanguageInstruction(videoModel || VIDEO_MODELS.trailer.primary),
+    `Duration: ${duration} seconds.`,
     ``,
-    `故事梗概：${(storyBrief || '').slice(0, 400)}`,
-    `概念图画面描述：${String(imagePrompt).slice(0, 500)}`,
-    `场景氛围：${mood}`,
+    `Story brief: ${(storyBrief || '').slice(0, 400)}`,
+    `Concept image description: ${String(imagePrompt).slice(0, 500)}`,
+    `Mood: ${mood}`,
     ``,
-    `要求：`,
-    `- 提示词必须用英文`,
-    `- 必须描述镜头运动（如 slow push-in / gentle pan / static with subtle light change / dolly forward）`,
-    `- 必须描述画面动态（如 character breathing / smoke drifting / water rippling / hair moving in wind）`,
-    `- 严格输出 JSON（不要任何额外解释）：{"videoPrompt": "英文提示词", "cameraMotion": "镜头运动描述"}`,
+    `Production SOP requirements:`,
+    `1. Start from the visible state shown in the concept image, then describe the action physics chain in time order: starting pose → motion direction/path → contact/force point → inertia continuation → grounded ending stable state.`,
+    `2. Use exactly ONE dominant camera movement and state its direction and ending frame size.`,
+    `3. Keep the action simple enough to complete in ${duration}s; end in a stable, clean cut-point.`,
+    `4. Output ONLY JSON without markdown: {"videoPrompt": "prompt following the language instruction", "cameraMotion": "camera motion description"}`,
   ].join('\n')
 
   let txt = ''
@@ -270,7 +298,7 @@ async function generateVideoPromptForConcept(args: {
   const parsed = safeExtractJson<{ videoPrompt?: string; cameraMotion?: string }>(txt)
   const videoPrompt =
     parsed?.videoPrompt ||
-    `Cinematic ${mood} shot, slow push-in, subtle light shifting, atmospheric depth, 35mm film, scene: ${String(imagePrompt).slice(0, 200)}`
+    `Cinematic ${mood} shot, slow push-in, clear action from starting state to grounded stable ending state, scene: ${String(imagePrompt).slice(0, 200)}`
   const finalCameraMotion = parsed?.cameraMotion || 'slow push-in'
 
   return { videoPrompt, cameraMotion: finalCameraMotion, caption: imagePrompt }
@@ -286,6 +314,7 @@ export async function generateConceptSegmentPrompts(
   stepName: 'TRAILER',
   conceptImages: any[],
   createdById?: string,
+  videoModel?: string,
 ): Promise<any[]> {
   // 读取框架数据
   const fwStep = await prisma.workflowStep.findUnique({
@@ -307,7 +336,7 @@ export async function generateConceptSegmentPrompts(
   // 并行生成提示词
   const promptResults = await Promise.all(
     conceptImages.map((conceptImage, index) =>
-      generateVideoPromptForConcept({ storyBrief, acts, conceptImage, index, segCount: conceptImages.length })
+      generateVideoPromptForConcept({ storyBrief, acts, conceptImage, index, segCount: conceptImages.length, videoModel })
     )
   )
 
@@ -332,6 +361,20 @@ export async function generateConceptSegmentPrompts(
     })
   )
 
+  await replaceProductionPlanFromLegacySegments({
+    projectId,
+    stepName,
+    segments,
+    shots: conceptImages.map((image, index) => ({
+      shotId: image.id || `concept_${index + 1}`,
+      sequence: index,
+      duration: 5,
+      description: image.prompt || image.description || '',
+    })),
+    preferredModel: videoModel,
+    createdById,
+  })
+
   console.log(`[CONCEPT-SEGMENT-PROMPTS] 生成 ${segments.length} 段提示词 stepName=${stepName}`)
   return segments
 }
@@ -342,48 +385,27 @@ interface FinalVideoPromptResult {
 }
 
 /**
- * 强制让 videoPrompt 里保留配音文案原文。
- * LLM 有时会把中文台词翻译成英文，或自己改写中文，导致 lip-sync 节奏不匹配中文配音。
- * 后处理规则：把 prompt 中被引号包围、且含中文/英文的台词文本强制替换为原文。
+ * 配音文案与视频提示词解耦。
+ * 不再把中文台词原文硬塞进英文 videoPrompt（这会污染多模态视频模型，导致乱码字幕或语义混乱）。
+ * 现在只保留一个元数据标记，方便后续 TTS 配音轨按时间码独立合成；视频 Prompt 只描述与情绪匹配的说话表演。
  */
 export function enforceOriginalVoiceover(videoPrompt: string, voiceoverText: string): string {
-  if (!videoPrompt || !voiceoverText) return videoPrompt
-  const hasChinese = /[\u4e00-\u9fa5]/.test(voiceoverText)
-  if (!hasChinese) return videoPrompt
-  // 已经包含原文，无需处理
-  if (videoPrompt.includes(voiceoverText)) return videoPrompt
-
-  // 替换被引号包围的台词文本（无论中英文），强制使用原文
-  const quotePatterns = [
-    /"([^"]{6,})"/g,
-    /“([^”]{6,})”/g,
-  ]
-  let replaced = false
-  for (const pattern of quotePatterns) {
-    videoPrompt = videoPrompt.replace(pattern, (match, quoted) => {
-      if (replaced) return match
-      replaced = true
-      return `"${voiceoverText}"`
-    })
-  }
-
-  // 如果没找到可替换的引号内容，在末尾追加原文
-  if (!replaced && !videoPrompt.includes(voiceoverText)) {
-    videoPrompt += ` The spoken line in Mandarin Chinese is: "${voiceoverText}".`
-  }
-
+  // 已废弃：不再向英文 videoPrompt 注入中文台词原文。
+  // 如需调试，可在日志中保留；返回原 prompt 不做修改。
   return videoPrompt
 }
 
 /**
- * 为单个 VideoSegment 生成最终的英文 videoPrompt。
+ * 为单个 VideoSegment 生成最终的 videoPrompt。
  * 综合：分镜描述、首帧/尾帧 imagePrompt、actionChange、配音文案。
+ * videoModel 决定提示词用中文还是英文撰写（语言指令注入模板）。
  * 尽力而为：如果 LLM 失败，返回原来的 prompt。
  */
 export async function buildFinalVideoPrompt(
   projectId: string,
   stepName: string,
-  segment: any
+  segment: any,
+  videoModel?: string
 ): Promise<FinalVideoPromptResult> {
   const originalPrompt = segment.prompt || ''
   const shotId = segment.shotId
@@ -434,6 +456,7 @@ export async function buildFinalVideoPrompt(
       ACTION_CHANGE: resultActionChange || '（无）',
       VOICEOVER_TEXT: voiceoverText || '（无）',
       SPEAKER: speaker || '（无）',
+      LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(videoModel || VIDEO_MODELS.direct.primary),
     })
 
     const textClient = await getTextClient()
@@ -481,7 +504,11 @@ export async function generateOneVideoSegment(args: {
     let lastFrameUrlFromContext: string | null = null
     const segment = await prisma.videoSegment.findUnique({ where: { id: segmentId } })
     if (segment) {
-      const ctxResult = await buildFinalVideoPrompt(projectId, stepName, segment)
+      // 与实际生图分支保持同一模型口径：trailer 走 trailer.primary，直生走 videoModel/默认
+      const promptVideoModel = isTrailer
+        ? ((VIDEO_MODELS as any).trailer?.primary || VIDEO_MODELS.direct.primary)
+        : (videoModel || VIDEO_MODELS.direct.primary)
+      const ctxResult = await buildFinalVideoPrompt(projectId, stepName, segment, promptVideoModel)
       finalPrompt = ctxResult.videoPrompt
       lastFrameUrlFromContext = ctxResult.lastFrameUrl
     }
@@ -544,7 +571,10 @@ export async function generateOneVideoSegment(args: {
 
     if (isDirect) {
       // Direct: 首尾帧视频生成（复用 OpenLux 直生视频）
-      const modelId = videoModel || VIDEO_MODELS.direct.primary
+      // 路由层通常已经把 auto 解析为具体模型；这里仍做一次防御性解析，
+      // 避免客户端直接传 auto 导致把占位符发给供应商。
+      const modelId = resolveVideoModelForShot(segment || {}, videoModel)
+      const resolvedDuration = resolveDurationForModel(modelId, duration)
       const firstFrameForVideo = await ensureVideoFrameResolution(imageUrl, projectId)
       const lastFrameForVideo = lastFrameUrlFromContext
         ? await ensureVideoFrameResolution(lastFrameUrlFromContext, projectId)
@@ -556,7 +586,7 @@ export async function generateOneVideoSegment(args: {
           prompt: finalPrompt || 'A cinematic shot with smooth camera motion',
           model: modelId,
           aspectRatio: segmentAspectRatio || '16:9',
-          duration,
+          duration: resolvedDuration,
           pollTimeoutSec: 300,
           pollIntervalMs: 5000,
         })
@@ -570,7 +600,7 @@ export async function generateOneVideoSegment(args: {
         await uploadFile(storageKey, buf, 'video/mp4')
         const url = await getSignedFileUrl(storageKey)
         await removeDir(tempDir)
-        return { storageKey, url, duration: 5, isMock: false }
+        return { storageKey, url, duration: resolvedDuration, isMock: false }
       } catch (err: any) {
         console.warn(`[SEGMENT ${segmentId}] Direct 真实 API 失败，回退 ffmpeg: ${err?.message?.slice(0, 200)}`)
       }
@@ -579,13 +609,13 @@ export async function generateOneVideoSegment(args: {
       const segPath = path.join(tempDir, 'segment.mp4')
       const imgPath = path.join(tempDir, 'input.png')
       await downloadUrlToTemp(imageUrl, imgPath)
-      await kenBurnsClipFromImage(imgPath, segPath, duration)
+      await kenBurnsClipFromImage(imgPath, segPath, resolvedDuration)
       const buf = await fsPromises.readFile(segPath)
       const storageKey = `projects/${projectId}/segments/${segmentId}.mp4`
       await uploadFile(storageKey, buf, 'video/mp4')
       const url = await getSignedFileUrl(storageKey)
       await removeDir(tempDir)
-      return { storageKey, url, duration, isMock: true }
+      return { storageKey, url, duration: resolvedDuration, isMock: true }
     }
 
     throw new Error(`Unknown stepName: ${stepName}`)

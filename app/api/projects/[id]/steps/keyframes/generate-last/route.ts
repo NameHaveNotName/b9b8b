@@ -15,6 +15,7 @@ import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { mergeStepOutputData } from '@/lib/workflow-executor'
 import { GENERATION_COSTS } from '@/lib/points-config'
 import { refreshShotsUrls } from '@/lib/resolve-media-url'
+import { IMAGE_MODELS, getPromptLanguageInstruction } from '@/lib/models-config'
 
 /**
  * 单条尾帧生成 API
@@ -35,7 +36,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'KEYFRAMES' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -105,7 +106,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     try {
       const ref = await getStyleRefUrl(params.id)
       styleRefUrl = ref.styleRefUrl
-      stylePrompt = ref.stylePrompt || 'cinematic film still, 35mm Kodak Portra 400, soft grain, atmospheric depth, 8K'
+      stylePrompt = ref.stylePrompt || 'high-quality cinematic visual style, coherent lighting and color palette, clean sharp details'
     } catch (refErr: any) {
       console.error('[KEYFRAMES-GENERATE-LAST] 风格参考获取失败:', refErr?.message)
       return NextResponse.json(
@@ -114,17 +115,31 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       )
     }
 
-    // 生成尾帧图像提示词
+    // 生成尾帧图像提示词：读取分镜首帧提示词，让尾帧基于首帧画面真实内容演进
     const textClient = await getTextClient()
     const glRefs = await getProjectReferences(params.id).catch(() => [])
     const glRefLabels = glRefs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
     const glRefHint = glRefs.length > 0
-      ? `\n【参考图】${glRefs.length} 张用户参考图${glRefLabels.length > 0 ? `（标签：${glRefLabels.join('、')}）` : ''}。生成 imagePrompt 时可直接引用参考图中的人物。`
+      ? `\n【参考图】${glRefs.length} 张用户参考图${glRefLabels.length > 0 ? `（标签：${glRefLabels.join('、')}）` : ''}。尾帧需保持与参考图一致的角色外观与服装颜色分区。`
       : ''
+
+    const storyboardStepForPrompt = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } }
+    })
+    const firstFramePrompt = ((storyboardStepForPrompt?.outputData as any)?.shotPrompts || [] as any[])
+      .find((sp: any) => sp?.shotId === shot.shotId)?.prompt || ''
+
+    const userInputBlock = [
+      `分镜描述：${shot.description || `${shot.shotId} - ${shot.sceneName || ''}`}`,
+      firstFramePrompt ? `首帧画面提示词（必须继承其中的角色身份、服装、空间结构与光线方向）：${firstFramePrompt}` : '',
+      glRefHint,
+    ].filter(Boolean).join('\n\n')
 
     const promptTemplate = loadPromptTemplate('keyframe-last', {
       STYLE_REF: stylePrompt,
-      USER_INPUT: (shot.description || `${shot.shotId} - ${shot.sceneName || ''}`) + glRefHint,
+      USER_INPUT: userInputBlock,
+      // 生图调用固定走 IMAGE_MODELS.primary（generateKeyframe 未传 imageModel），语言跟随该模型
+      LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(IMAGE_MODELS.primary),
     })
     const generatedPrompt = await textClient.generate(promptTemplate, { temperature: 0.7, maxTokens: 1024 })
     const parsed = extractJsonFromMarkdown(generatedPrompt)

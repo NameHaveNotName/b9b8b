@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils'
 import { ASPECT_RATIO_OPTIONS } from '@/lib/models-config'
 import CostBadge from '@/components/CostBadge'
 import { GENERATION_COSTS } from '@/lib/points-config'
+import GenerationStrategyPreviewCard from './GenerationStrategyPreviewCard'
+import VideoQualityReviewCard from './VideoQualityReviewCard'
 
 /** 合成看门狗：超过这个时间仍拿不到 combinedVideoUrl 就认为合成失败 */
 const COMPOSE_WATCHDOG_MS = 8 * 60 * 1000
@@ -397,6 +399,12 @@ export default function TrailerPanel({
     return (
       <div className="flex flex-col h-[calc(100vh-8rem)]">
         {errorBanner}
+        <div className="shrink-0 pb-4">
+          <GenerationStrategyPreviewCard projectId={projectId} stepName="TRAILER" />
+        </div>
+        <div className="shrink-0 pb-4">
+          <VideoQualityReviewCard projectId={projectId} stepName="TRAILER" />
+        </div>
         {/* 上半部分：操作区 */}
         <div className="shrink-0 flex items-center justify-between pb-4">
           <div>

@@ -11,6 +11,7 @@ import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { getImageGenerationCost } from '@/lib/points-config'
 import { ASSET_LIBRARY_TEMPLATES, buildAssetPromptInstruction, getAssetTemplate } from '@/lib/asset-library'
 import { createUserAssetWithInitialRevision, hashAssetContent } from '@/lib/user-asset-revisions'
+import { assertAssetCandidateCapabilityConfigured, issueAssetCandidateToken } from '@/lib/asset-candidate-capability'
 
 function parseKind(value: unknown) {
   return value === 'CHARACTER' || value === 'ENVIRONMENT' ? value : null
@@ -97,6 +98,8 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  if (!saveToLibrary) assertAssetCandidateCapabilityConfigured()
+
   const points = await checkPoints(getImageGenerationCost(imageModel), undefined, 'generation.user_asset', 'IMAGE')
   if (!points.ok) {
     return NextResponse.json({ error: 'POINTS_001', message: `点数不足，需要 ${points.cost} 点` }, { status: 402 })
@@ -142,6 +145,7 @@ export async function POST(req: NextRequest) {
           templateId: template.id,
           mimeType: 'image/png',
           storageKey,
+          candidateToken: issueAssetCandidateToken({ userId, storageKey }),
           url,
           metadata: { templateName: template.name, referenceAssetIds, referenceImages, model, aspectRatio: requestedAspectRatio, quality: 'medium', revisedPrompt },
         },

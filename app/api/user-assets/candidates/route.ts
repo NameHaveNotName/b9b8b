@@ -5,18 +5,26 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { prisma } from '@/lib/prisma'
 import { deleteFile, getSignedFileUrl } from '@/lib/r2'
 import { createUserAssetWithInitialRevision } from '@/lib/user-asset-revisions'
+import { verifyAssetCandidateToken } from '@/lib/asset-candidate-capability'
+import { assertSafeStorageKey } from '@/lib/storage-key'
 
 const KINDS = new Set(['CHARACTER', 'ENVIRONMENT', 'STYLE', 'OBJECT', 'BRAND', 'REFERENCE'])
 
 function validCandidateKey(userId: string, storageKey: unknown): storageKey is string {
-  return typeof storageKey === 'string' && storageKey.startsWith(`users/${userId}/asset-candidates/`)
+  if (typeof storageKey !== 'string') return false
+  try { assertSafeStorageKey(storageKey) } catch { return false }
+  return storageKey.startsWith(`users/${userId}/asset-candidates/`)
+}
+
+function ownsIssuedCandidate(userId: string, storageKey: string, token: unknown): boolean {
+  return verifyAssetCandidateToken({ token, userId, storageKey })
 }
 
 export async function POST(req: NextRequest) {
   const userId = await getCurrentUserId()
   if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
-  if (!validCandidateKey(userId, body.storageKey) || !KINDS.has(body.kind)) {
+  if (!validCandidateKey(userId, body.storageKey) || !ownsIssuedCandidate(userId, body.storageKey, body.candidateToken) || !KINDS.has(body.kind)) {
     return NextResponse.json({ error: 'VALIDATION_001' }, { status: 400 })
   }
   const existing = await prisma.userAsset.findFirst({ where: { userId, storageKey: body.storageKey, deletedAt: null } })
@@ -48,7 +56,9 @@ export async function DELETE(req: NextRequest) {
   const userId = await getCurrentUserId()
   if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
-  if (!validCandidateKey(userId, body.storageKey)) return NextResponse.json({ error: 'VALIDATION_001' }, { status: 400 })
-  await deleteFile(body.storageKey).catch(() => {})
+  if (!validCandidateKey(userId, body.storageKey) || !ownsIssuedCandidate(userId, body.storageKey, body.candidateToken)) {
+    return NextResponse.json({ error: 'VALIDATION_001' }, { status: 400 })
+  }
+  await deleteFile(body.storageKey)
   return NextResponse.json({ success: true })
 }

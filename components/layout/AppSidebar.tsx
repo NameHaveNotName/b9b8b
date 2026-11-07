@@ -19,6 +19,7 @@ import {
   Images,
   UsersRound,
   Mail,
+  Clapperboard,
 } from 'lucide-react'
 
 interface Project {
@@ -51,6 +52,7 @@ export default function AppSidebar({
     { href: '/dashboard', label: '仪表盘', icon: LayoutDashboard },
     { href: '/project/new', label: '新建项目', icon: PlusCircle },
     { href: '/assets', label: '全局资产库', icon: Images },
+    { href: '/series', label: '系列短剧', icon: Clapperboard },
     { href: '/groups', label: '小组项目', icon: UsersRound },
     { href: '/invitations', label: '小组邀请', icon: Mail },
   ]

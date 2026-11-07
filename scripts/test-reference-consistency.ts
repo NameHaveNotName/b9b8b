@@ -13,6 +13,7 @@
 import fs from 'fs'
 import path from 'path'
 import { loadPromptTemplate } from '@/lib/prompts'
+import { getPromptLanguageInstruction, getStylePoolPromptLanguageInstruction } from '@/lib/models-config'
 
 const RESULTS_DIR = path.join(process.cwd(), '.kimi', 'api-test-results')
 
@@ -57,6 +58,7 @@ async function main() {
   const characterPrompt = loadPromptTemplate('character', {
     USER_INPUT: JSON.stringify(SAMPLE_FRAMEWORK),
     REFERENCE_INSTRUCTIONS: REF_INSTRUCTIONS,
+    LANGUAGE_INSTRUCTION: getPromptLanguageInstruction('gpt-image-1'),
   })
   const characterPass = saveAndValidate('character_with_refs', characterPrompt, [
     { name: '包含参考图处理说明', test: p => /参考图/.test(p) },
@@ -73,6 +75,7 @@ async function main() {
     VISUAL_REFERENCES: VISUAL_REF_BLOCK,
     CHARACTERS: `【角色设定】\n- 海宝（虚拟导游）：蓝色圆润可爱型吉祥物，头顶三叉皇冠\n- 海贝（虚拟导游）：黑色齐耳短发，蓝色开衫，白色百褶裙`,
     ASPECT_RATIO: '9:16',
+    LANGUAGE_INSTRUCTION: getStylePoolPromptLanguageInstruction(),
   })
   const stylePass = saveAndValidate('style_with_refs', stylePrompt, [
     { name: '包含视觉参考图说明', test: p => /视觉参考图/.test(p) },
@@ -91,6 +94,7 @@ async function main() {
     VISUAL_REFERENCES: '【无视觉参考图】',
     CHARACTERS: '【角色设定】无具体角色',
     ASPECT_RATIO: '16:9',
+    LANGUAGE_INSTRUCTION: getStylePoolPromptLanguageInstruction(),
   })
   const styleLandscapePass = saveAndValidate('style_landscape', styleLandscapePrompt, [
     { name: '使用 16:9 横屏构图', test: p => /16:9|cinematic widescreen|horizontal frame/.test(p) },
@@ -100,6 +104,7 @@ async function main() {
   const characterNoRefPrompt = loadPromptTemplate('character', {
     USER_INPUT: JSON.stringify(SAMPLE_FRAMEWORK),
     REFERENCE_INSTRUCTIONS: '【无人物参考图】请根据 framework.characters 中的 description 生成 imagePrompt。',
+    LANGUAGE_INSTRUCTION: getPromptLanguageInstruction('gpt-image-1'),
   })
   const characterNoRefPass = saveAndValidate('character_no_refs', characterNoRefPrompt, [
     { name: '无参考图时仍可用', test: p => /无人物参考图/.test(p) },

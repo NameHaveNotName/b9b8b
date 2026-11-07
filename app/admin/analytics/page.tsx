@@ -94,6 +94,7 @@ const actionLabels: Record<string, string> = {
   "generation.concept_art": "概念图生成",
   "generation.representative": "代表画面生成",
   "generation.storyboard_prompts": "分镜提示词生成",
+  "generation.scoped_change_proposal": "局部修改草案",
   "generation.storyboard_images": "分镜占位图生成",
   "generation.storyboard_act_image": "分镜画面生成",
   "generation.storyboard": "分镜生成",

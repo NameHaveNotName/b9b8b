@@ -136,28 +136,35 @@ model VerificationToken {
 }
 
 model User {
-  id                 String               @id @default(cuid())
-  email              String               @unique
-  name               String?
-  image              String?
-  emailVerified      DateTime?
-  points             Int                  @default(0)
-  isAdmin            Boolean              @default(false)
-  adminNote          String?
-  accounts           Account[]
-  sessions           Session[]
-  projects           Project[]
-  userAssets         UserAsset[]
-  userAssetRevisions UserAssetRevision[]
-  auditLogs          AuditLog[]
-  operationLogs      OperationLog[]
-  rechargeOrders     RechargeOrder[]
-  creativeIterations CreativeIteration[]
-  groupMemberships   GroupMembership[]
-  createdGroups      Group[]              @relation("CreatedGroups")
-  invitedMemberships GroupMembership[]    @relation("InvitedBy")
-  pointTransfersOut  GroupPointTransfer[] @relation("TransferFromUser")
-  createdAt          DateTime             @default(now())
+  id                     String                 @id @default(cuid())
+  email                  String                 @unique
+  name                   String?
+  image                  String?
+  emailVerified          DateTime?
+  points                 Int                    @default(0)
+  isAdmin                Boolean                @default(false)
+  adminNote              String?
+  accounts               Account[]
+  sessions               Session[]
+  projects               Project[]
+  userAssets             UserAsset[]
+  userAssetRevisions     UserAssetRevision[]
+  auditLogs              AuditLog[]
+  operationLogs          OperationLog[]
+  rechargeOrders         RechargeOrder[]
+  creativeIterations     CreativeIteration[]
+  groupMemberships       GroupMembership[]
+  createdGroups          Group[]                @relation("CreatedGroups")
+  invitedMemberships     GroupMembership[]      @relation("InvitedBy")
+  pointTransfersOut      GroupPointTransfer[]   @relation("TransferFromUser")
+  scopedChangeProposals  ScopedChangeProposal[]
+  storySeries            StorySeries[]          @relation("SeriesOwner")
+  seriesBibleRevisions   SeriesBibleRevision[]  @relation("BibleRevisionAuthor")
+  createdSeriesAssets    SeriesAsset[]          @relation("SeriesAssetCreator")
+  seriesMemberships      SeriesMembership[]
+  requestedSeriesBatches SeriesBatchApproval[]  @relation("SeriesBatchRequester")
+  reviewedSeriesBatches  SeriesBatchApproval[]  @relation("SeriesBatchReviewer")
+  createdAt              DateTime               @default(now())
 }
 
 model UserAsset {
@@ -185,6 +192,7 @@ model UserAsset {
   updatedAt         DateTime             @updatedAt @map("updated_at")
   bindings          AssetBinding[]
   revisions         UserAssetRevision[]
+  seriesSnapshots   SeriesAsset[]
 
   @@index([userId, kind, createdAt])
   @@index([userId, deletedAt, createdAt])
@@ -209,6 +217,7 @@ model UserAssetRevision {
   parentRevisionId   String?               @map("parent_revision_id")
   createdAt          DateTime              @default(now()) @map("created_at")
   attachments        UserAssetAttachment[]
+  seriesSnapshots    SeriesAsset[]
 
   @@unique([userAssetId, revisionNumber])
   @@index([ownerId, createdAt])
@@ -266,20 +275,232 @@ model Project {
   stepEndingDone               Boolean @default(false) @map("step_ending_done") // KEYFRAMES
   stepDirectDone               Boolean @default(false) @map("step_direct_done") // VIDEO_DIRECT
 
-  steps              WorkflowStep[]
-  assets             Asset[]
-  comparisons        Comparison[]
-  creativeIterations CreativeIteration[]
-  videoSegments      VideoSegment[]
-  voiceoverSegments  VoiceoverSegment[]
-  assetBindings      AssetBinding[]
-  assetConstraints   ProjectAssetConstraint[]
+  steps                   WorkflowStep[]
+  assets                  Asset[]
+  comparisons             Comparison[]
+  creativeIterations      CreativeIteration[]
+  videoSegments           VideoSegment[]
+  videoProductionPlans    VideoProductionPlan[]
+  generationUnits         GenerationUnit[]
+  generatedClips          GeneratedClip[]
+  timelineSegments        TimelineSegment[]
+  videoQualityAssessments VideoQualityAssessment[]
+  voiceoverSegments       VoiceoverSegment[]
+  assetBindings           AssetBinding[]
+  assetConstraints        ProjectAssetConstraint[]
+  scopedChangeProposals   ScopedChangeProposal[]
+  storyEpisode            StoryEpisode?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId, status])
   @@index([groupId])
+}
+
+// 系列短剧的稳定层级。界面可隐藏只有一季的情况，但数据层始终保留 Season，
+// 避免单季作品扩展为多季时重新编号或搬迁项目。
+model StorySeries {
+  id                       String                          @id @default(cuid())
+  userId                   String                          @map("user_id")
+  user                     User                            @relation("SeriesOwner", fields: [userId], references: [id], onDelete: Cascade)
+  title                    String
+  logline                  String?                         @db.Text
+  status                   String                          @default("ACTIVE") // ACTIVE | ARCHIVED
+  currentBibleVersion      Int                             @default(1) @map("current_bible_version")
+  seasons                  StorySeason[]
+  episodes                 StoryEpisode[]
+  bibleRevisions           SeriesBibleRevision[]
+  assets                   SeriesAsset[]
+  members                  SeriesMembership[]
+  batchApprovals           SeriesBatchApproval[]
+  generationAuthorizations SeriesGenerationAuthorization[]
+  monthlyPointBudget       Int                             @default(0) @map("monthly_point_budget") // 0 = 不设上限
+  batchGenerationLimit     Int                             @default(3) @map("batch_generation_limit")
+  requireBatchApproval     Boolean                         @default(true) @map("require_batch_approval")
+  createdAt                DateTime                        @default(now()) @map("created_at")
+  updatedAt                DateTime                        @updatedAt @map("updated_at")
+
+  @@index([userId, status, updatedAt])
+  @@map("story_series")
+}
+
+// 系列负责人由 StorySeries.userId 表示；本表只保存协作者及其明确职责。
+model SeriesMembership {
+  id                 String      @id @default(cuid())
+  seriesId           String      @map("series_id")
+  series             StorySeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  userId             String      @map("user_id")
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role               String // WRITER | VISUAL | EPISODE_EDITOR | REVIEWER
+  assignedEpisodeIds Json        @default("[]") @map("assigned_episode_ids")
+  status             String      @default("ACTIVE")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  @@unique([seriesId, userId])
+  @@index([userId, status])
+  @@map("series_memberships")
+}
+
+model SeriesBatchApproval {
+  id                       String                          @id @default(cuid())
+  seriesId                 String                          @map("series_id")
+  series                   StorySeries                     @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  requestedById            String                          @map("requested_by_id")
+  requestedBy              User                            @relation("SeriesBatchRequester", fields: [requestedById], references: [id], onDelete: Cascade)
+  reviewedById             String?                         @map("reviewed_by_id")
+  reviewedBy               User?                           @relation("SeriesBatchReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  episodeIds               Json                            @map("episode_ids")
+  requestedPoints          Int                             @map("requested_points")
+  consumedPoints           Int                             @default(0) @map("consumed_points")
+  purpose                  String                          @db.Text
+  status                   String                          @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED | CONSUMED
+  decisionNote             String?                         @map("decision_note") @db.Text
+  expiresAt                DateTime?                       @map("expires_at")
+  decidedAt                DateTime?                       @map("decided_at")
+  createdAt                DateTime                        @default(now()) @map("created_at")
+  updatedAt                DateTime                        @updatedAt @map("updated_at")
+  generationAuthorizations SeriesGenerationAuthorization[]
+
+  @@index([seriesId, status, createdAt])
+  @@index([requestedById, status])
+  @@map("series_batch_approvals")
+}
+
+model SeriesGenerationAuthorization {
+  id          String               @id @default(cuid())
+  seriesId    String               @map("series_id")
+  series      StorySeries          @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  approvalId  String?              @map("approval_id")
+  approval    SeriesBatchApproval? @relation(fields: [approvalId], references: [id], onDelete: SetNull)
+  operationId String               @unique @map("operation_id")
+  projectId   String               @map("project_id")
+  episodeId   String               @map("episode_id")
+  userId      String               @map("user_id")
+  points      Int
+  status      String               @default("RESERVED") // RESERVED | CONSUMED | RELEASED
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  @@index([seriesId, status, createdAt])
+  @@index([approvalId, status])
+  @@index([userId, status])
+  @@map("series_generation_authorizations")
+}
+
+// 系列公共资产是个人资产某一版本的独立存储快照。个人库切换、软删除或清理
+// 不会改变系列和已经建立的单集；新版本必须由用户显式加入系列。
+model SeriesAsset {
+  id                        String               @id @default(cuid())
+  seriesId                  String               @map("series_id")
+  series                    StorySeries          @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  sourceUserAssetId         String?              @map("source_user_asset_id")
+  sourceUserAsset           UserAsset?           @relation(fields: [sourceUserAssetId], references: [id], onDelete: SetNull)
+  sourceUserAssetRevisionId String?              @map("source_user_asset_revision_id")
+  sourceUserAssetRevision   UserAssetRevision?   @relation(fields: [sourceUserAssetRevisionId], references: [id], onDelete: SetNull)
+  createdById               String               @map("created_by_id")
+  createdBy                 User                 @relation("SeriesAssetCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  kind                      UserAssetKind
+  contentType               UserAssetContentType @map("content_type")
+  title                     String
+  description               String?              @db.Text
+  mimeType                  String               @map("mime_type")
+  storageKey                String               @map("storage_key")
+  schemaVersion             Int                  @default(1) @map("schema_version")
+  structuredPayload         Json?                @map("structured_payload")
+  contentHash               String?              @map("content_hash")
+  enabled                   Boolean              @default(true)
+  createdAt                 DateTime             @default(now()) @map("created_at")
+  updatedAt                 DateTime             @updatedAt @map("updated_at")
+
+  @@unique([seriesId, sourceUserAssetRevisionId])
+  @@index([seriesId, enabled, createdAt])
+  @@index([sourceUserAssetId])
+  @@index([sourceUserAssetRevisionId])
+  @@map("series_assets")
+}
+
+model StorySeason {
+  id           String         @id @default(cuid())
+  seriesId     String         @map("series_id")
+  series       StorySeries    @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seasonNumber Int            @map("season_number")
+  title        String?
+  synopsis     String?        @db.Text
+  episodes     StoryEpisode[]
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  @@unique([seriesId, seasonNumber])
+  @@map("story_seasons")
+}
+
+// 系列圣经只追加版本。单集固定指向创建时版本，后续升级必须显式执行。
+model SeriesBibleRevision {
+  id             String         @id @default(cuid())
+  seriesId       String         @map("series_id")
+  series         StorySeries    @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  revisionNumber Int            @map("revision_number")
+  payload        Json
+  createdById    String         @map("created_by_id")
+  createdBy      User           @relation("BibleRevisionAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  episodes       StoryEpisode[]
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  @@unique([seriesId, revisionNumber])
+  @@index([createdById, createdAt])
+  @@map("series_bible_revisions")
+}
+
+model StoryEpisode {
+  id               String              @id @default(cuid())
+  seriesId         String              @map("series_id")
+  series           StorySeries         @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seasonId         String              @map("season_id")
+  season           StorySeason         @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  projectId        String              @unique @map("project_id")
+  project          Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bibleRevisionId  String              @map("bible_revision_id")
+  bibleRevision    SeriesBibleRevision @relation(fields: [bibleRevisionId], references: [id], onDelete: Restrict)
+  episodeNumber    Int                 @map("episode_number")
+  title            String
+  synopsis         String?             @db.Text
+  status           String              @default("IN_PRODUCTION") // PLANNED | IN_PRODUCTION | COMPLETED
+  continuityBefore Json?               @map("continuity_before")
+  continuityAfter  Json?               @map("continuity_after")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  @@unique([seasonId, episodeNumber])
+  @@index([seriesId, status, episodeNumber])
+  @@index([bibleRevisionId])
+  @@map("story_episodes")
+}
+
+// 一个步骤的一版生产方案。独立生成、长单元草案与当前激活方案可并存。
+model VideoProductionPlan {
+  id                    String            @id @default(cuid())
+  projectId             String            @map("project_id")
+  project               Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stepName              String            @map("step_name")
+  strategy              String // INDEPENDENT_SHOTS | MULTI_SHOT_UNITS | MIXED
+  status                String            @default("DRAFT") // DRAFT | ACTIVE | ARCHIVED
+  modelPolicy           Json?             @map("model_policy")
+  qualityPolicy         Json?             @map("quality_policy")
+  requestedDurationMs   Int               @default(0) @map("requested_duration_ms")
+  billableDurationMs    Int               @default(0) @map("billable_duration_ms")
+  estimatedCostUsd      Float?            @map("estimated_cost_usd")
+  expectedUsableCostUsd Float?            @map("expected_usable_cost_usd")
+  createdById           String?           @map("created_by_id")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  units                 GenerationUnit[]
+  timelineSegments      TimelineSegment[]
+
+  @@index([projectId, stepName, status, createdAt])
+  // 数据库另有部分唯一索引：每个 projectId + stepName 最多一个 ACTIVE 方案。
+  @@map("video_production_plans")
 }
 
 // 充值订单
@@ -353,26 +574,55 @@ model GroupPointTransfer {
 }
 
 model WorkflowStep {
-  id           String           @id @default(cuid())
-  projectId    String
-  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  stepType     WorkflowStepType
-  status       StepStatus       @default(PENDING)
-  inputData    Json? // 该步输入参数
-  outputData   Json? // 该步输出结果
-  errorMessage String?          @db.Text
-  order        Int // 步骤顺序（0-8）
-  retryCount   Int              @default(0)
-  startedAt    DateTime?
-  completedAt  DateTime?
-  resultAssets Asset[] // 关联生成的资源
+  id                    String                 @id @default(cuid())
+  projectId             String
+  project               Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stepType              WorkflowStepType
+  status                StepStatus             @default(PENDING)
+  inputData             Json? // 该步输入参数
+  outputData            Json? // 该步输出结果
+  errorMessage          String?                @db.Text
+  order                 Int // 步骤顺序（0-8）
+  retryCount            Int                    @default(0)
+  startedAt             DateTime?
+  completedAt           DateTime?
+  resultAssets          Asset[] // 关联生成的资源
+  scopedChangeProposals ScopedChangeProposal[]
   // 乐观锁 CAS 字段：并发局部更新 outputData 时用于检测期间是否有别的写入
   // 见 lib/workflow-executor.mergeStepOutputData
-  updatedAt    DateTime         @updatedAt @map("updated_at")
-  createdAt    DateTime         @default(now())
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  createdAt             DateTime               @default(now())
 
   @@unique([projectId, stepType]) // 一个项目同一步骤只能有一条记录
   @@index([projectId, order])
+}
+
+// 用户框定范围后生成的可审查修改草案。应用前必须校验 baseHash，防止覆盖并发编辑。
+model ScopedChangeProposal {
+  id             String           @id @default(cuid())
+  projectId      String           @map("project_id")
+  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workflowStepId String           @map("workflow_step_id")
+  workflowStep   WorkflowStep     @relation(fields: [workflowStepId], references: [id], onDelete: Cascade)
+  createdById    String           @map("created_by_id")
+  createdBy      User             @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  stepType       WorkflowStepType @map("step_type")
+  scopeType      String           @map("scope_type")
+  scopeKey       String           @map("scope_key")
+  instruction    String           @db.Text
+  baseHash       String           @map("base_hash")
+  beforeSnapshot Json             @map("before_snapshot")
+  operations     Json
+  summary        String?          @db.Text
+  status         String           @default("DRAFT") // DRAFT | APPLIED | REJECTED | STALE
+  appliedAt      DateTime?        @map("applied_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  @@index([projectId, status, createdAt])
+  @@index([workflowStepId, scopeType, scopeKey, createdAt])
+  @@index([createdById, createdAt])
+  @@map("scoped_change_proposals")
 }
 
 model Asset {
@@ -617,24 +867,25 @@ model OperationResult {
 
 // 创意扩散深化迭代历史版本
 model VideoSegment {
-  id           String   @id @default(cuid())
-  projectId    String   @map("project_id")
-  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  shotId       String   @map("shot_id") // 对应分镜 shot_001 / 概念图 asset id
-  actNumber    Int?     @map("act_number") // VIDEO_DIRECT 中区分不同幕的同名 shotId
-  stepName     String   @map("step_name") // 'TRAILER' | 'VIDEO_DIRECT' | 'VIDEO_RENDER'
-  prompt       String // 英文视频生成提示词
-  caption      String?  @map("caption") // 中文画面描述（前端展示用）
-  videoUrl     String?  @map("video_url") // 生成后的视频 URL（R2 签名 URL）
-  storageKey   String?  @map("storage_key") // R2 存储 key
-  status       String   @default("pending") @map("status") // pending | generating | completed | failed
-  sequence     Int      @map("sequence") // 片段顺序（用于 ffmpeg concat）
-  duration     Int?     @map("duration") // 片段时长（秒）
-  isMock       Boolean  @default(false) @map("is_mock") // 是否 Ken Burns 兜底
-  errorMessage String?  @map("error_message") // 失败原因
-  createdById  String?  @map("created_by_id")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id                  String               @id @default(cuid())
+  projectId           String               @map("project_id")
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shotId              String               @map("shot_id") // 对应分镜 shot_001 / 概念图 asset id
+  actNumber           Int?                 @map("act_number") // VIDEO_DIRECT 中区分不同幕的同名 shotId
+  stepName            String               @map("step_name") // 'TRAILER' | 'VIDEO_DIRECT' | 'VIDEO_RENDER'
+  prompt              String // 英文视频生成提示词
+  caption             String?              @map("caption") // 中文画面描述（前端展示用）
+  videoUrl            String?              @map("video_url") // 生成后的视频 URL（R2 签名 URL）
+  storageKey          String?              @map("storage_key") // R2 存储 key
+  status              String               @default("pending") @map("status") // pending | generating | completed | failed
+  sequence            Int                  @map("sequence") // 片段顺序（用于 ffmpeg concat）
+  duration            Int?                 @map("duration") // 片段时长（秒）
+  isMock              Boolean              @default(false) @map("is_mock") // 是否 Ken Burns 兜底
+  errorMessage        String?              @map("error_message") // 失败原因
+  createdById         String?              @map("created_by_id")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  generationUnitItems GenerationUnitItem[]
 
   @@index([projectId, status])
   @@index([projectId, stepName])
@@ -642,6 +893,138 @@ model VideoSegment {
   @@index([projectId, stepName, actNumber, shotId])
   @@index([createdById, createdAt])
   @@map("VideoSegment")
+}
+
+// 一次供应商生成请求。它可以承载一个镜头，也可以承载内部包含多个切镜的长生成单元。
+model GenerationUnit {
+  id                  String               @id @default(cuid())
+  projectId           String               @map("project_id")
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  planId              String?              @map("plan_id")
+  plan                VideoProductionPlan? @relation(fields: [planId], references: [id], onDelete: Cascade)
+  stepName            String               @map("step_name")
+  strategy            String               @default("SINGLE_SHOT") // SINGLE_SHOT | MULTI_SHOT
+  status              String               @default("planned") // planned | queued | generating | completed | failed | cancelled
+  tier                String? // hero | standard | budget
+  modelId             String?              @map("model_id")
+  prompt              String               @db.Text
+  requestedDurationMs Int                  @map("requested_duration_ms")
+  billableDurationMs  Int?                 @map("billable_duration_ms")
+  referenceAssets     Json?                @map("reference_assets")
+  estimatedCostUsd    Float?               @map("estimated_cost_usd")
+  actualCostUsd       Float?               @map("actual_cost_usd")
+  providerTaskId      String?              @map("provider_task_id")
+  errorMessage        String?              @map("error_message")
+  createdById         String?              @map("created_by_id")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  items               GenerationUnitItem[]
+  clips               GeneratedClip[]
+  timelineSegments    TimelineSegment[]
+
+  @@index([projectId, stepName, status])
+  @@index([planId, status])
+  @@index([projectId, createdAt])
+  @@index([providerTaskId])
+  @@map("generation_units")
+}
+
+// 生成单元中的创作镜头计划。一个 MULTI_SHOT 单元会有多个 item。
+model GenerationUnitItem {
+  id                String         @id @default(cuid())
+  generationUnitId  String         @map("generation_unit_id")
+  generationUnit    GenerationUnit @relation(fields: [generationUnitId], references: [id], onDelete: Cascade)
+  legacySegmentId   String?        @map("legacy_segment_id")
+  legacySegment     VideoSegment?  @relation(fields: [legacySegmentId], references: [id], onDelete: SetNull)
+  shotId            String         @map("shot_id")
+  actNumber         Int?           @map("act_number")
+  sequence          Int
+  plannedDurationMs Int            @map("planned_duration_ms")
+  prompt            String?        @db.Text
+  metadata          Json?
+  createdAt         DateTime       @default(now()) @map("created_at")
+
+  @@unique([generationUnitId, sequence])
+  @@index([legacySegmentId])
+  @@index([shotId, actNumber])
+  @@map("generation_unit_items")
+}
+
+// 供应商返回并保存到对象存储的原始素材。一个生成单元可以产生多个候选素材。
+model GeneratedClip {
+  id                 String                   @id @default(cuid())
+  projectId          String                   @map("project_id")
+  project            Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generationUnitId   String                   @map("generation_unit_id")
+  generationUnit     GenerationUnit           @relation(fields: [generationUnitId], references: [id], onDelete: Cascade)
+  modelId            String?                  @map("model_id")
+  providerTaskId     String?                  @map("provider_task_id")
+  videoUrl           String?                  @map("video_url")
+  storageKey         String?                  @map("storage_key")
+  durationMs         Int                      @map("duration_ms")
+  isMock             Boolean                  @default(false) @map("is_mock")
+  metadata           Json?
+  createdAt          DateTime                 @default(now()) @map("created_at")
+  timelineSegments   TimelineSegment[]
+  qualityAssessments VideoQualityAssessment[]
+
+  @@index([projectId, createdAt])
+  @@index([generationUnitId, createdAt])
+  @@index([providerTaskId])
+  @@map("generated_clips")
+}
+
+// 成片时间线上的生成单元。一个完整生成视频对应一行；内部镜头不自动拆片。
+model TimelineSegment {
+  id               String               @id @default(cuid())
+  projectId        String               @map("project_id")
+  project          Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  planId           String?              @map("plan_id")
+  plan             VideoProductionPlan? @relation(fields: [planId], references: [id], onDelete: Cascade)
+  stepName         String               @map("step_name")
+  generationUnitId String               @map("generation_unit_id")
+  generationUnit   GenerationUnit       @relation(fields: [generationUnitId], references: [id], onDelete: Cascade)
+  generatedClipId  String?              @map("generated_clip_id")
+  generatedClip    GeneratedClip?       @relation(fields: [generatedClipId], references: [id], onDelete: SetNull)
+  sequence         Int
+  sourceStartMs    Int                  @default(0) @map("source_start_ms")
+  sourceEndMs      Int                  @map("source_end_ms")
+  timelineStartMs  Int                  @map("timeline_start_ms")
+  timelineEndMs    Int                  @map("timeline_end_ms")
+  durationMs       Int                  @map("duration_ms")
+  transition       Json?
+  metadata         Json?
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+
+  @@unique([planId, sequence])
+  @@index([projectId, stepName, sequence])
+  @@index([generatedClipId])
+  @@index([generationUnitId])
+  @@index([projectId, stepName, timelineStartMs])
+  @@map("timeline_segments")
+}
+
+// 对原始生成素材的技术、语义和人工质量评估。一次素材可以有多次评估。
+model VideoQualityAssessment {
+  id              String        @id @default(cuid())
+  projectId       String        @map("project_id")
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generatedClipId String        @map("generated_clip_id")
+  generatedClip   GeneratedClip @relation(fields: [generatedClipId], references: [id], onDelete: Cascade)
+  source          String        @default("STATIC") // STATIC | AI | HUMAN
+  decision        String // HUMAN_REVIEW | DELIVERY_FAILED（旧记录可能保留 ACCEPT/RETRY/FALLBACK）
+  overallScore    Float         @map("overall_score")
+  confidence      Float
+  scores          Json
+  signals         Json?
+  reasons         Json
+  createdById     String?       @map("created_by_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  @@index([generatedClipId, createdAt])
+  @@index([projectId, decision, createdAt])
+  @@map("video_quality_assessments")
 }
 
 model CreativeIteration {

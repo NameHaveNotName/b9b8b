@@ -1,7 +1,9 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, HeadBucketCommand, ObjectIdentifier } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
+import type { ObjectIdentifier } from '@aws-sdk/client-s3'
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import fs from "fs/promises";
 import path from "path";
+import { assertSafeStorageKey, resolveMockStoragePath } from './storage-key.ts'
 
 // ======== 存储配置 ========
 // 存储模式优先级（R2 优先，因为免费额度更大）：
@@ -34,7 +36,7 @@ const isR2Mode =
 // === Mock 模式 ===
 const isMockMode = !isSupabaseS3Mode && !isR2Mode
 
-const MOCK_STORAGE_ROOT = path.join(process.cwd(), 'public', 'mock-storage')
+const MOCK_STORAGE_ROOT = path.resolve(process.env.MOCK_STORAGE_ROOT || path.join(process.cwd(), 'public', 'mock-storage'))
 
 // ======== 初始化各模式客户端 ========
 
@@ -78,6 +80,7 @@ async function ensureLocalDir(filePath: string) {
 
 // ======== 公共 URL 构建 ========
 function buildPublicUrl(key: string): string {
+  assertSafeStorageKey(key)
   const normalizedKey = key.split('\\').join('/')
   if (!isR2Mode && isSupabaseS3Mode) {
     // 从 endpoint 提取项目 ref，构建标准公共访问 URL
@@ -107,6 +110,7 @@ const STORAGE_REFERENCE_PREFIX = 'storage:'
  * is authorized to view the file.
  */
 export function toStorageReference(key: string): string {
+  assertSafeStorageKey(key)
   return `${STORAGE_REFERENCE_PREFIX}${key}`
 }
 
@@ -126,13 +130,14 @@ export async function resolveStorageReference(
 }
 
 export async function uploadFile(key: string, body: Buffer, contentType: string) {
+  assertSafeStorageKey(key)
   if (body.length > MAX_FILE_SIZE_BYTES) {
     throw new Error(`STORAGE_004: 文件大小超过限制 (${MAX_FILE_SIZE_MB}MB)`)
   }
 
   if (isMockMode) {
     try {
-      const localPath = path.join(MOCK_STORAGE_ROOT, key)
+      const localPath = resolveMockStoragePath(MOCK_STORAGE_ROOT, key)
       await ensureLocalDir(localPath)
       await fs.writeFile(localPath, body)
       console.log(`[STORAGE-MOCK] uploadFile → ${localPath} (${body.length} bytes, ${contentType})`)
@@ -175,6 +180,7 @@ export async function uploadFile(key: string, body: Buffer, contentType: string)
 }
 
 export async function getSignedFileUrl(key: string, expiresIn: number = 3600 * 24 * 7) {
+  assertSafeStorageKey(key)
   if (isMockMode) {
     return buildPublicUrl(key)
   }
@@ -197,8 +203,9 @@ export async function getSignedFileUrl(key: string, expiresIn: number = 3600 * 2
 }
 
 export async function downloadFile(key: string): Promise<Buffer> {
+  assertSafeStorageKey(key)
   if (isMockMode) {
-    const localPath = path.join(MOCK_STORAGE_ROOT, key)
+    const localPath = resolveMockStoragePath(MOCK_STORAGE_ROOT, key)
     return fs.readFile(localPath)
   }
 
@@ -222,9 +229,10 @@ export async function copyFile(sourceKey: string, destinationKey: string, conten
 }
 
 export async function deleteFile(key: string) {
+  assertSafeStorageKey(key)
   if (isMockMode) {
     try {
-      const localPath = path.join(MOCK_STORAGE_ROOT, key)
+      const localPath = resolveMockStoragePath(MOCK_STORAGE_ROOT, key)
       await fs.unlink(localPath).catch(() => {})
       return { key }
     } catch (error: any) {
@@ -315,14 +323,14 @@ export async function uploadThumbnail(
 // 删除项目文件夹（批量删除前缀下的所有对象）
 // ============================================================
 export async function deleteProjectFolder(projectId: string): Promise<{ deletedCount: number }> {
+  assertSafeStorageKey(`projects/${projectId}`)
   const prefix = `projects/${projectId}/`
   let deletedCount = 0
   let continuationToken: string | undefined
 
   if (isMockMode) {
     try {
-      const { readdir, unlink, rmdir } = await import('fs/promises')
-      const projectDir = path.join(MOCK_STORAGE_ROOT, prefix)
+      const projectDir = resolveMockStoragePath(MOCK_STORAGE_ROOT, `projects/${projectId}`)
       await deleteLocalFolderRecursive(projectDir)
       console.log(`[STORAGE-MOCK] 删除文件夹 ${prefix}`)
       return { deletedCount: 0 }
@@ -414,16 +422,16 @@ async function deleteLocalFolderRecursive(dirPath: string): Promise<void> {
 // 删除用户资产文件夹
 // ============================================================
 export async function deleteUserAssetsFolder(userId: string): Promise<{ deletedCount: number }> {
+  assertSafeStorageKey(`users/${userId}`)
   const prefix = `users/${userId}/`
   let deletedCount = 0
 
   if (isMockMode) {
     try {
-      const { readdir, unlink, rmdir } = await import('fs/promises')
-      const userDir = path.join(MOCK_STORAGE_ROOT, prefix)
+      const userDir = resolveMockStoragePath(MOCK_STORAGE_ROOT, `users/${userId}`)
       await deleteLocalFolderRecursive(userDir)
       return { deletedCount: 0 }
-    } catch (error: any) {
+    } catch {
       return { deletedCount: 0 }
     }
   }

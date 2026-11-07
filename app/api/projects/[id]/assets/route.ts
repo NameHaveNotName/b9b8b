@@ -7,7 +7,7 @@ import { resolveStorageReference, getSignedFileUrl } from '@/lib/r2'
 
 export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const permission = await checkProjectPermission(params.id)
+  const permission = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
   if (!permission.allowed) {
     return permission.response
   }

@@ -144,13 +144,14 @@ function ensureModel(modelName: string): Record<string, any> {
 //   { model: 'childModel', fk: 'childForeignKey' }
 // 反向关系（多对一）：parent.sourceField 对应 child.id
 //   { model: 'childModel', fk: 'childPrimaryKey', sourceField: 'parentForeignKey' }
-const RELATIONS: Record<string, Record<string, { model: string; fk: string; sourceField?: string }>> = {
+const RELATIONS: Record<string, Record<string, { model: string; fk: string; sourceField?: string; many?: boolean }>> = {
   project: {
     steps: { model: 'workflowStep', fk: 'projectId' },
     assets: { model: 'asset', fk: 'projectId' },
     videoSegments: { model: 'videoSegment', fk: 'projectId' },
     voiceoverSegments: { model: 'voiceoverSegment', fk: 'projectId' },
     assetBindings: { model: 'assetBinding', fk: 'projectId' },
+    storyEpisode: { model: 'storyEpisode', fk: 'projectId', many: false },
   },
   workflowStep: {
     resultAssets: { model: 'asset', fk: 'stepId' },
@@ -161,11 +162,32 @@ const RELATIONS: Record<string, Record<string, { model: string; fk: string; sour
   },
   userAsset: {
     bindings: { model: 'assetBinding', fk: 'userAssetId' },
+    seriesSnapshots: { model: 'seriesAsset', fk: 'sourceUserAssetId' },
   },
   assetBinding: {
     project: { model: 'project', fk: 'id', sourceField: 'projectId' },
     userAsset: { model: 'userAsset', fk: 'id', sourceField: 'userAssetId' },
     asset: { model: 'asset', fk: 'id', sourceField: 'assetId' },
+  },
+  storySeries: {
+    seasons: { model: 'storySeason', fk: 'seriesId' },
+    episodes: { model: 'storyEpisode', fk: 'seriesId' },
+    bibleRevisions: { model: 'seriesBibleRevision', fk: 'seriesId' },
+    assets: { model: 'seriesAsset', fk: 'seriesId' },
+    members: { model: 'seriesMembership', fk: 'seriesId' },
+    batchApprovals: { model: 'seriesBatchApproval', fk: 'seriesId' },
+  },
+  seriesMembership: {
+    user: { model: 'user', fk: 'id', sourceField: 'userId', many: false },
+  },
+  seriesBatchApproval: {
+    requestedBy: { model: 'user', fk: 'id', sourceField: 'requestedById', many: false },
+    reviewedBy: { model: 'user', fk: 'id', sourceField: 'reviewedById', many: false },
+  },
+  storyEpisode: {
+    season: { model: 'storySeason', fk: 'id', sourceField: 'seasonId', many: false },
+    project: { model: 'project', fk: 'id', sourceField: 'projectId', many: false },
+    bibleRevision: { model: 'seriesBibleRevision', fk: 'id', sourceField: 'bibleRevisionId', many: false },
   },
 }
 
@@ -173,6 +195,11 @@ const RELATIONS: Record<string, Record<string, { model: string; fk: string; sour
 const UNIQUE_KEYS: Record<string, string[][]> = {
   workflowStep: [['projectId', 'stepType']],
   user: [['email']],
+  storySeason: [['seriesId', 'seasonNumber']],
+  seriesBibleRevision: [['seriesId', 'revisionNumber']],
+  storyEpisode: [['projectId'], ['seasonId', 'episodeNumber']],
+  seriesAsset: [['seriesId', 'sourceUserAssetRevisionId']],
+  seriesMembership: [['seriesId', 'userId']],
 }
 
 function findExistingByUnique(modelName: string, data: any): any | null {
@@ -254,7 +281,10 @@ function resolveIncludes(record: any, modelName: string, includes: Record<string
     if (relationKey === '_count') {
       // 统计关联记录数量
       const counts: Record<string, number> = {}
-      for (const [relName] of Object.entries(includeConfig)) {
+      const countSelection = includeConfig && typeof includeConfig === 'object' && 'select' in includeConfig
+        ? (includeConfig as any).select
+        : includeConfig
+      for (const [relName] of Object.entries(countSelection || {})) {
         const rel = RELATIONS[modelName]?.[relName]
         if (rel) {
           const lookupValue = rel.sourceField ? record[rel.sourceField] : record.id
@@ -288,7 +318,7 @@ function resolveIncludes(record: any, modelName: string, includes: Record<string
           }
         }
       }
-      copy[relationKey] = relatedRecords
+      copy[relationKey] = rel.many === false ? relatedRecords[0] || null : relatedRecords
     }
   }
   return copy
@@ -471,6 +501,11 @@ function buildMockPrisma(): PrismaClient {
                 const defaults: Record<string, Record<string, any>> = {
                   project: { status: 'ACTIVE', title: '未命名项目' },
                   workflowStep: { status: 'PENDING', retryCount: 0 },
+                  storySeries: { status: 'ACTIVE', currentBibleVersion: 1, monthlyPointBudget: 0, batchGenerationLimit: 3, requireBatchApproval: true },
+                  storyEpisode: { status: 'IN_PRODUCTION' },
+                  seriesAsset: { enabled: true },
+                  seriesMembership: { status: 'ACTIVE', assignedEpisodeIds: [] },
+                  seriesBatchApproval: { status: 'PENDING' },
                 }
                 records[id] = {
                   id,

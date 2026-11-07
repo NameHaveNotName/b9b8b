@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import type { WorkflowStepType } from '@prisma/client'
+import { editableSeriesProjectSteps, seriesRoleCanEditProjectStep, seriesRoleCanReadProject } from '@/lib/series-project-access'
+
+export type SeriesProjectPermissionScope =
+  | { mode: 'READ' }
+  | { mode: 'EDIT_STEP'; stepType: WorkflowStepType }
 
 export type ProjectPermissionResult =
   | {
@@ -19,6 +25,9 @@ export type ProjectPermissionResult =
         groupId: string | null
       }
       isOwner: boolean
+      isSeriesAccess: boolean
+      seriesRole?: string
+      editableStepTypes?: WorkflowStepType[]
     }
   | {
       allowed: false
@@ -37,7 +46,8 @@ export type ProjectPermissionResult =
  */
 export async function checkProjectPermission(
   projectId: string,
-  responseOnFail?: { status: number; error: string }
+  responseOnFail?: { status: number; error: string },
+  seriesScope?: SeriesProjectPermissionScope,
 ): Promise<ProjectPermissionResult> {
   const user = await getCurrentUser()
   if (!user) {
@@ -49,7 +59,12 @@ export async function checkProjectPermission(
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, userId: true, groupId: true },
+    select: {
+      id: true,
+      userId: true,
+      groupId: true,
+      storyEpisode: { select: { id: true, seriesId: true, series: { select: { userId: true } } } },
+    },
   })
 
   if (!project) {
@@ -69,6 +84,7 @@ export async function checkProjectPermission(
       user,
       project,
       isOwner: true,
+      isSeriesAccess: false,
     }
   }
 
@@ -89,6 +105,43 @@ export async function checkProjectPermission(
         user,
         project,
         isOwner: false,
+        isSeriesAccess: false,
+      }
+    }
+  }
+
+  // 系列成员必须由调用方显式声明读取或具体步骤编辑范围；旧接口不自动扩权。
+  if (seriesScope && project.storyEpisode) {
+    const episode = project.storyEpisode
+    if (episode.series.userId === user.id) {
+      return {
+        allowed: true,
+        user,
+        project,
+        isOwner: false,
+        isSeriesAccess: true,
+        seriesRole: 'OWNER',
+        editableStepTypes: editableSeriesProjectSteps('OWNER', [], episode.id),
+      }
+    }
+    const membership = await prisma.seriesMembership.findUnique({
+      where: { seriesId_userId: { seriesId: episode.seriesId, userId: user.id } },
+      select: { role: true, assignedEpisodeIds: true, status: true },
+    })
+    const allowed = membership?.status === 'ACTIVE' && (
+      seriesScope.mode === 'READ'
+        ? seriesRoleCanReadProject(membership.role, membership.assignedEpisodeIds, episode.id)
+        : seriesRoleCanEditProjectStep(membership.role, membership.assignedEpisodeIds, episode.id, seriesScope.stepType)
+    )
+    if (allowed && membership) {
+      return {
+        allowed: true,
+        user,
+        project,
+        isOwner: false,
+        isSeriesAccess: true,
+        seriesRole: membership.role,
+        editableStepTypes: editableSeriesProjectSteps(membership.role, membership.assignedEpisodeIds, episode.id),
       }
     }
   }

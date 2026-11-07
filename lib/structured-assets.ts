@@ -4,7 +4,7 @@ export const STRUCTURED_CONTENT_TYPES = new Set([
 
 const LIMITS = { short: 200, long: 4000, list: 30 }
 const ALLOWED_CONSTRAINT_FIELDS: Record<string, string[]> = {
-  CHARACTER_CARD: ['name', 'aliases', 'role', 'summary', 'personality', 'motivations', 'recurringBehaviors', 'taboos', 'visualNotes', 'relationships'],
+  CHARACTER_CARD: ['name', 'aliases', 'identityMode', 'role', 'narrativeFunction', 'summary', 'personality', 'motivations', 'recurringBehaviors', 'taboos', 'visualNotes', 'relationships'],
   ENVIRONMENT_SETTING: ['name', 'summary', 'locations', 'hardRules', 'softRules', 'mood', 'timePeriod', 'visualNotes'],
   STORY_TEMPLATE: ['name', 'premise', 'beats', 'hardConstraints', 'softConstraints', 'endingPattern', 'forbiddenPatterns'],
   STYLE_GUIDE: ['name', 'visualLanguage', 'palette', 'cameraRules', 'negativeRules', 'examples'],
@@ -25,7 +25,9 @@ export function sanitizeStructuredPayload(contentType: string, raw: unknown): Re
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
   switch (contentType) {
     case 'CHARACTER_CARD': return {
-      name: text(input.name, LIMITS.short), aliases: list(input.aliases), role: text(input.role, LIMITS.short),
+      name: text(input.name, LIMITS.short), aliases: list(input.aliases),
+      identityMode: input.identityMode === 'PLOT_FUNCTION_ONLY' ? 'PLOT_FUNCTION_ONLY' : 'DEFINED_PERSONA',
+      role: text(input.role, LIMITS.short), narrativeFunction: text(input.narrativeFunction, 1000),
       summary: text(input.summary), personality: list(input.personality), motivations: list(input.motivations),
       recurringBehaviors: list(input.recurringBehaviors), taboos: list(input.taboos),
       visualNotes: text(input.visualNotes), relationships: list(input.relationships),

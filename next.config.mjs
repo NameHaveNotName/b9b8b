@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Windows 本机构建在页面数据收集阶段同时拉起过多 worker 会出现 OOM / spawn UNKNOWN。
+  // 两个 worker 足够并行，并让 CI 与低内存开发机的生产构建保持稳定。
+  experimental: {
+    cpus: 2,
+  },
   env: {
     // Vercel 构建脚本会把静态 ffmpeg 下载到 public/ffmpeg
     // Next.js 运行时被部署到 /var/task，public 文件位于 /var/task/public/ffmpeg

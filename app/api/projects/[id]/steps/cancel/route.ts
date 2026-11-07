@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
+import { WORKFLOW_STEP_TYPES } from '@/lib/workflow-steps'
 import { prisma } from '@/lib/prisma'
 import { refundPointsAndLog } from '@/lib/points'
 
@@ -41,6 +42,7 @@ async function refundCancelledOperation(
       await refundPointsAndLog(op.userId || fallbackUserId, op.pointsCost, {
         projectId,
         workflowStepId: stepId,
+        operationId: op.id,
         billingSource: (op.billingSource as 'USER' | 'GROUP') || 'USER',
         billingGroupId: op.billingGroupId ?? null,
         finalStatus: 'CANCELLED',
@@ -66,15 +68,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
-  if (!permission.allowed) {
-    return permission.response
-  }
-
   const body = await req.json().catch(() => ({}))
   const { stepType } = body
-  if (!stepType) {
-    return NextResponse.json({ error: 'VALIDATION_001', message: '缺少 stepType' }, { status: 400 })
+  if (!WORKFLOW_STEP_TYPES.includes(stepType)) {
+    return NextResponse.json({ error: 'VALIDATION_001', message: 'stepType 无效' }, { status: 400 })
+  }
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType })
+  if (!permission.allowed) {
+    return permission.response
   }
 
   const step = await prisma.workflowStep.findUnique({

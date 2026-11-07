@@ -6,13 +6,18 @@ import { selectBillingTarget, type BillingSource } from '@/lib/billing-policy'
 import {
   attachOperationResults,
   beginSupplierOperation,
-  finalizeCurrentSupplierOperation,
   getCurrentOperationId,
   prepareOperationContext,
   activateOperationContext,
   type OperationCategory,
   type OperationTarget,
 } from '@/lib/supplier-observability'
+import {
+  finalizeSeriesGenerationAuthorization,
+  getProjectSeriesGenerationContext,
+  releaseSeriesGenerationAuthorization,
+  reserveSeriesGenerationAuthorization,
+} from '@/lib/series-generation-authorization'
 
 /**
  * 根据成本常量获取操作类别
@@ -46,6 +51,7 @@ export interface PointsCheckResult {
   billingGroupId: string | null
   duplicateOperation?: boolean
   operationStatus?: string
+  authorizationError?: string
 }
 
 interface BillingTarget {
@@ -122,12 +128,12 @@ export async function checkPoints(
   if (idempotencyKey) {
     const existing = await prisma.operationLog.findUnique({
       where: { idempotencyKey },
-      select: { id: true, userId: true, status: true, billingSource: true, billingGroupId: true },
+      select: { id: true, userId: true, status: true, billingSource: true, billingGroupId: true, errorCode: true },
     })
     if (existing && existing.userId === userId) {
       activateOperationContext(pendingOperationContext, existing.id, userId)
       return {
-        ok: true,
+        ok: existing.status !== 'REJECTED',
         userId,
         currentPoints: 0,
         cost,
@@ -135,6 +141,7 @@ export async function checkPoints(
         billingGroupId: existing.billingGroupId,
         duplicateOperation: true,
         operationStatus: existing.status,
+        authorizationError: existing.status === 'REJECTED' ? (existing.errorCode || 'SERIES_GENERATION_NOT_AUTHORIZED') : undefined,
       }
     }
   }
@@ -153,6 +160,7 @@ export async function checkPoints(
 
   const ok = target.currentPoints >= target.cost
   if (ok) {
+    const seriesContext = projectId ? await getProjectSeriesGenerationContext(projectId) : null
     try {
       const operation = await beginSupplierOperation({
         userId,
@@ -164,10 +172,10 @@ export async function checkPoints(
         category,
         idempotencyKey,
       })
-      activateOperationContext(pendingOperationContext, operation.operationId, userId)
       if (operation.duplicate) {
+        activateOperationContext(pendingOperationContext, operation.operationId, userId)
         return {
-          ok: true,
+          ok: operation.status !== 'REJECTED',
           userId,
           currentPoints: target.currentPoints,
           cost: target.cost,
@@ -175,9 +183,47 @@ export async function checkPoints(
           billingGroupId: target.groupId,
           duplicateOperation: true,
           operationStatus: operation.status,
+          authorizationError: operation.status === 'REJECTED' ? 'SERIES_GENERATION_NOT_AUTHORIZED' : undefined,
         }
       }
+      if (seriesContext && projectId) {
+        try {
+          await reserveSeriesGenerationAuthorization({
+            operationId: operation.operationId,
+            projectId,
+            userId,
+            points: target.cost,
+          })
+        } catch (authorizationError: any) {
+          const code = authorizationError?.code || authorizationError?.message || 'SERIES_GENERATION_NOT_AUTHORIZED'
+          await prisma.operationLog.update({
+            where: { id: operation.operationId },
+            data: { status: 'REJECTED', success: false, errorCode: code, errorMessage: code, completedAt: new Date() },
+          }).catch(() => {})
+          return {
+            ok: false,
+            userId,
+            currentPoints: target.currentPoints,
+            cost: target.cost,
+            billingSource: target.source,
+            billingGroupId: target.groupId,
+            authorizationError: code,
+          }
+        }
+      }
+      activateOperationContext(pendingOperationContext, operation.operationId, userId)
     } catch (error: any) {
+      if (seriesContext) {
+        return {
+          ok: false,
+          userId,
+          currentPoints: target.currentPoints,
+          cost: target.cost,
+          billingSource: target.source,
+          billingGroupId: target.groupId,
+          authorizationError: 'SERIES_AUTHORIZATION_UNAVAILABLE',
+        }
+      }
       if (idempotencyKey) throw error
       // Observability is fail-open: an unavailable ledger must not block generation.
       console.error('[supplier-ledger] begin operation failed:', error?.message)
@@ -216,6 +262,7 @@ export async function deductPointsAndLog(
 
   // 只有操作成功时才扣点；失败时只记录日志，不扣点
   if (cost <= 0 || meta.success === false) {
+    await releaseSeriesGenerationAuthorization(operationId)
     await logOperation({
       userId,
       projectId: meta.projectId,
@@ -242,6 +289,7 @@ export async function deductPointsAndLog(
 
   // 检查与扣减在同一条条件更新中完成，避免多人并发把余额扣成负数。
   await prisma.$transaction(async (tx: any) => {
+    if (operationId) await finalizeSeriesGenerationAuthorization(tx, operationId, cost)
     let balanceAfter: number
 
     if (resolved.source === 'GROUP' && resolved.groupId) {
@@ -328,28 +376,39 @@ export async function refundPointsAndLog(
     billingGroupId: string | null
     errorMessage?: string
     finalStatus?: 'PARTIAL' | 'FAILED' | 'CANCELLED'
+    operationId?: string
   },
 ) {
   if (cost <= 0) return
-  const operationId = getCurrentOperationId()
-
-  await finalizeCurrentSupplierOperation({
-    status: meta.finalStatus || 'FAILED',
-    projectId: meta.projectId,
-    workflowStepId: meta.workflowStepId,
-    errorMessage: meta.errorMessage || '任务失败，点数已退回',
-  })
+  const operationId = meta.operationId || getCurrentOperationId()
+  if (!operationId) {
+    throw new Error('REFUND_OPERATION_CONTEXT_REQUIRED')
+  }
 
   await prisma.$transaction(async (tx: any) => {
-    // Background jobs can be delivered more than once. Claim the refund on the
-    // original operation before changing a balance so retries cannot double-pay.
-    if (operationId) {
-      const claim = await tx.operationLog.updateMany({
-        where: { id: operationId, pointsRefunded: 0 },
-        data: { pointsRefunded: cost },
-      })
-      if (claim.count !== 1) return
-    }
+    // 退款对象必须显式或由当前生成上下文唯一确定。先原子认领原账本，
+    // 再恢复余额；取消请求、后台失败和任务重投只能有一个成功。
+    const completedAt = new Date()
+    const claim = await tx.operationLog.updateMany({
+      where: {
+        id: operationId,
+        userId,
+        pointsRefunded: 0,
+        pointsCost: { gte: cost },
+        billingSource: meta.billingSource,
+        billingGroupId: meta.billingGroupId,
+      },
+      data: {
+        pointsRefunded: cost,
+        status: meta.finalStatus || 'FAILED',
+        success: false,
+        projectId: meta.projectId,
+        workflowStepId: meta.workflowStepId,
+        errorMessage: (meta.errorMessage || '任务失败，点数已退回').slice(0, 500),
+        completedAt,
+      },
+    })
+    if (claim.count !== 1) return
 
     let balanceAfter: number
 
@@ -381,7 +440,7 @@ export async function refundPointsAndLog(
         billingSource: meta.billingSource,
         billingGroupId: meta.billingGroupId,
         balanceAfter,
-        metadata: operationId ? { refundedOperationId: operationId } : undefined,
+        metadata: { refundedOperationId: operationId },
       },
     })
   })

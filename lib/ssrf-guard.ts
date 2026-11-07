@@ -18,6 +18,9 @@
 
 import net from 'net'
 import dns from 'dns/promises'
+import http from 'node:http'
+import https from 'node:https'
+import { Readable } from 'node:stream'
 
 export const SSRF_BLOCKED = 'SSRF_BLOCKED' as const
 
@@ -119,13 +122,30 @@ function isBlockedHostname(hostname: string): boolean {
   return false
 }
 
-export type SsrfCheckResult = { ok: true; url: URL } | { ok: false; reason: string }
+export type PinnedAddress = { address: string; family: 4 | 6 }
+export type SsrfCheckResult =
+  | { ok: true; url: URL; addresses: PinnedAddress[] }
+  | { ok: false; reason: string }
+
+type LookupAll = (
+  hostname: string,
+  options: { all: true; verbatim: true },
+) => Promise<Array<{ address: string; family: number }>>
+
+type PinnedRequest = (
+  url: URL,
+  init: RequestInit,
+  address: PinnedAddress,
+) => Promise<Response>
 
 /**
  * 校验单个 URL 是否允许服务端出站访问。
  * 主机名会先做 DNS 解析，再逐一校验解析结果，防止域名指向内网。
  */
-export async function assertSsrfSafe(rawUrl: string): Promise<SsrfCheckResult> {
+export async function assertSsrfSafe(
+  rawUrl: string,
+  lookupAll: LookupAll = dns.lookup,
+): Promise<SsrfCheckResult> {
   let target: URL
   try {
     target = new URL(rawUrl)
@@ -142,13 +162,18 @@ export async function assertSsrfSafe(rawUrl: string): Promise<SsrfCheckResult> {
   }
 
   // 已是 IP 字面量，无需解析
-  if (net.isIP(stripBrackets(target.hostname)) !== 0) {
-    return { ok: true, url: target }
+  const literalFamily = net.isIP(stripBrackets(target.hostname))
+  if (literalFamily !== 0) {
+    return {
+      ok: true,
+      url: target,
+      addresses: [{ address: stripBrackets(target.hostname), family: literalFamily as 4 | 6 }],
+    }
   }
 
-  let addresses: { address: string }[]
+  let addresses: Array<{ address: string; family: number }>
   try {
-    addresses = await dns.lookup(target.hostname, { all: true, verbatim: true })
+    addresses = await lookupAll(target.hostname, { all: true, verbatim: true })
   } catch {
     return { ok: false, reason: 'DNS_RESOLVE_FAILED' }
   }
@@ -161,7 +186,86 @@ export async function assertSsrfSafe(rawUrl: string): Promise<SsrfCheckResult> {
     return { ok: false, reason: SSRF_BLOCKED }
   }
 
-  return { ok: true, url: target }
+  if (addresses.some((a) => a.family !== 4 && a.family !== 6)) {
+    return { ok: false, reason: 'DNS_INVALID_ADDRESS' }
+  }
+
+  return {
+    ok: true,
+    url: target,
+    addresses: addresses.map(({ address, family }) => ({
+      address,
+      family: family as 4 | 6,
+    })),
+  }
+}
+
+function responseHasNoBody(method: string, status: number): boolean {
+  return method === 'HEAD' || status === 204 || status === 205 || status === 304
+}
+
+async function requestPinned(url: URL, init: RequestInit, pinned: PinnedAddress): Promise<Response> {
+  const method = (init.method || 'GET').toUpperCase()
+  const headers = new Headers(init.headers)
+  // Host 必须和原 URL 一致；不能允许调用方把它替换成另一个虚拟主机。
+  headers.delete('host')
+
+  let body: Uint8Array | string | undefined
+  if (typeof init.body === 'string') body = init.body
+  else if (init.body instanceof ArrayBuffer) body = new Uint8Array(init.body)
+  else if (ArrayBuffer.isView(init.body)) {
+    body = new Uint8Array(init.body.buffer, init.body.byteOffset, init.body.byteLength)
+  } else if (init.body != null) {
+    throw new Error('SSRF_REJECTED:UNSUPPORTED_REQUEST_BODY')
+  }
+
+  const transport = url.protocol === 'https:' ? https : http
+  return new Promise<Response>((resolve, reject) => {
+    const request = transport.request({
+      protocol: url.protocol,
+      hostname: stripBrackets(url.hostname),
+      port: url.port || undefined,
+      path: `${url.pathname}${url.search}`,
+      method,
+      headers: Object.fromEntries(headers.entries()),
+      // 网络栈只能使用已验证的地址，杜绝校验后再次 DNS 解析。
+      lookup: (_hostname, lookupOptions, callback) => {
+        // Node 20/22 常请求单地址，Node 24 的 Happy Eyeballs 会传 all=true。
+        // 两种形式都只能返回同一个已验证地址，不能退回系统 DNS。
+        const done = callback as unknown as (...args: unknown[]) => void
+        if (typeof lookupOptions === 'object' && lookupOptions?.all) {
+          done(null, [{ address: pinned.address, family: pinned.family }])
+        } else {
+          done(null, pinned.address, pinned.family)
+        }
+      },
+      // HTTPS 仍以原始域名执行 SNI 与证书校验。
+      servername: url.protocol === 'https:' && net.isIP(stripBrackets(url.hostname)) === 0
+        ? stripBrackets(url.hostname)
+        : undefined,
+      signal: init.signal || undefined,
+    }, (incoming) => {
+      const responseHeaders = new Headers()
+      for (const [name, value] of Object.entries(incoming.headers)) {
+        if (Array.isArray(value)) {
+          for (const item of value) responseHeaders.append(name, item)
+        } else if (value !== undefined) {
+          responseHeaders.set(name, value)
+        }
+      }
+      const responseBody = responseHasNoBody(method, incoming.statusCode || 0)
+        ? null
+        : Readable.toWeb(incoming) as ReadableStream<Uint8Array>
+      resolve(new Response(responseBody, {
+        status: incoming.statusCode || 502,
+        statusText: incoming.statusMessage,
+        headers: responseHeaders,
+      }))
+    })
+    request.on('error', reject)
+    if (body !== undefined) request.write(body)
+    request.end()
+  })
 }
 
 /**
@@ -170,21 +274,24 @@ export async function assertSsrfSafe(rawUrl: string): Promise<SsrfCheckResult> {
 export async function safeFetch(
   rawUrl: string,
   init: RequestInit = {},
-  options: { maxRedirects?: number } = {}
+  options: {
+    maxRedirects?: number
+    lookupAll?: LookupAll
+    requestPinned?: PinnedRequest
+  } = {}
 ): Promise<Response> {
   const maxRedirects = options.maxRedirects ?? 3
+  const lookupAll = options.lookupAll ?? dns.lookup
+  const pinnedRequest = options.requestPinned ?? requestPinned
   let current = rawUrl
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
-    const check = await assertSsrfSafe(current)
+    const check = await assertSsrfSafe(current, lookupAll)
     if (!check.ok) {
       throw new Error(`SSRF_REJECTED:${check.reason}`)
     }
 
-    const response = await fetch(check.url.toString(), {
-      ...init,
-      redirect: 'manual',
-    })
+    const response = await pinnedRequest(check.url, init, check.addresses[0])
 
     const isRedirect = response.status >= 300 && response.status < 400
     const location = response.headers.get('location')
@@ -193,8 +300,10 @@ export async function safeFetch(
     }
 
     if (hop === maxRedirects) {
+      await response.body?.cancel().catch(() => undefined)
       throw new Error('SSRF_REJECTED:TOO_MANY_REDIRECTS')
     }
+    await response.body?.cancel().catch(() => undefined)
     // 相对重定向基于当前 URL 解析
     current = new URL(location, check.url).toString()
   }

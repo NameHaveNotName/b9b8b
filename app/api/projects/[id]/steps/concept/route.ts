@@ -10,9 +10,24 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
-import { IMAGE_MODELS } from '@/lib/models-config'
+import { IMAGE_MODELS, getPromptLanguageInstruction, getModelPromptLanguage } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
+
+/**
+ * 按目标模型语言校验 LLM 返回的概念图 imagePrompt；
+ * 校验不过时回退到对应语言的中性描述（不硬编码胶片型号词）。
+ */
+function pickConceptImagePrompt(rawPrompt: string, sceneDesc: string, imageModel?: string): string {
+  const isZh = getModelPromptLanguage(imageModel || IMAGE_MODELS.primary) === 'zh'
+  const isValid = isZh
+    ? rawPrompt.trim().length > 5 && /[一-鿿]{2,}/.test(rawPrompt)
+    : rawPrompt.trim().length > 5 && /[a-zA-Z]{3,}/.test(rawPrompt)
+  if (isValid) return rawPrompt.trim()
+  return isZh
+    ? `电影感场景，${sceneDesc}。单张完整画面，空间结构清晰，主光源方向明确，画面无文字无水印。`
+    : `Cinematic scene, ${sceneDesc}. Single full frame, clear spatial structure, defined key lighting, no text or watermark.`
+}
 
 /**
  * 生成概念图提示词（供 generate-prompts 和 generate-images 共用）
@@ -21,7 +36,8 @@ import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 async function generateConceptPrompts(
   project: any,
   frameworkStep: any,
-  stepId: string
+  stepId: string,
+  imageModel?: string
 ): Promise<{ prompts: any[]; totalScenes: number }> {
   const framework = (project.framework || frameworkStep.outputData) as any
   const acts = Array.isArray(framework?.acts) ? framework.acts : []
@@ -33,7 +49,8 @@ async function generateConceptPrompts(
     : ''
 
   const prompt = loadPromptTemplate('concept', {
-    USER_INPUT: JSON.stringify({ framework }) + refHint
+    USER_INPUT: JSON.stringify({ framework }) + refHint,
+    LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(imageModel || IMAGE_MODELS.primary),
   })
   const textClient = await getTextClient()
   const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
@@ -50,13 +67,8 @@ async function generateConceptPrompts(
       const llmScene = parsedScenes.find(
         (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
       )
-      // 过滤空白，确保 englishPrompt 是有效的英文内容
-        const rawPrompt = llmScene?.imagePrompt || ''
-        const isValidEnglish = rawPrompt.trim().length > 5 && /[a-zA-Z]{3,}/.test(rawPrompt)
-        const imagePrompt = isValidEnglish
-          ? rawPrompt.trim()
-          : `Cinematic scene, ${sceneDesc}. Film still, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism.`
-        prompts.push({
+      const imagePrompt = pickConceptImagePrompt(llmScene?.imagePrompt || '', sceneDesc, imageModel)
+      prompts.push({
         id: `prompt_act${actNo}_scene${i + 1}`,
         chineseDesc: sceneDesc,
         englishPrompt: imagePrompt,
@@ -91,7 +103,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
-  const permission = await checkProjectPermission(params.id)
+  const permission = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'CONCEPT' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -134,7 +146,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
     try {
       console.log('[CONCEPT-PROMPT] 收到 generate-prompts 请求')
-      const { prompts } = await generateConceptPrompts(project, frameworkStep, step.id)
+      const promptImageModel = body?.imageModel || (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
+      const { prompts } = await generateConceptPrompts(project, frameworkStep, step.id, promptImageModel)
       await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
@@ -173,7 +186,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
       try {
-        const generated = await generateConceptPrompts(project, frameworkStep, step.id)
+        const generated = await generateConceptPrompts(project, frameworkStep, step.id, imageModel)
         resolvedPrompts = generated.prompts
         console.log(`[CONCEPT-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
         await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
@@ -427,7 +440,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       : ''
 
     const prompt = loadPromptTemplate('concept', {
-      USER_INPUT: JSON.stringify({ framework, selectedStyle: stylePrompt }) + refHintDefault
+      USER_INPUT: JSON.stringify({ framework, selectedStyle: stylePrompt }) + refHintDefault,
+      LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(IMAGE_MODELS.primary),
     })
     const textClient = await getTextClient()
     const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
@@ -453,11 +467,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           const llmScene = parsedScenes.find(
             (s: any) => s.actNumber === actNo && s.sceneNumber === i + 1
           )
-          const rawPrompt = llmScene?.imagePrompt || ''
-          const isValidEnglish = rawPrompt.trim().length > 5 && /[a-zA-Z]{3,}/.test(rawPrompt)
-          const finalPrompt = isValidEnglish
-            ? rawPrompt.trim()
-            : `Cinematic scene, ${sceneDesc}. Film still, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism.`
+          const finalPrompt = pickConceptImagePrompt(llmScene?.imagePrompt || '', sceneDesc, IMAGE_MODELS.primary)
 
           // 工作指令.txt（Round 6 任务一）：多图参考 — 风格图 + 全部角色图
           const result = await imageClient.generateConceptScene(
@@ -555,7 +565,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'CONCEPT' })
   if (!permission.allowed) {
     return permission.response
   }

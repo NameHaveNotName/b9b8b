@@ -16,12 +16,25 @@ import { promisify } from 'util'
 import * as fs from 'fs/promises'
 import * as fsSync from 'fs'
 import * as path from 'path'
-import * as os from 'os'
 import ffmpegStatic from 'ffmpeg-static'
 
-import { execSync } from 'child_process'
+import { execFileSync, execSync } from 'child_process'
 
 const execAsync = promisify(exec)
+
+function isRunnableFfmpeg(candidate: string): boolean {
+  try {
+    execFileSync(candidate, ['-version'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return true
+  } catch (error: any) {
+    console.warn(`[FFMPEG] 跳过不可执行候选 ${candidate}: ${error?.code || error?.message}`)
+    return false
+  }
+}
 
 /**
  * 工作指令.txt（Phase 2 修复）：ffmpeg 路径解析 + 兜底逻辑。
@@ -61,7 +74,7 @@ function resolveFfmpegPath(): string {
     '/tmp/ffmpeg',
   ]
   for (const p of buildDownloadedCandidates) {
-    if (fsSync.existsSync(p)) {
+    if (fsSync.existsSync(p) && isRunnableFfmpeg(p)) {
       console.log('[FFMPEG] 使用构建脚本下载的静态 ffmpeg:', p)
       return p
     }
@@ -71,10 +84,14 @@ function resolveFfmpegPath(): string {
   console.log('[FFMPEG] ffmpeg-static import value:', ffmpegStatic)
   if (ffmpegStatic) {
     if (fsSync.existsSync(ffmpegStatic)) {
-      console.log('[FFMPEG] 使用 ffmpeg-static 路径:', ffmpegStatic)
-      return ffmpegStatic
+      if (isRunnableFfmpeg(ffmpegStatic)) {
+        console.log('[FFMPEG] 使用 ffmpeg-static 路径:', ffmpegStatic)
+        return ffmpegStatic
+      }
+      console.log('[FFMPEG] ffmpeg-static 文件存在但不可执行，继续寻找兜底:', ffmpegStatic)
+    } else {
+      console.log('[FFMPEG] ffmpeg-static 路径文件不存在:', ffmpegStatic)
     }
-    console.log('[FFMPEG] ffmpeg-static 路径文件不存在:', ffmpegStatic)
   }
 
   // 3. 尝试 require.resolve 获取 node_modules 中的真实路径
@@ -91,7 +108,7 @@ function resolveFfmpegPath(): string {
         resolvedPath,
       ]
       for (const c of candidates) {
-        if (fsSync.existsSync(c)) {
+        if (fsSync.existsSync(c) && isRunnableFfmpeg(c)) {
           console.log('[FFMPEG] 使用 node_modules 候选路径:', c)
           return c
         }
@@ -110,18 +127,32 @@ function resolveFfmpegPath(): string {
       '/var/task/node_modules/ffmpeg-static/ffmpeg.exe',
     ]
     for (const nmPath of nmPaths) {
-      if (fsSync.existsSync(nmPath)) {
+      if (fsSync.existsSync(nmPath) && isRunnableFfmpeg(nmPath)) {
         console.log('[FFMPEG] 使用 node_modules 直接路径:', nmPath)
         return nmPath
       }
     }
   } catch {}
 
-  // 5. 系统 PATH 中的 ffmpeg（Linux 用 which，Windows 用 where）
+  // 5. Windows 本地常见的随应用分发版本，仅在确实可运行时采用。
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA
+    const localCandidates = [
+      appData ? path.join(appData, 's7z', 'ffmpeg.exe') : '',
+    ].filter(Boolean)
+    for (const localCandidate of localCandidates) {
+      if (fsSync.existsSync(localCandidate) && isRunnableFfmpeg(localCandidate)) {
+        console.log('[FFMPEG] 使用本机应用附带的可执行版本:', localCandidate)
+        return localCandidate
+      }
+    }
+  }
+
+  // 6. 系统 PATH 中的 ffmpeg（Linux 用 which，Windows 用 where）
   try {
     const cmd = process.platform === 'win32' ? 'where ffmpeg' : 'which ffmpeg'
     const sysPath = execSync(cmd, { encoding: 'utf8' }).trim().split('\n')[0]
-    if (sysPath && fsSync.existsSync(sysPath)) {
+    if (sysPath && fsSync.existsSync(sysPath) && isRunnableFfmpeg(sysPath)) {
       console.log('[FFMPEG] 使用系统 PATH 路径:', sysPath)
       return sysPath
     }
@@ -129,13 +160,13 @@ function resolveFfmpegPath(): string {
     console.log('[FFMPEG] 系统 PATH 查找失败:', err?.message)
   }
 
-  // 6. 尝试 require('ffmpeg-static') 的 CJS 导出（有时和 ESM import 不同）
+  // 7. 尝试 require('ffmpeg-static') 的 CJS 导出（有时和 ESM import 不同）
   try {
     // 运行时惰性加载：静态 import 会在模块加载时就解析二进制路径
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const cjsStatic = require('ffmpeg-static')
     console.log('[FFMPEG] require(ffmpeg-static)=', cjsStatic)
-    if (cjsStatic && fsSync.existsSync(cjsStatic)) {
+    if (cjsStatic && fsSync.existsSync(cjsStatic) && isRunnableFfmpeg(cjsStatic)) {
       console.log('[FFMPEG] 使用 require(ffmpeg-static) 路径:', cjsStatic)
       return cjsStatic
     }
@@ -143,7 +174,7 @@ function resolveFfmpegPath(): string {
     console.log('[FFMPEG] require(ffmpeg-static) 失败:', err?.message)
   }
 
-  // 7. 最终兜底：直接调用 ffmpeg（依赖系统 PATH）
+  // 8. 最终兜底：直接调用 ffmpeg（依赖系统 PATH）
   console.warn('[FFMPEG] 未找到 ffmpeg 可执行文件，尝试直接调用系统 PATH 中的 ffmpeg')
   return 'ffmpeg'
 }
@@ -175,6 +206,11 @@ function getFfmpegBin(): string {
   return _FFMPEG_BIN;
 }
 
+/** Read-only access for technical media probes that use the same validated binary. */
+export function getFfmpegExecutablePath(): string {
+  return getFfmpegBin()
+}
+
 /** 把命令里所有路径用双引号包裹，规避 Windows 下空格/中文路径问题 */
 function quote(p: string): string {
   return `"${p}"`
@@ -198,8 +234,8 @@ async function runFfmpeg(stage: string, cmd: string, maxBuffer = 64 * 1024 * 102
   }
 }
 
-import { makeTempDir } from './temp-utils'
-import { safeFetch } from './ssrf-guard'
+import { makeTempDir } from './temp-utils.ts'
+import { safeFetch } from './ssrf-guard.ts'
 export { makeTempDir }
 
 export async function ensureDir(dir: string): Promise<void> {
@@ -435,6 +471,45 @@ export async function trimVideo(
   ].join(' ')
 
   await runFfmpeg(`trimVideo(${durationSec}s→${path.basename(outputPath)})`, cmd, 128 * 1024 * 1024)
+  return outputPath
+}
+
+/** Extract an arbitrary source range for the 2.0 edit timeline, preserving audio when present. */
+export async function extractVideoRange(
+  inputPath: string,
+  outputPath: string,
+  sourceStartMs: number,
+  sourceEndMs: number
+): Promise<string> {
+  if (!Number.isInteger(sourceStartMs) || sourceStartMs < 0) {
+    throw new Error(`extractVideoRange: invalid sourceStartMs ${sourceStartMs}`)
+  }
+  if (!Number.isInteger(sourceEndMs) || sourceEndMs <= sourceStartMs) {
+    throw new Error(`extractVideoRange: invalid sourceEndMs ${sourceEndMs}`)
+  }
+  const startSec = (sourceStartMs / 1000).toFixed(3)
+  const durationSec = ((sourceEndMs - sourceStartMs) / 1000).toFixed(3)
+  const cmd = [
+    quote(getFfmpegBin()),
+    `-y`,
+    `-ss ${startSec}`,
+    `-i ${quote(inputPath)}`,
+    `-t ${durationSec}`,
+    `-map 0:v:0`,
+    `-map 0:a?`,
+    `-c:v libx264`,
+    `-pix_fmt yuv420p`,
+    `-r 25`,
+    `-c:a aac`,
+    `-b:a 128k`,
+    `-movflags +faststart`,
+    quote(outputPath),
+  ].join(' ')
+  await runFfmpeg(
+    `extractRange(${startSec}s+${durationSec}s→${path.basename(outputPath)})`,
+    cmd,
+    128 * 1024 * 1024
+  )
   return outputPath
 }
 

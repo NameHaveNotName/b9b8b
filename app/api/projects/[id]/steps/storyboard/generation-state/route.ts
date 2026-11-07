@@ -16,7 +16,7 @@ export async function DELETE(req: Request, props: { params: Promise<{ id: string
   const userId = await getCurrentUserId()
   if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
 
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'STORYBOARD' })
   if (!access.allowed) return access.response
 
   const url = new URL(req.url)

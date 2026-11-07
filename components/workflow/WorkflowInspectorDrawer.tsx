@@ -19,6 +19,7 @@ interface WorkflowInspectorDrawerProps {
   run: GenerationRun | null
   onDraftChange: (draft: GenerationDraft) => void
   onSubmit: (draft: GenerationDraft, mode: 'generate' | 'edit-original') => Promise<void> | void
+  onCancelRun?: () => Promise<void> | void
   onLocateStep?: (stepType: string) => void
 }
 
@@ -428,18 +429,32 @@ function WorkbenchAssetShelf({ projectId, run }: { projectId: string; run: Gener
   )
 }
 
-export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, draft, run, onDraftChange, onSubmit, onLocateStep }: WorkflowInspectorDrawerProps) {
+export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, draft, run, onDraftChange, onSubmit, onCancelRun, onLocateStep }: WorkflowInspectorDrawerProps) {
   const [localDraft, setLocalDraft] = useState<GenerationDraft | null>(draft)
   const [activePanel, setActivePanel] = useState<'配置' | '执行'>('配置')
   const [selectedTask, setSelectedTask] = useState<any>(null)
   const [assetUsage, setAssetUsage] = useState<any>(null)
   const [assetUsageSaving, setAssetUsageSaving] = useState(false)
   const [assetUsageMessage, setAssetUsageMessage] = useState('')
+  const [cancelling, setCancelling] = useState(false)
   useEffect(() => setLocalDraft(draft), [draft])
   useEffect(() => {
     setActivePanel(run ? '执行' : '配置')
     if (run) setSelectedTask(null)
   }, [run])
+  useEffect(() => {
+    if (!isOpen) return
+    const previousOverflow = document.body.style.overflow
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [isOpen, onClose])
   const { data: taskData } = useSWR(
     isOpen ? `/api/projects/${projectId}/generation-tasks?limit=20` : null,
     assetFetcher,
@@ -467,7 +482,7 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
     (baseRun?.taskId && task.id === baseRun.taskId)
     || (!baseRun?.taskId && localDraft && task.stepType === localDraft.stepType && (!baseRun?.startedAt || new Date(task.startedAt).getTime() >= new Date(baseRun.startedAt).getTime() - 15000))
   )
-  const effectiveRun: GenerationRun | null = baseRun && persisted ? {
+  const effectiveRun: GenerationRun | null = baseRun && persisted && baseRun.status !== 'interrupted' ? {
     ...baseRun,
     taskId: persisted.id,
     status: persisted.status,
@@ -540,6 +555,12 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
       }
     }
   }
+  const cancelRun = async () => {
+    if (!onCancelRun || cancelling) return
+    if (!window.confirm('确认取消当前任务？关闭副工作台不会取消任务，只有此操作会中断并按现有规则处理退款。')) return
+    setCancelling(true)
+    try { await onCancelRun() } finally { setCancelling(false) }
+  }
   if (!isOpen) return null
   const updateDraft = (next: GenerationDraft) => { setLocalDraft(next); onDraftChange(next) }
   const restoreTask = (task: any) => {
@@ -571,20 +592,27 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
   }
 
   return (
-    <aside className="fixed right-0 top-0 z-50 flex h-full w-[min(92vw,440px)] flex-col border-l border-stone-200 bg-white shadow-2xl">
+    <>
+      <button type="button" aria-label="关闭生成工作台" onClick={onClose} className="fixed inset-0 z-40 cursor-default bg-stone-950/25 backdrop-blur-[1px]" />
+      <aside role="dialog" aria-modal="true" aria-label="生成与执行" className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[760px] flex-col overflow-hidden border-l border-stone-200 bg-white shadow-[-24px_0_80px_rgba(28,25,23,0.22)] sm:w-[calc(100vw-2rem)]">
       <header className="border-b border-stone-100 px-4 py-3">
-        <div className="flex items-center justify-between"><div className="flex items-center gap-2"><Settings2 className="h-4 w-4 text-amber-700" /><div><p className="text-sm font-semibold text-stone-800">生成工作台</p><p className="text-[10px] text-stone-500">配置与执行使用同一份任务数据</p></div></div><button type="button" onClick={onClose} className="rounded p-1.5 text-stone-500 hover:bg-stone-100"><X className="h-4 w-4" /></button></div>
-        <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg bg-stone-100 p-1">{(['配置', '执行'] as const).map((item) => <button type="button" key={item} disabled={item === '执行' && !run} onClick={() => setActivePanel(item)} className={`rounded-md px-2 py-1 text-center text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${activePanel === item ? 'bg-white text-amber-800 shadow-sm' : 'text-stone-500'}`}>{item}</button>)}</div>
+        <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2"><Settings2 className="h-4 w-4 shrink-0 text-amber-700" /><div className="min-w-0"><p className="text-sm font-semibold text-stone-800">生成与执行</p><p className="truncate text-[10px] text-stone-500">关闭只收起副工作台；进行中的任务会继续在后台运行</p></div></div>
+          <div className="grid w-48 grid-cols-2 gap-1 rounded-lg bg-stone-100 p-1">{(['配置', '执行'] as const).map((item) => <button type="button" key={item} disabled={item === '执行' && !run} onClick={() => setActivePanel(item)} className={`rounded-md px-2 py-1 text-center text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${activePanel === item ? 'bg-white text-amber-800 shadow-sm' : 'text-stone-500'}`}>{item}</button>)}</div>
+          {effectiveRun?.status === 'running' && onCancelRun && <button type="button" onClick={cancelRun} disabled={cancelling} className="shrink-0 rounded-lg border border-red-200 px-2.5 py-1.5 text-[10px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-40">{cancelling ? '取消中…' : '取消任务'}</button>}
+          <button type="button" onClick={onClose} aria-label="关闭副工作台但不取消任务" title="收起副工作台（不取消任务）" className="rounded-lg p-2 text-stone-500 hover:bg-stone-100"><X className="h-4 w-4" /></button>
+        </div>
       </header>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto px-4 py-5">
         <div className="space-y-6">
           {!localDraft ? <div className="space-y-4"><div className="flex min-h-40 flex-col items-center justify-center text-center"><Settings2 className="h-10 w-10 text-stone-300" /><p className="mt-3 text-sm font-medium text-stone-600">尚未选择生成任务</p><p className="mt-1 max-w-xs text-xs leading-relaxed text-stone-500">可从步骤发起生成，或恢复下方最近任务的真实执行记录。</p></div>{(taskData?.tasks || []).slice(0, 5).map((task: any) => <button type="button" key={task.id} onClick={() => restoreTask(task)} className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-3 text-left hover:border-amber-300"><div><p className="text-xs font-semibold text-stone-700">{STEP_LABELS[task.stepType] || task.stepType || task.actionKey}</p><p className="mt-1 text-[10px] text-stone-500">{task.message}</p></div><span className="ml-3 shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[10px] text-stone-600">恢复</span></button>)}</div> : activePanel === '配置' ? <div data-asset-usage-step={localDraft.stepType} className="rounded-xl outline-none transition"><ConfigurationView draft={localDraft} run={effectiveRun} onChange={updateDraft} onSubmit={onSubmit} />{['IDEATION', 'FRAMEWORK'].includes(localDraft.stepType) && <div className="mt-3 space-y-2"><p className="rounded-lg border border-dashed border-amber-200 bg-amber-50/50 px-3 py-2 text-center text-[10px] text-amber-800">可将角色卡、环境设定、故事模板或风格指南拖到本配置区</p>{(constraintData?.constraints || []).map((constraint: any) => <div key={constraint.id} className="flex items-center justify-between rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2"><div><p className="text-xs font-medium text-emerald-800">{constraint.title}</p><p className="mt-0.5 text-[10px] text-emerald-700">{constraint.asset.contentType} · {constraint.strength === 'HARD' ? '硬约束' : '软偏好'} · {constraint.mergeStrategy}</p></div><button type="button" onClick={() => removeAssetUsage(constraint.id)} className="rounded p-1 text-emerald-700 hover:bg-emerald-100" title="从当前步骤移除"><X className="h-3.5 w-3.5" /></button></div>)}</div>}</div> : effectiveRun ? <ExecutionView run={effectiveRun} onBackToConfig={() => setActivePanel('配置')} /> : <div className="py-12 text-center text-xs text-stone-500">提交配置后将在这里显示执行过程。</div>}
           {assetUsageMessage && <div className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-600">{assetUsageMessage}</div>}
           <WorkbenchAssetShelf projectId={projectId} run={run} />
         </div>
       </div>
-      {localDraft && onLocateStep && <footer className="border-t border-stone-100 px-4 py-3"><button type="button" onClick={() => onLocateStep(localDraft.stepType)} className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-amber-800"><LocateFixed className="h-3.5 w-3.5" />定位到对应步骤</button></footer>}
+      {localDraft && onLocateStep && <footer className="border-t border-stone-100 px-4 py-3"><div className="flex items-center justify-between gap-3"><button type="button" onClick={() => onLocateStep(localDraft.stepType)} className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-amber-800"><LocateFixed className="h-3.5 w-3.5" />定位到对应步骤并收起</button><span className="text-[10px] text-stone-400">收起 ≠ 取消任务</span></div></footer>}
       {assetUsage && <div className="absolute inset-0 z-20 flex items-end bg-black/25 p-3"><div className="max-h-[85vh] w-full overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-stone-800">确认如何使用“{assetUsage.preview.title}”</p><p className="mt-1 text-xs text-stone-500">目标：{STEP_LABELS[assetUsage.targetStep]}。确认前不会复制资产或改写项目。</p></div><button type="button" onClick={() => setAssetUsage(null)} className="rounded p-1 text-stone-500"><X className="h-4 w-4" /></button></div>{assetUsage.preview.conflicts?.length > 0 && <div className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{assetUsage.preview.conflicts.join('；')}</div>}<div className="mt-3 space-y-2"><p className="text-xs font-semibold text-stone-700">将使用的字段</p>{assetUsage.preview.fields.map((field: string) => <label key={field} className="flex items-center gap-2 rounded-lg border border-stone-100 px-2.5 py-2 text-xs text-stone-600"><input type="checkbox" checked={assetUsage.selectedFields.includes(field)} onChange={(event) => setAssetUsage((current: any) => ({ ...current, selectedFields: event.target.checked ? [...current.selectedFields, field] : current.selectedFields.filter((item: string) => item !== field) }))} />{field}</label>)}</div><div className="mt-3 grid grid-cols-2 gap-2"><label className="text-[10px] text-stone-500">约束强度<select value={assetUsage.strength} onChange={(event) => setAssetUsage((current: any) => ({ ...current, strength: event.target.value }))} className="mt-1 w-full rounded-lg border border-stone-200 px-2 py-2 text-xs"><option value="SOFT">软偏好</option><option value="HARD">硬约束</option></select></label><label className="text-[10px] text-stone-500">冲突策略<select value={assetUsage.mergeStrategy} onChange={(event) => setAssetUsage((current: any) => ({ ...current, mergeStrategy: event.target.value }))} className="mt-1 w-full rounded-lg border border-stone-200 px-2 py-2 text-xs"><option value="ADD">新增</option><option value="MERGE_SELECTED_FIELDS">合并所选字段</option><option value="REPLACE">替换</option></select></label></div><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setAssetUsage(null)} className="rounded-lg px-3 py-2 text-xs text-stone-600">取消</button><button type="button" disabled={assetUsageSaving || assetUsage.selectedFields.length === 0} onClick={applyAssetUsage} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{assetUsageSaving ? '应用中…' : '复制到项目并应用'}</button></div></div></div>}
-    </aside>
+      </aside>
+    </>
   )
 }

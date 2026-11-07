@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { realTextClient } from '@/lib/api-clients/text'
 import { loadPromptTemplate } from '@/lib/prompts'
+import { getPromptLanguageInstruction } from '@/lib/models-config'
 
 const RESULTS_DIR = path.join(process.cwd(), '.kimi', 'api-test-results')
 
@@ -118,7 +119,10 @@ async function main() {
   // 测试文本模板
   await testTemplate('ideation', { USER_INPUT: '赛博朋克剑客在雨夜霓虹中复仇的故事' }, 'text')
   await testTemplate('style', { USER_INPUT: JSON.stringify({ visualStyle: 'cyberpunk noir', background: 'future Tokyo' }) }, 'text')
-  await testTemplate('character', { USER_INPUT: JSON.stringify({ title: '赛博剑客', characters: [{ name: 'Akira', description: 'a cyber-samurai' }] }) }, 'text')
+  await testTemplate('character', {
+    USER_INPUT: JSON.stringify({ title: '赛博剑客', characters: [{ name: 'Akira', description: 'a cyber-samurai' }] }),
+    LANGUAGE_INSTRUCTION: getPromptLanguageInstruction('gpt-image-1'),
+  }, 'text')
   await testTemplate('review-consistency', { USER_INPUT: '镜头1: 剑客站在雨中\n镜头2: 剑客拔刀' }, 'text')
 
   // 测试分拆的 storyboard

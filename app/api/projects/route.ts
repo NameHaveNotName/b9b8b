@@ -5,6 +5,10 @@ import { prisma } from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser, getCurrentUserId } from '@/lib/auth-helpers';
 import { projectDashboardSelect, projectCoreSelect } from '@/lib/db/project-select';
+import { ensureProjectAssetSnapshot } from '@/lib/project-asset-snapshots';
+import { selectConstraintPayload } from '@/lib/structured-assets';
+import { buildInitialAssetConstraintSpecs, normalizeInitialAssetIds, supportsInitialProjectImport } from '@/lib/project-asset-imports';
+import { buildInitialWorkflowSteps } from '@/lib/workflow-steps';
 
 export async function GET() {
   try {
@@ -50,6 +54,17 @@ export async function POST(req: Request) {
 
     const trimmedTitle = title.trim();
 
+    const initialAssetIds = normalizeInitialAssetIds(body?.initialAssetIds);
+    const initialAssets = initialAssetIds.length > 0
+      ? await prisma.userAsset.findMany({
+          where: { id: { in: initialAssetIds }, userId: user.id, deletedAt: null },
+          select: { id: true, contentType: true, structuredPayload: true, currentRevisionId: true },
+        })
+      : [];
+    if (initialAssets.length !== initialAssetIds.length || initialAssets.some((asset) => !supportsInitialProjectImport(asset.contentType) || !asset.structuredPayload || !asset.currentRevisionId)) {
+      return NextResponse.json({ error: 'ASSET_IMPORT_INVALID', message: '所选资产已失效或不适合在项目创建时导入' }, { status: 400 });
+    }
+
     const project = await prisma.project.create({
       data: {
         userId: user.id,
@@ -63,33 +78,41 @@ export async function POST(req: Request) {
     console.log('[POST /api/projects] created project:', project.id, 'with userId:', user.id)
 
     // 自动初始化 9 步 WorkflowStep 记录（全部 PENDING）
-    const stepTypes: string[] = [
-      'IDEATION',
-      'FRAMEWORK',
-      'STYLE',
-      'CHARACTER',
-      'CONCEPT',
-      'TRAILER',
-      'STORYBOARD',
-      'KEYFRAMES',
-      'VIDEO_DIRECT',
-    ];
-
     const existingSteps = await prisma.workflowStep.findMany({
       where: { projectId: project.id },
       select: { stepType: true },
     });
     const existingTypes = new Set(existingSteps.map((s: any) => s.stepType));
-    const stepsToCreate = stepTypes
-      .map((type: string, idx: number) => ({ projectId: project.id, stepType: type as any, order: idx, status: 'PENDING' as const }))
+    const stepsToCreate = buildInitialWorkflowSteps(project.id)
       .filter((s: any) => !existingTypes.has(s.stepType));
 
     if (stepsToCreate.length > 0) {
       await prisma.workflowStep.createMany({ data: stepsToCreate });
     }
 
+    let importedAssetCount = 0;
+    const assetImportWarnings: Array<{ assetId: string; error: string }> = [];
+    for (const source of initialAssets) {
+      try {
+        const snapshot = await ensureProjectAssetSnapshot({ projectId: project.id, userAssetId: source.id, actorId: user.id });
+        const payloadSnapshot = selectConstraintPayload(source.contentType, source.structuredPayload);
+        if (Object.keys(payloadSnapshot).length === 0) throw new Error('NO_USABLE_FIELDS');
+        for (const spec of buildInitialAssetConstraintSpecs()) {
+          await prisma.projectAssetConstraint.upsert({
+            where: { projectId_assetId_targetStep_targetKey: { projectId: project.id, assetId: snapshot.asset.id, targetStep: spec.targetStep, targetKey: spec.targetKey } },
+            create: { projectId: project.id, assetId: snapshot.asset.id, ...spec, selectedFields: Object.keys(payloadSnapshot), payloadSnapshot: payloadSnapshot as any, createdById: user.id },
+            update: { ...spec, selectedFields: Object.keys(payloadSnapshot), payloadSnapshot: payloadSnapshot as any, enabled: true, createdById: user.id },
+          });
+        }
+        importedAssetCount += 1;
+      } catch (error: any) {
+        console.error('[POST /api/projects] initial asset import failed:', source.id, error?.message || error);
+        assetImportWarnings.push({ assetId: source.id, error: 'ASSET_IMPORT_FAILED' });
+      }
+    }
+
     revalidatePath('/dashboard')
-    return NextResponse.json({ project })
+    return NextResponse.json({ project, importedAssetCount, assetImportWarnings })
   } catch (error: any) {
     console.error('[POST /api/projects] error:', error)
     return NextResponse.json(

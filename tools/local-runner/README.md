@@ -11,7 +11,7 @@ npm run local-runner
 启动后打开：
 
 ```text
-http://localhost:4317
+http://127.0.0.1:4317
 ```
 
 ## 使用
@@ -35,6 +35,15 @@ http://localhost:4317
 
 ## 注意
 
-Cookie 等敏感配置保存在 `.local-runner/state.json`，该目录已加入 `.gitignore`，不要提交或分享。
+Cookie 不再写入普通的 `.local-runner/state.json`，而是单独保存在仅供当前用户使用的
+`.local-runner/session-cookie.secret`；整个目录已加入 `.gitignore`，仍然不要提交或分享。
+
+Runner 默认只允许连接正式站点以及本机 `localhost:3000` / `127.0.0.1:3000`。如需连接可信的
+预发布站点，可在启动前设置逗号分隔的 `LOCAL_RUNNER_ALLOWED_ORIGINS`，例如：
+
+```powershell
+$env:LOCAL_RUNNER_ALLOWED_ORIGINS = 'https://staging.example.com'
+npm run local-runner
+```
 
 如果 Windows 当前用户启用了代理，例如 Edge 正在使用 `127.0.0.1:7890`，启动器会自动读取并让 Node 请求走同一个代理。

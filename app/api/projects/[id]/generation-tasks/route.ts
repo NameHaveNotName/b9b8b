@@ -1,9 +1,11 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
+import type { WorkflowStepType } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { generationTaskInclude, serializeGenerationTask, stepTypeFromAction } from '@/lib/generation-task-view'
+import { WORKFLOW_STEP_TYPES } from '@/lib/workflow-steps'
 
 function cleanText(value: unknown, max = 12000) {
   return typeof value === 'string' ? value.slice(0, max) : ''
@@ -42,7 +44,7 @@ function sanitizeSnapshot(raw: any) {
 
 export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
   const { id: projectId } = await props.params
-  const access = await checkProjectPermission(projectId)
+  const access = await checkProjectPermission(projectId, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
   const { searchParams } = new URL(req.url)
   const limit = Math.min(50, Math.max(1, Number(searchParams.get('limit') || 20)))
@@ -57,12 +59,12 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
 
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const { id: projectId } = await props.params
-  const access = await checkProjectPermission(projectId)
-  if (!access.allowed) return access.response
   const body = await req.json().catch(() => ({}))
   const snapshot = sanitizeSnapshot(body.snapshot)
   const stepType = cleanText(body.stepType, 40).toUpperCase()
-  if (!snapshot || !stepType) return NextResponse.json({ error: 'VALIDATION_001' }, { status: 400 })
+  if (!snapshot || !WORKFLOW_STEP_TYPES.includes(stepType as WorkflowStepType)) return NextResponse.json({ error: 'VALIDATION_001' }, { status: 400 })
+  const access = await checkProjectPermission(projectId, undefined, { mode: 'EDIT_STEP', stepType: stepType as WorkflowStepType })
+  if (!access.allowed) return access.response
 
   const submittedAtMs = snapshot.submittedAt ? Date.parse(snapshot.submittedAt) : Number.NaN
   const lowerBound = Number.isFinite(submittedAtMs)

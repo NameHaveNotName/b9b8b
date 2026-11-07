@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
+import type { WorkflowStepType } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
@@ -12,11 +13,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const { id: projectId } = await props.params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  const access = await checkProjectPermission(projectId)
-  if (!access.allowed) return access.response
   const body = await req.json().catch(() => ({}))
   const targetStep = typeof body.targetStep === 'string' ? body.targetStep.toUpperCase() : ''
   if (!TARGET_STEPS.has(targetStep)) return NextResponse.json({ error: 'TARGET_UNSUPPORTED' }, { status: 400 })
+  const access = await checkProjectPermission(projectId, undefined, { mode: 'EDIT_STEP', stepType: targetStep as WorkflowStepType })
+  if (!access.allowed) return access.response
 
   const personal = typeof body.userAssetId === 'string'
     ? await prisma.userAsset.findFirst({ where: { id: body.userAssetId, userId: user.id, deletedAt: null } }) : null

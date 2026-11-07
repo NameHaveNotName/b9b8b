@@ -48,6 +48,13 @@ try {
         adoptionStatus: true,
       },
     }),
+    prisma.storySeries.findFirst({ select: { id: true, userId: true, currentBibleVersion: true, monthlyPointBudget: true, batchGenerationLimit: true, requireBatchApproval: true } }),
+    prisma.storySeason.findFirst({ select: { id: true, seriesId: true, seasonNumber: true } }),
+    prisma.seriesBibleRevision.findFirst({ select: { id: true, seriesId: true, revisionNumber: true, payload: true } }),
+    prisma.storyEpisode.findFirst({ select: { id: true, seriesId: true, seasonId: true, projectId: true, bibleRevisionId: true, episodeNumber: true, continuityBefore: true, continuityAfter: true } }),
+    prisma.seriesAsset.findFirst({ select: { id: true, seriesId: true, sourceUserAssetId: true, sourceUserAssetRevisionId: true, contentType: true, storageKey: true, enabled: true } }),
+    prisma.seriesMembership.findFirst({ select: { id: true, seriesId: true, userId: true, role: true, assignedEpisodeIds: true, status: true } }),
+    prisma.seriesBatchApproval.findFirst({ select: { id: true, seriesId: true, requestedById: true, reviewedById: true, episodeIds: true, requestedPoints: true, status: true } }),
   ])
   console.log('database schema contract verified')
 } finally {

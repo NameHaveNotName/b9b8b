@@ -15,7 +15,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    const permission = await checkProjectPermission(params.id)
+    const permission = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
     if (!permission.allowed) {
       return permission.response
     }
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   try {
     const userId = await getCurrentUserId()
     if (!userId) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-    const permission = await checkProjectPermission(params.id)
+    const permission = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'STYLE' })
     if (!permission.allowed) {
       return permission.response
     }

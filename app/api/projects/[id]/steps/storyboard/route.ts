@@ -14,12 +14,14 @@ import { uploadFile, uploadThumbnail, getSignedFileUrl, deleteFile } from '@/lib
 import { claimStepForGeneration, completeStep, failStep, canExecuteStep, mergeStepOutputData } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import sharp from 'sharp'
-import { IMAGE_MODELS } from '@/lib/models-config'
+import { IMAGE_MODELS, getPromptLanguageInstruction, getStoryboardVideoCapabilityInstruction } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, getImageGenerationCost } from '@/lib/points-config'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
+import { getBusinessGoalPrompt } from '@/lib/business-goals'
 import { setCurrentOperationTarget } from '@/lib/supplier-observability'
 import { refreshShotsUrls } from '@/lib/resolve-media-url'
+import { shouldUsePreviousShotContinuity } from '@/lib/video-shot-structure'
 
 const STORYBOARD_REFERENCE_IMAGE_MODEL = 'gpt-image-1'
 const STORYBOARD_MIN_TOTAL_SHOTS = 20
@@ -99,6 +101,7 @@ async function generateStoryboardByAct(textClient: any, framework: any, act: any
     ACT_PACING: act.pacing || '张弛有度',
     KEY_SCENES: Array.isArray(act.keyScenes) ? act.keyScenes.join('；') : '',
     TAG_INSTRUCTIONS: tagInstructions || '',
+    VIDEO_MODEL_CAPABILITIES: getStoryboardVideoCapabilityInstruction(),
   })
   const text = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
   return extractJsonFromMarkdown(text) || []
@@ -115,6 +118,8 @@ async function generateStoryboardImagePrompt(textClient: any, input: {
   previousDescription?: string
   nextDescription?: string
   referencePolicy: string
+  /** 目标生图模型：决定 imagePrompt 用中文还是英文撰写 */
+  imageModel: string
 }): Promise<{ imagePrompt: string; negativePrompt?: string }> {
   const prompt = loadPromptTemplate('storyboard-image-prompt', {
     CURRENT_DESCRIPTION: input.currentDescription || '',
@@ -127,6 +132,7 @@ async function generateStoryboardImagePrompt(textClient: any, input: {
     PREVIOUS_DESCRIPTION: input.previousDescription || '',
     NEXT_DESCRIPTION: input.nextDescription || '',
     REFERENCE_POLICY: input.referencePolicy || '',
+    LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(input.imageModel),
   })
 
   const text = await textClient.generate(prompt, { temperature: 0.35, maxTokens: 1200 })
@@ -180,19 +186,6 @@ function normalizeActNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function uniqueUrlList(...groups: string[][]): string[] {
-  const seen = new Set<string>()
-  const result: string[] = []
-  for (const group of groups) {
-    for (const url of group) {
-      if (!url || seen.has(url)) continue
-      seen.add(url)
-      result.push(url)
-    }
-  }
-  return result
-}
-
 export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const userId = await getCurrentUserId()
@@ -200,7 +193,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'STORYBOARD' })
   if (!access.allowed) {
     return access.response
   }
@@ -250,10 +243,12 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
         ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].storyboard
         : ''
+      const goalInstructions = getBusinessGoalPrompt(outputData?.businessGoal, 'storyboard')
+      const storyboardInstructions = [goalInstructions, tagInstructions].filter(Boolean).join('\n\n')
 
       const shotBudgets = distributeStoryboardShotBudget(acts)
       const actResults = await Promise.all(
-        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, tagInstructions, actIndex + 1, shotBudgets[actIndex]))
+        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, storyboardInstructions, actIndex + 1, shotBudgets[actIndex]))
       )
       let allShots = normalizeStoryboardActResults(actResults, acts)
       if (!Array.isArray(allShots) || allShots.length === 0) {
@@ -341,10 +336,12 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       const tagInstructions2 = projectTag2 && PROJECT_TAG_PROMPTS[projectTag2 as keyof typeof PROJECT_TAG_PROMPTS]
         ? PROJECT_TAG_PROMPTS[projectTag2 as keyof typeof PROJECT_TAG_PROMPTS].storyboard
         : ''
+      const goalInstructions2 = getBusinessGoalPrompt(ideationOutput?.businessGoal, 'storyboard')
+      const storyboardInstructions2 = [goalInstructions2, tagInstructions2].filter(Boolean).join('\n\n')
 
       const shotBudgets = distributeStoryboardShotBudget(acts)
       const actResults = await Promise.all(
-        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, tagInstructions2, actIndex + 1, shotBudgets[actIndex]))
+        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, storyboardInstructions2, actIndex + 1, shotBudgets[actIndex]))
       )
       currentAllShots = normalizeStoryboardActResults(actResults, acts)
       if (!Array.isArray(currentAllShots) || currentAllShots.length === 0) {
@@ -629,7 +626,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
               })
               .join('、')
 
-            const llmPrompt = `基于以下分镜信息，生成一段适合 AI 图像生成模型的英文提示词（prompt）。这张图片将直接作为视频首帧，必须是单张完整画面，不能是拼接/分屏/多格漫画。
+            const llmPrompt = `基于以下分镜信息，生成一段适合 AI 图像生成模型的英文提示词（prompt）。这张图片将直接作为当前镜头的视频首帧，必须是单张完整画面，不能是拼接/分屏/多格漫画。
 
 分镜描述：${shot.description || promptItem.chineseDesc || ''}
 运镜方式：${shot.cameraMove || promptItem.cameraMove || '固定'}
@@ -638,16 +635,15 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 涉及角色：${characterNames || '无'}
 
 要求：
-1. 提示词必须包含场景环境、角色动作、光影氛围、镜头感描述
-2. 如果涉及角色，必须引用该角色的形象特征（从角色设定中提取），确保角色一致性
-3. 如果是旅游/城市/路线镜头，地点和体验必须是主体，人物只做导览；除非镜头明确要求人物特写，人物通常只占画面高度 15%-30%，不要挡住建筑、街道、船窗、河岸、展品或入口。
-4. 如果镜头涉及主观视角、过肩跟随、步行移动、船窗/车窗、入口、检票、交通连接，必须优先表现观众视角和真实空间关系，可以不出现人物。
+1. 当前镜头描述是最高优先级，提示词必须准确表现当前镜头的起始状态与核心动作，不得把上一镜头或参考图中的无关物件、地点、动作带入当前镜头。
+2. 如果涉及角色，只继承角色的面部身份、发型、体型比例与核心服装颜色分区（来自 CHARACTER 步骤的角色母版图），严禁复制角色母版中的复杂背景或无关道具。
+3. 必须用具体的视觉名词描述场景几何、人物朝向（facing left/right/camera）、所持道具结构、主光源方向、景别与机位；禁止使用"参考图1""shot_001"等只有人类看得懂的占位编号。
+4. 若当前镜头是角色关键动作、情绪反应或手持道具特写，必须保证面部神态、视线方向或手部接触点清晰可读，不被前景杂物遮挡；若当前镜头明确为环境建立空镜或纯物体特写，则按描述不出现无关人物。
 5. 禁止让图像模型绘制可读中文、英文招牌、校训、票面文字、二维码、UI 文本、水印、字幕或 logo；需要文字信息时，只表现信息牌/手机/票据轮廓或后期留白区域。
-6. 真实城市点位要克制幻想化：避免虚构古街牌坊、宫殿化建筑、错误地标混搭、江南园林化船只、随机天际线。
-7. 提示词长度控制在 120-240 词，适合即梦/Flux/DALL-E 等模型
-8. 同时生成一个中文描述（用于前端展示）
-9. 【最高优先级】必须输出单张完整画面（single full frame），禁止出现以下任何形式：分屏 split-screen、多格 panels、漫画分镜 comic layout、拼贴 collage、三联画 triptych、双联画 diptych、时间轴 timeline、前后对比 before/after、白天黑夜并列 day-night split。只描述一个单一瞬间的单一画面。
-10. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
+6. 提示词长度控制在 120-240 词，适合即梦/Flux/DALL-E/GPT-Image 等模型。
+7. 同时生成一个中文描述（用于前端展示）。
+8. 【最高优先级】必须输出单张完整画面（single full frame），禁止出现以下任何形式：分屏 split-screen、多格 panels、漫画分镜 comic layout、拼贴 collage、三联画 triptych、双联画 diptych、时间轴 timeline、前后对比 before/after、白天黑夜并列 day-night split。只描述一个单一瞬间的单一画面。
+9. 输出必须是有效的 JSON 格式，不要包含任何其他文字：
 {"prompt": "英文生图提示词...", "caption": "中文画面描述..."}${sbRefHint}`
 
             try {
@@ -760,14 +756,16 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       // 查找上一个镜头（同幕内），用于画面连贯性
       let previousShotImageUrl: string | null = null
       let previousShotDesc: string | null = null
+      let previousShot: any | null = null
       let nextShotDesc = ''
       const targetIndex = actPrompts.findIndex((p: any) => p.shotId === targetShotId)
       if (targetIndex > 0) {
         const prevPrompt = actPrompts[targetIndex - 1]
+        previousShot = allShots.find((s: any) => s.shotId === prevPrompt.shotId && s.actNumber === actNumber) || prevPrompt
         const prevAsset = cleanedShotAssets.find((s: any) => s.shotId === prevPrompt.shotId && s.actNumber === actNumber)
         if (prevAsset?.url) {
           previousShotImageUrl = prevAsset.url
-          previousShotDesc = allShots.find((s: any) => s.shotId === prevPrompt.shotId && s.actNumber === actNumber)?.description || prevPrompt.chineseDesc || ''
+          previousShotDesc = previousShot?.description || prevPrompt.chineseDesc || ''
           console.log(`[STORYBOARD-ACT] 上一镜头 ${prevPrompt.shotId} 已有图片，用作连贯参考`)
         }
       }
@@ -825,22 +823,52 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         .filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url))
         .filter((url, index, all) => all.indexOf(url) === index)
 
-      const refImages = uniqueUrlList(
-        extraRefUrls,
-        characterImageUrls,
-        styleRefUrl ? [styleRefUrl] : [],
-        previousShotImageUrl ? [previousShotImageUrl] : [],
-        userRefUrls
+      // 上一镜参考仅在同一连续空间或明确连续动作时才真正生效，避免跨场景/跨角色串图污染
+      const isSameSceneForContinuity = previousShotImageUrl
+        ? shouldUsePreviousShotContinuity(previousShot, currentShot)
+        : false
+      const effectivePreviousShotImageUrl = isSameSceneForContinuity ? previousShotImageUrl : null
+
+      type ReferenceRole = 'topPriority' | 'character' | 'style' | 'previousShot' | 'userReference'
+      const referenceEntries: Array<{ url: string; roles: Set<ReferenceRole>; instructions: string[] }> = []
+      const referenceByUrl = new Map<string, (typeof referenceEntries)[number]>()
+      const addReferenceGroup = (urls: string[], role: ReferenceRole, instruction: string) => {
+        for (const url of urls) {
+          if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) continue
+          let entry = referenceByUrl.get(url)
+          if (!entry) {
+            entry = { url, roles: new Set<ReferenceRole>(), instructions: [] }
+            referenceEntries.push(entry)
+            referenceByUrl.set(url, entry)
+          }
+          entry.roles.add(role)
+          if (!entry.instructions.includes(instruction)) entry.instructions.push(instruction)
+        }
+      }
+
+      // 顺序决定供应商数组中的 Picture 编号；同一 URL 跨职责出现时合并职责，不再让编号游标错位。
+      addReferenceGroup(extraRefUrls, 'topPriority', 'top-priority composition/structure reference; follow its assigned visual content')
+      addReferenceGroup(characterImageUrls, 'character', 'character identity master; lock face, hairstyle, proportions and costume colors only; do not copy background or pose')
+      addReferenceGroup(styleRefUrl ? [styleRefUrl] : [], 'style', 'visual style master; match palette, lighting contrast, material texture and medium only; do not inherit people or scene objects')
+      addReferenceGroup(effectivePreviousShotImageUrl ? [effectivePreviousShotImageUrl] : [], 'previousShot', 'previous-shot continuity reference; preserve shared spatial landmarks, light direction and character continuity only')
+      addReferenceGroup(userRefUrls, 'userReference', 'user-provided visual reference; use atmosphere or location similarity only when compatible with the current shot')
+
+      const refImages = referenceEntries.map((entry) => entry.url)
+      const roleSegments = referenceEntries.map((entry, index) =>
+        `Picture ${index + 1}: ${entry.instructions.join('; ')}.`
       )
-      // 优先级：角色 → 风格 → 上一帧 → 用户参考（角色优先保证一致性）
+      const referenceRoleMapping = roleSegments.length > 0
+        ? `REFERENCE ROLES (in the same order as the uploaded reference-image array):\n${roleSegments.join('\n')}\nAlways prefer the current-shot description over unrelated references; do not copy objects, people or layouts from references into the current shot unless explicitly assigned above.`
+        : 'No reference images provided. Generate strictly from the current-shot description and style guide.'
+
       const refStats = {
         total: refImages.length,
-        topPriority: extraRefUrls.length,
-        characters: characterImageUrls.length,
+        topPriority: referenceEntries.filter((entry) => entry.roles.has('topPriority')).length,
+        characters: referenceEntries.filter((entry) => entry.roles.has('character')).length,
         characterIds: characterImageRefs.map((ref) => ref.characterId),
-        style: styleRefUrl ? 1 : 0,
-        previousShot: previousShotImageUrl ? 1 : 0,
-        userReferences: userRefUrls.length,
+        style: referenceEntries.filter((entry) => entry.roles.has('style')).length,
+        previousShot: referenceEntries.filter((entry) => entry.roles.has('previousShot')).length,
+        userReferences: referenceEntries.filter((entry) => entry.roles.has('userReference')).length,
       }
       console.log(`[STORYBOARD-ACT] 参考图统计: total=${refStats.total}, topPriority=${refStats.topPriority}, chars=${refStats.characters}, style=${refStats.style}, prev=${refStats.previousShot}, userRefs=${refStats.userReferences}`)
       refImages.forEach((url, index) => console.log(`[STORYBOARD-ACT] ref[${index}]=${url.slice(0, 100)}`))
@@ -853,7 +881,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       let generatedNegativePrompt = ''
       try {
         const textClientForImagePrompt = await getTextClient()
-        const referencePolicy = `Reference image counts: topPriority=${refStats.topPriority}, characters=${refStats.characters}, style=${refStats.style}, previousShot=${refStats.previousShot}, userReferences=${refStats.userReferences}. Top-priority reference images are mandatory visual constraints and should be followed first. Use character/style references for appearance and style only. Use previous-shot reference only for shared continuity; never copy its unrelated scene objects into the current shot.`
+        const referencePolicy = referenceRoleMapping
         const imagePromptResult = await generateStoryboardImagePrompt(textClientForImagePrompt, {
           currentDescription: currentDesc,
           originalPrompt: shotPrompt.prompt || '',
@@ -862,9 +890,10 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           duration: currentShot?.duration || shotPrompt.duration || '',
           aspectRatio,
           characters: currentShot?.characters || shotPrompt.characters || [],
-          previousDescription: previousShotDesc || '',
+          previousDescription: isSameSceneForContinuity ? (previousShotDesc || '') : '',
           nextDescription: nextShotDesc,
           referencePolicy,
+          imageModel: imageModel || STORYBOARD_REFERENCE_IMAGE_MODEL,
         })
         generatedImagePrompt = imagePromptResult.imagePrompt
         generatedNegativePrompt = imagePromptResult.negativePrompt || ''
@@ -880,15 +909,12 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       const primaryRefHint = characterImageUrls.length > 0
         ? 'Use the character reference images only for character appearance, costume, hairstyle and iconic accessories. Do not copy unrelated background objects from reference images.'
         : ''
-      if (previousShotImageUrl && previousShotDesc) {
-        const charSame = currentShot?.characters?.join(',') === actPrompts[targetIndex]?.characters?.join(',')
-        // 弱化连贯性提示
-        const hint = charSame
-          ? 'Maintain only shared character/style continuity from the previous shot; the current shot description is authoritative.'
-          : 'Use previous-shot context only for narrative continuity; the current shot description is authoritative.'
-        finalPrompt = `${primaryRefHint}\n\n${hint}\n\n${generatedImagePrompt}`
+      if (effectivePreviousShotImageUrl && previousShotDesc) {
+        // 上一镜参考仅在连续场景时保留弱连续性提示
+        const hint = 'Maintain only shared character/style continuity and spatial landmarks from the previous shot; the current shot description remains authoritative.'
+        finalPrompt = `${referenceRoleMapping}\n\n${primaryRefHint}\n\n${hint}\n\n${generatedImagePrompt}`
       } else {
-        finalPrompt = `${primaryRefHint}\n\n${generatedImagePrompt}`
+        finalPrompt = `${referenceRoleMapping}\n\n${primaryRefHint}\n\n${generatedImagePrompt}`
       }
 
       const aspectGuard = aspectRatio === '9:16'
@@ -1233,7 +1259,7 @@ const storageKey = `projects/${params.id}/storyboard/${actNumber}_${shotPrompt.s
 
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
 
   const step = await prisma.workflowStep.findUnique({
@@ -1257,7 +1283,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
   }
 
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'STORYBOARD' })
   if (!access.allowed) {
     return access.response
   }

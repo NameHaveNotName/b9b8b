@@ -4,6 +4,9 @@ import { LoaderCircle, Play, RefreshCw, Film, Music, Check, Mic, Volume2, Edit2,
 import { MINIMAX_TTS_VOICES, MINIMAX_DEFAULT_VOICE_ID, findVoiceById } from '@/lib/voice-config'
 import CostBadge from '@/components/CostBadge'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
+import GenerationStrategyPreviewCard from './GenerationStrategyPreviewCard'
+import VideoQualityReviewCard from './VideoQualityReviewCard'
+import ReferenceRecoveryCard from './ReferenceRecoveryCard'
 
 const SHOW_BATCH_VIDEO_GENERATION = false
 /** 合成看门狗：超过这个时间仍拿不到 combinedVideoUrl 就认为合成失败 */
@@ -431,7 +434,7 @@ export default function VideoDirectPanel({
   const [editingVoiceId, setEditingVoiceId] = useState(MINIMAX_DEFAULT_VOICE_ID)
 
   // 轮询 VideoSegment 数据
-  const { data: segmentData } = useSWR(
+  const { data: segmentData, mutate: mutateSegments } = useSWR(
     `/api/projects/${projectId}/video-segments?stepName=VIDEO_DIRECT`,
     fetcher,
     { refreshInterval: 10000 }
@@ -915,6 +918,8 @@ export default function VideoDirectPanel({
     return (
       <div className="space-y-6">
         {errorBanner}
+        <GenerationStrategyPreviewCard projectId={projectId} stepName="VIDEO_DIRECT" />
+        <VideoQualityReviewCard projectId={projectId} stepName="VIDEO_DIRECT" />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-semibold text-stone-700">
@@ -1090,6 +1095,9 @@ export default function VideoDirectPanel({
                 <div className="divide-y divide-stone-100">
                   {actSegments.map((segment: any) => {
                     const shot = findShotForSegment(segment)
+                    const recoveryReferences = Array.isArray(segment.referenceRecovery?.references)
+                      ? segment.referenceRecovery.references : []
+                    const recoveryReady = recoveryReferences.some((reference: any) => reference.replaced)
                     return (
                       <div
                         key={segment.id}
@@ -1164,11 +1172,11 @@ export default function VideoDirectPanel({
                             {segment.status === 'failed' && (
                               <button
                                 onClick={() => handleGenerateSegment(segment.id)}
-                                disabled={isExecuting}
+                                disabled={isExecuting || (Boolean(segment.referenceRecovery) && !recoveryReady)}
                                 className="flex items-center gap-1 rounded bg-red-600 px-2 py-1 text-[10px] text-white transition hover:bg-red-700 disabled:opacity-50"
                               >
                                 <RefreshCw className="h-3 w-3" />
-                                重试
+                                {segment.referenceRecovery && !recoveryReady ? '先处理参考图' : '重试'}
                               </button>
                             )}
                             {segment.status === 'completed' && (
@@ -1193,6 +1201,13 @@ export default function VideoDirectPanel({
                             <p className="mt-2 text-[11px] text-red-500">
                               {segment.errorMessage}
                             </p>
+                          )}
+                          {segment.status === 'failed' && segment.referenceRecovery && (
+                            <ReferenceRecoveryCard
+                              projectId={projectId}
+                              recovery={segment.referenceRecovery}
+                              onChanged={() => mutateSegments()}
+                            />
                           )}
                         </div>
 

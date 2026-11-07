@@ -272,8 +272,12 @@ export async function finalizeCurrentSupplierOperation(input: {
     })
     if (!operation) return
     const completedAt = new Date()
-    await prisma.operationLog.update({
-      where: { id: operationId },
+    const finalized = await prisma.operationLog.updateMany({
+      where: {
+        id: operationId,
+        status: { not: 'CANCELLED' },
+        pointsRefunded: 0,
+      },
       data: {
         status: input.status,
         success: input.status === 'SUCCEEDED' || input.status === 'PARTIAL',
@@ -284,7 +288,7 @@ export async function finalizeCurrentSupplierOperation(input: {
         durationMs: Math.max(0, completedAt.getTime() - operation.startedAt.getTime()),
       },
     })
-    if (input.status === 'SUCCEEDED' || input.status === 'PARTIAL') {
+    if (finalized.count === 1 && (input.status === 'SUCCEEDED' || input.status === 'PARTIAL')) {
       await attachOperationResults(operationId, input.resultId, input.target)
     }
   } catch (error) {

@@ -17,7 +17,7 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
     if (!project) {
       return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
-    const permission = await checkProjectPermission(project.id)
+    const permission = await checkProjectPermission(project.id, undefined, { mode: 'READ' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -62,7 +62,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     if (!project) {
       return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
     }
-    const permission = await checkProjectPermission(project.id)
+    const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'IDEATION' })
   if (!permission.allowed) {
     return permission.response
   }

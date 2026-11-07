@@ -7,6 +7,7 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
+import { getBusinessGoalPrompt } from '@/lib/business-goals'
 import { extractJsonFromMarkdown } from '@/lib/prompts'
 import { claimStepForGeneration, completeStep, failStep } from '@/lib/workflow-executor'
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
@@ -97,7 +98,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const permission = await checkProjectPermission(project.id)
+  const permission = await checkProjectPermission(project.id, undefined, { mode: 'EDIT_STEP', stepType: 'FRAMEWORK' })
   if (!permission.allowed) {
     return permission.response
   }
@@ -144,11 +145,13 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   const storyLength = ideationOutput.storyLength || 'short'
   const projectTag = ideationOutput?.projectTag || ''
+  const businessGoal = ideationOutput?.businessGoal || ''
   const tagInstructions = projectTag && PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
     ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS].framework
     : ''
   const assetConstraints = await getStepAssetConstraints(params.id, 'FRAMEWORK')
-  const combinedInstructions = [tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
+  const goalInstructions = getBusinessGoalPrompt(businessGoal, 'framework')
+  const combinedInstructions = [goalInstructions, tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
 
   const pointsCheck = await checkPoints(GENERATION_COSTS.FRAMEWORK + GENERATION_COSTS.FRAMEWORK_DEEPEN_ALL, params.id, 'generation.framework', 'TEXT')
   if (!pointsCheck.ok) {
@@ -228,7 +231,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     waitUntil(
       (async () => {
         try {
-          await runDeepening(params.id, step.id, framework, projectTag)
+          await runDeepening(params.id, step.id, framework, projectTag, businessGoal)
         } catch (e: any) {
           console.error('[FRAMEWORK-REGENERATE] 后台深化失败:', e.message)
         }

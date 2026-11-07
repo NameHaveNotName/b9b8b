@@ -42,7 +42,7 @@ export default function UserAssetsPage({
   const [preparedGeneration, setPreparedGeneration] = useState<any>(null)
   const [generationRun, setGenerationRun] = useState<{ status: 'idle' | 'running' | 'completed' | 'failed'; message: string; startedAt?: string; completedAt?: string }>({ status: 'idle', message: '尚未提交生成任务' })
   const [savingStructured, setSavingStructured] = useState(false)
-  const [structuredForm, setStructuredForm] = useState({ contentType: 'CHARACTER_CARD', title: '', summary: '', details: '' })
+  const [structuredForm, setStructuredForm] = useState({ contentType: 'CHARACTER_CARD', title: '', summary: '', details: '', roleOnly: false, narrativeFunction: '' })
   const [selectedAsset, setSelectedAsset] = useState<UserAsset | null>(null)
   const [attachmentUploading, setAttachmentUploading] = useState(false)
   const [form, setForm] = useState({
@@ -157,7 +157,7 @@ export default function UserAssetsPage({
     await fetch('/api/user-assets/candidates', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storageKey: candidate.storageKey }),
+      body: JSON.stringify({ storageKey: candidate.storageKey, candidateToken: candidate.candidateToken }),
     }).catch(() => {})
     setCandidate(null)
     setGenerationRun({ status: 'idle', message: '候选图已放弃，可返回配置重新生成' })
@@ -183,7 +183,15 @@ export default function UserAssetsPage({
   async function saveStructuredAsset() {
     const lines = structuredForm.details.split('\n').map((line) => line.trim()).filter(Boolean)
     const payload = structuredForm.contentType === 'CHARACTER_CARD'
-      ? { name: structuredForm.title, summary: structuredForm.summary, personality: lines, recurringBehaviors: [] }
+      ? {
+          name: structuredForm.title,
+          identityMode: structuredForm.roleOnly ? 'PLOT_FUNCTION_ONLY' : 'DEFINED_PERSONA',
+          role: structuredForm.roleOnly ? structuredForm.title : '',
+          narrativeFunction: structuredForm.narrativeFunction,
+          summary: structuredForm.summary,
+          personality: structuredForm.roleOnly ? [] : lines,
+          recurringBehaviors: structuredForm.roleOnly ? lines : [],
+        }
       : structuredForm.contentType === 'ENVIRONMENT_SETTING'
         ? { name: structuredForm.title, summary: structuredForm.summary, hardRules: lines, softRules: [] }
         : structuredForm.contentType === 'STORY_TEMPLATE'
@@ -195,7 +203,7 @@ export default function UserAssetsPage({
       const response = await fetch('/api/user-assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentType: structuredForm.contentType, title: structuredForm.title, payload }) })
       const result = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(result.message || result.error || '保存失败')
-      setStructuredForm((current) => ({ ...current, title: '', summary: '', details: '' }))
+      setStructuredForm((current) => ({ ...current, title: '', summary: '', details: '', narrativeFunction: '' }))
       setMessage('结构化设定已保存到个人资产库')
       await mutate()
     } catch (error: any) { setMessage(error?.message || '保存失败') } finally { setSavingStructured(false) }
@@ -288,9 +296,11 @@ export default function UserAssetsPage({
             <select value={structuredForm.contentType} onChange={(event) => setStructuredForm((current) => ({ ...current, contentType: event.target.value }))} className="w-full rounded-md border border-stone-200 px-3 py-2 text-sm">
               <option value="CHARACTER_CARD">角色卡</option><option value="ENVIRONMENT_SETTING">环境设定</option><option value="STORY_TEMPLATE">故事模板</option><option value="STYLE_GUIDE">风格指南</option>
             </select>
+            {structuredForm.contentType === 'CHARACTER_CARD' && <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5"><input type="checkbox" checked={structuredForm.roleOnly} onChange={(event) => setStructuredForm((current) => ({ ...current, roleOnly: event.target.checked }))} className="mt-0.5 h-4 w-4 accent-amber-700" /><span><span className="block text-xs font-medium text-stone-700">只定义剧情作用，不限定具体人设</span><span className="mt-0.5 block text-[10px] leading-relaxed text-stone-500">适合“吐槽役”“笨手笨脚的推进者”等；姓名、外貌可由具体项目再决定。</span></span></label>}
             <input value={structuredForm.title} onChange={(event) => setStructuredForm((current) => ({ ...current, title: event.target.value }))} placeholder="名称" className="mt-2 w-full rounded-md border border-stone-200 px-3 py-2 text-sm" />
+            {structuredForm.contentType === 'CHARACTER_CARD' && structuredForm.roleOnly && <textarea value={structuredForm.narrativeFunction} onChange={(event) => setStructuredForm((current) => ({ ...current, narrativeFunction: event.target.value }))} placeholder="剧情作用，例如：通过吐槽点出主角盲区，并在关键时刻误打误撞推动转折" className="mt-2 min-h-20 w-full rounded-md border border-stone-200 px-3 py-2 text-sm" />}
             <textarea value={structuredForm.summary} onChange={(event) => setStructuredForm((current) => ({ ...current, summary: event.target.value }))} placeholder="核心简介、人物动机或世界背景" className="mt-2 min-h-20 w-full rounded-md border border-stone-200 px-3 py-2 text-sm" />
-            <textarea value={structuredForm.details} onChange={(event) => setStructuredForm((current) => ({ ...current, details: event.target.value }))} placeholder="每行一条：性格特点、世界规则、剧情节拍或镜头规则" className="mt-2 min-h-24 w-full rounded-md border border-stone-200 px-3 py-2 text-sm" />
+            <textarea value={structuredForm.details} onChange={(event) => setStructuredForm((current) => ({ ...current, details: event.target.value }))} placeholder={structuredForm.contentType === 'CHARACTER_CARD' && structuredForm.roleOnly ? '每行一条反复行为，例如：总在最严肃时说错话' : '每行一条：性格特点、世界规则、剧情节拍或镜头规则'} className="mt-2 min-h-24 w-full rounded-md border border-stone-200 px-3 py-2 text-sm" />
             <button onClick={saveStructuredAsset} disabled={savingStructured || !structuredForm.title.trim()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-amber-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"><FileText className="h-4 w-4" />{savingStructured ? '保存中…' : '保存设定'}</button>
           </div>
 

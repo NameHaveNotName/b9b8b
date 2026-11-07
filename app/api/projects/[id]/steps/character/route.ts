@@ -7,7 +7,7 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getTextClient, getImageClient } from '@/lib/api-clients'
-import { IMAGE_MODELS } from '@/lib/models-config'
+import { IMAGE_MODELS, getPromptLanguageInstruction, getModelPromptLanguage } from '@/lib/models-config'
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
@@ -17,13 +17,44 @@ import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { getBoundReferences } from '@/lib/asset-bindings'
 
 /**
+ * 把 LLM 返回的角色 imagePrompt 组装为 prompts 条目。
+ * 语言校验按目标模型：中文优化模型要求中文字符，英文偏好模型要求拉丁字母；
+ * 校验不过时回退到对应语言的中性描述（不再硬编码胶片型号词）。
+ */
+function buildCharacterPromptEntries(parsedChars: any[], characters: any[], imageModel?: string) {
+  const isZh = getModelPromptLanguage(imageModel || IMAGE_MODELS.primary) === 'zh'
+  return characters.map((character, i) => {
+    const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
+    const charDesc = charData?.description || character.description || `${character.name}（${character.role}）`
+    const rawPrompt = charData?.imagePrompt || ''
+    const isValidPrompt = isZh
+      ? rawPrompt.trim().length > 10 && /[一-鿿]{2,}/.test(rawPrompt)
+      : rawPrompt.trim().length > 10 && /[a-zA-Z]{3,}/.test(rawPrompt)
+    const fallbackPrompt = isZh
+      ? `电影感角色母版肖像：${character.name}，${charDesc}。单人正面或四分之三视角，面部五官与服装完整清晰可见，干净简洁背景，均匀可读受光，画面无文字无水印。`
+      : `Cinematic character portrait of ${character.name}, ${charDesc}. Solo portrait, front-facing, complete full face clearly visible. Clean minimal background, clear key lighting, no text or watermark.`
+    const imagePrompt = isValidPrompt ? rawPrompt.trim() : fallbackPrompt
+    return {
+      id: `prompt_${i + 1}`,
+      chineseDesc: charDesc,
+      englishPrompt: imagePrompt,
+      target: `character_${character.id}`,
+      characterName: character.name,
+      characterId: character.id,
+      role: character.role,
+    }
+  })
+}
+
+/**
  * 生成角色提示词（供 generate-prompts 和 generate-images 共用）
  * 成功返回 { prompts, characterCount }，失败抛出异常（调用方需 catch 并 failStep）
  */
 async function generateCharacterPrompts(
   project: any,
   frameworkStep: any,
-  stepId: string
+  stepId: string,
+  imageModel?: string
 ): Promise<{ prompts: any[]; characterCount: number }> {
   const framework = (project.framework || frameworkStep.outputData) as any
   const allCharacters: Array<{ id: string; name: string; role: string; description: string }> =
@@ -44,32 +75,14 @@ async function generateCharacterPrompts(
   const prompt = loadPromptTemplate('character', {
     USER_INPUT: JSON.stringify(framework),
     REFERENCE_INSTRUCTIONS: refInstructions,
+    LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(imageModel || IMAGE_MODELS.primary),
   })
   const textClient = await getTextClient()
   const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
   const parsed = extractJsonFromMarkdown(resultText)
   const parsedChars = parsed.characters || []
 
-  const prompts = characters.map((character, i) => {
-    const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
-    const charDesc = charData?.description || character.description || `${character.name}（${character.role}）`
-    // 过滤空白，确保 englishPrompt 是有效的英文内容
-    const rawPrompt = charData?.imagePrompt || ''
-    const isValidEnglishPrompt = rawPrompt.trim().length > 10 && /[a-zA-Z]{3,}/.test(rawPrompt)
-    // 如果 LLM 返回了有效的英文提示词则使用；否则用 charDesc 构建完整英文描述
-    const englishPrompt = isValidEnglishPrompt
-      ? rawPrompt.trim()
-      : `Cinematic character portrait of ${character.name}, ${charDesc}. Solo portrait, front-facing, complete full face clearly visible. Cinematic film still, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism.`
-    return {
-      id: `prompt_${i + 1}`,
-      chineseDesc: charDesc,
-      englishPrompt,
-      target: `character_${character.id}`,
-      characterName: character.name,
-      characterId: character.id,
-      role: character.role,
-    }
-  })
+  const prompts = buildCharacterPromptEntries(parsedChars, characters, imageModel)
 
   const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
   await prisma.workflowStep.update({
@@ -99,7 +112,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'CHARACTER' })
   if (!access.allowed) {
     return access.response
   }
@@ -135,7 +148,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
     try {
       console.log('[CHARACTER-PROMPT] 收到 generate-prompts 请求')
-      const { prompts } = await generateCharacterPrompts(project, frameworkStep, step.id)
+      const promptImageModel = body?.imageModel || (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
+      const { prompts } = await generateCharacterPrompts(project, frameworkStep, step.id, promptImageModel)
       await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
@@ -173,7 +187,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
       try {
-        const generated = await generateCharacterPrompts(project, frameworkStep, step.id)
+        const generated = await generateCharacterPrompts(project, frameworkStep, step.id, imageModel)
         resolvedPrompts = generated.prompts
         console.log(`[CHARACTER-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
         await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
@@ -303,33 +317,18 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           framework?.characters || []
         const characters = allCharacters.slice(0, 5)
 
+        const promptImageModel = body?.imageModel || (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
         const prompt = loadPromptTemplate('character', {
           USER_INPUT: JSON.stringify(framework),
           REFERENCE_INSTRUCTIONS: '',
+          LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(promptImageModel),
         })
         const textClient = await getTextClient()
         const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
         const parsed = extractJsonFromMarkdown(resultText)
         const parsedChars = parsed.characters || []
 
-        const prompts = characters.map((character, i) => {
-          const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
-          const charDesc = charData?.description || character.description || `${character.name}（${character.role}）`
-          const rawPrompt = charData?.imagePrompt || ''
-          const isValidEnglishPrompt = rawPrompt.trim().length > 10 && /[a-zA-Z]{3,}/.test(rawPrompt)
-          const englishPrompt = isValidEnglishPrompt
-            ? rawPrompt.trim()
-            : `Cinematic character portrait of ${character.name}, ${charDesc}. Solo portrait, front-facing, complete full face clearly visible. Cinematic film still, 35mm Kodak Portra 400, atmospheric depth, 8k, poetic realism.`
-          return {
-            id: `prompt_${i + 1}`,
-            chineseDesc: charDesc,
-            englishPrompt,
-            target: `character_${character.id}`,
-            characterName: character.name,
-            characterId: character.id,
-            role: character.role,
-          }
-        })
+        const prompts = buildCharacterPromptEntries(parsedChars, characters, promptImageModel)
 
         await prisma.workflowStep.update({
           where: { id: step.id },
@@ -533,7 +532,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!project) {
     return NextResponse.json({ error: 'AUTH_002' }, { status: 404 })
   }
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'CHARACTER' })
   if (!access.allowed) {
     return access.response
   }

@@ -18,8 +18,6 @@ import {
   LayoutGrid,
   Frame,
   Video,
-  ArrowRight,
-  ExternalLink,
 } from 'lucide-react'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -38,15 +36,8 @@ interface WorkflowStep {
 interface FloatingGenerationPanelProps {
   projectId: string
   steps?: WorkflowStep[]
-  // Callback when user clicks "view details" - opens inspector with result feedback
-  onViewDetails?: (step: WorkflowStep) => void
-  // Callback when user clicks "view result" / "open asset library"
-  onViewResult?: (step: WorkflowStep) => void
   // Callback when user clicks "locate step"
   onLocateStep?: (stepType: string) => void
-  // Callback when user clicks "open asset library"
-  onOpenAssetLibrary?: (step: WorkflowStep) => void
-  onOpenWorkbench?: () => void
 }
 
 const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -153,11 +144,7 @@ function useRecentCompletions(steps: WorkflowStep[]) {
 export default function FloatingGenerationPanel({
   projectId,
   steps: externalSteps,
-  onViewDetails,
-  onViewResult,
   onLocateStep,
-  onOpenAssetLibrary,
-  onOpenWorkbench,
 }: FloatingGenerationPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [dismissedTasks, setDismissedTasks] = useState<Set<string>>(new Set())
@@ -225,16 +212,7 @@ export default function FloatingGenerationPanel({
               {processingCount === 0 && completedCount === 0 && failedCount > 0 && `失败 ${failedCount}`}
             </span>
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={(e) => { e.stopPropagation(); onOpenWorkbench?.() }}
-              className="rounded-lg border border-stone-200 px-2.5 py-1 text-[11px] font-medium text-stone-500 transition hover:bg-stone-100"
-              title="打开生成工作台"
-            >
-              生成工作台
-            </button>
-            <ChevronUp className="h-4 w-4 text-stone-400" />
-          </div>
+          <ChevronUp className="h-4 w-4 text-stone-400" />
         </button>
       )}
 
@@ -311,18 +289,10 @@ export default function FloatingGenerationPanel({
                       <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         {onLocateStep && (
                           <button
-                            onClick={() => { onLocateStep(step.stepType); dismissTask(`proc-${step.id}`) }}
+                            onClick={() => onLocateStep(step.stepType)}
                             className="text-[11px] text-amber-600 hover:text-amber-700"
                           >
                             定位步骤
-                          </button>
-                        )}
-                        {onViewDetails && (
-                          <button
-                            onClick={() => { onViewDetails(step); dismissTask(`proc-${step.id}`) }}
-                            className="text-[11px] text-stone-500 hover:text-stone-700"
-                          >
-                            详情
                           </button>
                         )}
                       </div>
@@ -354,22 +324,12 @@ export default function FloatingGenerationPanel({
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-2">
-                      {onViewResult && (
+                      {onLocateStep && (
                         <button
-                          onClick={() => { onViewResult(steps.find(s => s.stepType === completion.stepType)!); dismiss(`done-${completion.stepType}`) }}
+                          onClick={() => { onLocateStep(completion.stepType); dismiss(completion.stepType) }}
                           className="flex items-center gap-0.5 text-[11px] text-amber-600 hover:text-amber-700"
                         >
-                          查看结果
-                          <ArrowRight className="h-3 w-3" />
-                        </button>
-                      )}
-                      {onOpenAssetLibrary && (
-                        <button
-                          onClick={() => { onOpenAssetLibrary(steps.find(s => s.stepType === completion.stepType)!); dismiss(`done-${completion.stepType}`) }}
-                          className="flex items-center gap-0.5 text-[11px] text-stone-500 hover:text-stone-700"
-                        >
-                          资产库
-                          <ExternalLink className="h-3 w-3" />
+                          定位步骤
                         </button>
                       )}
                     </div>
@@ -412,14 +372,6 @@ export default function FloatingGenerationPanel({
                           className="text-[11px] text-amber-600 hover:text-amber-700"
                         >
                           定位步骤
-                        </button>
-                      )}
-                      {onViewDetails && (
-                        <button
-                          onClick={() => { onViewDetails(step); dismissTask(`fail-${step.id}`) }}
-                          className="text-[11px] text-stone-500 hover:text-stone-700"
-                        >
-                          详情
                         </button>
                       )}
                     </div>

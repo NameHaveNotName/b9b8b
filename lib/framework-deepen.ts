@@ -2,15 +2,15 @@ import { prisma } from './prisma'
 import { getTextClient } from './api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from './prompts'
 import { PROJECT_TAG_PROMPTS } from './project-tags'
+import { getBusinessGoalPrompt } from './business-goals'
 
 function isPresentationTag(projectTag?: string): boolean {
   return projectTag === 'trailer' || projectTag === 'product'
 }
 
-function getTagDeepeningInstructions(projectTag?: string): string {
-  if (!projectTag) return ''
-  const entry = PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS]
-  return entry?.deepening || ''
+function getDeepeningInstructions(projectTag?: string, businessGoal?: string): string {
+  const entry = projectTag ? PROJECT_TAG_PROMPTS[projectTag as keyof typeof PROJECT_TAG_PROMPTS] : undefined
+  return [getBusinessGoalPrompt(businessGoal, 'deepening'), entry?.deepening].filter(Boolean).join('\n\n')
 }
 
 function truncateText(text: string, maxLen: number): string {
@@ -94,13 +94,13 @@ export async function updateDeepeningStatus(stepId: string, framework: any, stat
   return nextFramework
 }
 
-export async function deepenCharacters(framework: any, stepId: string, projectTag?: string) {
+export async function deepenCharacters(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
   const characters = framework.characters || []
   if (characters.length === 0) return framework
 
   const textClient = await getTextClient()
   const completedCharacters: any[] = []
-  const tagInstructions = getTagDeepeningInstructions(projectTag)
+  const tagInstructions = getDeepeningInstructions(projectTag, businessGoal)
 
   for (let i = 0; i < characters.length; i++) {
     const char = characters[i]
@@ -171,7 +171,7 @@ export async function deepenCharacters(framework: any, stepId: string, projectTa
   return framework
 }
 
-export async function deepenSynopsis(framework: any, stepId: string, projectTag?: string) {
+export async function deepenSynopsis(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
   framework = await updateDeepeningStatus(stepId, framework, 'deepening_synopsis', {
     current: 1,
     total: 1,
@@ -182,7 +182,7 @@ export async function deepenSynopsis(framework: any, stepId: string, projectTag?
     const textClient = await getTextClient()
     const context = buildNarrativeContext(framework)
     const templateName = isPresentationTag(projectTag) ? 'synopsis-deepen-presentation' : 'synopsis-deepen'
-    const tagInstructions = getTagDeepeningInstructions(projectTag)
+    const tagInstructions = getDeepeningInstructions(projectTag, businessGoal)
     const prompt = loadPromptTemplate(templateName, {
       FRAMEWORK: JSON.stringify(context, null, 2),
       CHARACTERS: JSON.stringify(context.characters, null, 2),
@@ -205,14 +205,14 @@ export async function deepenSynopsis(framework: any, stepId: string, projectTag?
   return framework
 }
 
-export async function deepenActs(framework: any, stepId: string, projectTag?: string) {
+export async function deepenActs(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
   const acts = framework.acts || []
   if (acts.length === 0) return framework
 
   const textClient = await getTextClient()
   const deepenedActs: any[] = []
   const templateName = isPresentationTag(projectTag) ? 'act-deepen-presentation' : 'act-deepen'
-  const tagInstructions = getTagDeepeningInstructions(projectTag)
+  const tagInstructions = getDeepeningInstructions(projectTag, businessGoal)
 
   for (let i = 0; i < acts.length; i++) {
     const act = acts[i]
@@ -261,7 +261,7 @@ export async function deepenActs(framework: any, stepId: string, projectTag?: st
   return framework
 }
 
-export async function extractAndDeepenEnvironments(framework: any, stepId: string, projectTag?: string) {
+export async function extractAndDeepenEnvironments(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
   framework = await updateDeepeningStatus(stepId, framework, 'extracting_environments', {
     current: 1,
     total: 1,
@@ -271,7 +271,7 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
   try {
     const textClient = await getTextClient()
     const context = buildNarrativeContext(framework)
-    const tagInstructions = getTagDeepeningInstructions(projectTag)
+    const tagInstructions = getDeepeningInstructions(projectTag, businessGoal)
     const extractPrompt = loadPromptTemplate('environment-extract', {
       FRAMEWORK: JSON.stringify(context, null, 2),
       CHARACTERS: JSON.stringify(context.characters, null, 2),
@@ -356,15 +356,15 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
   return framework
 }
 
-export async function runDeepening(projectId: string, stepId: string, initialFramework: any, projectTag?: string) {
+export async function runDeepening(projectId: string, stepId: string, initialFramework: any, projectTag?: string, businessGoal?: string) {
   console.log('[DEEPEN] 开始自动深化流程', projectTag ? `tag=${projectTag}` : '')
   let framework = initialFramework
 
   try {
-    framework = await deepenCharacters(framework, stepId, projectTag)
-    framework = await deepenSynopsis(framework, stepId, projectTag)
-    framework = await deepenActs(framework, stepId, projectTag)
-    framework = await extractAndDeepenEnvironments(framework, stepId, projectTag)
+    framework = await deepenCharacters(framework, stepId, projectTag, businessGoal)
+    framework = await deepenSynopsis(framework, stepId, projectTag, businessGoal)
+    framework = await deepenActs(framework, stepId, projectTag, businessGoal)
+    framework = await extractAndDeepenEnvironments(framework, stepId, projectTag, businessGoal)
 
     framework = await updateDeepeningStatus(stepId, framework, 'completed', {
       current: 1,

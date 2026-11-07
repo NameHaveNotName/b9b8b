@@ -5,6 +5,11 @@ export const runtime = 'nodejs'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { safeFetch } from '@/lib/ssrf-guard'
+import {
+  MAX_PROXIED_IMAGE_BYTES,
+  readResponseBodyLimited,
+  validateRasterResponse,
+} from '@/lib/safe-image-response'
 
 const IMAGE_PROXY_CACHE_TTL_MS = 5 * 60 * 1000
 const IMAGE_PROXY_CACHE_MAX_ENTRIES = 100
@@ -17,8 +22,24 @@ const imageProxyCache = new Map<
 >()
 let imageProxyCacheBytes = 0
 
+function safeImageHeaders(contentType: string, byteLength: number, extension: string, cache: 'HIT' | 'MISS') {
+  return {
+    'Content-Type': contentType,
+    'Content-Disposition': `inline; filename="proxied-image.${extension}"`,
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+    'X-Content-Type-Options': 'nosniff',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+    'Cache-Control': 'private, max-age=300, stale-while-revalidate=3600',
+    'Content-Length': String(byteLength),
+    'X-Proxy-Cache': cache,
+  }
+}
+
 function pruneCache(now: number) {
-  if (imageProxyCache.size <= IMAGE_PROXY_CACHE_MAX_ENTRIES) return
+  if (
+    imageProxyCache.size <= IMAGE_PROXY_CACHE_MAX_ENTRIES &&
+    imageProxyCacheBytes <= IMAGE_PROXY_CACHE_MAX_BYTES
+  ) return
 
   for (const [key, val] of imageProxyCache) {
     if (imageProxyCache.size <= IMAGE_PROXY_CACHE_MAX_ENTRIES) break
@@ -66,12 +87,12 @@ export async function GET(req: Request) {
   if (cached && now - cached.cachedAt < IMAGE_PROXY_CACHE_TTL_MS) {
     return new Response(cached.body, {
       status: 200,
-      headers: {
-        'Content-Type': cached.contentType,
-        'Cache-Control': 'private, max-age=300, stale-while-revalidate=3600',
-        'Content-Length': String(cached.body.byteLength),
-        'X-Proxy-Cache': 'HIT',
-      },
+      headers: safeImageHeaders(
+        cached.contentType,
+        cached.body.byteLength,
+        cached.contentType === 'image/jpeg' ? 'jpg' : cached.contentType.split('/')[1],
+        'HIT',
+      ),
     })
   }
 
@@ -81,7 +102,7 @@ export async function GET(req: Request) {
       urlKey,
       {
         headers: {
-          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif',
           'User-Agent': 'b9b8b-image-proxy/1.0',
         },
         cache: 'no-store',
@@ -108,20 +129,28 @@ export async function GET(req: Request) {
     )
   }
 
-  const contentType = upstream.headers.get('content-type') || 'application/octet-stream'
-  const body = await upstream.arrayBuffer()
+  let bodyBytes: Uint8Array
+  let image: ReturnType<typeof validateRasterResponse>
+  try {
+    bodyBytes = await readResponseBodyLimited(upstream, MAX_PROXIED_IMAGE_BYTES)
+    image = validateRasterResponse(bodyBytes, upstream.headers.get('content-type'))
+  } catch (error: any) {
+    const code = String(error?.message || '')
+    return NextResponse.json(
+      { error: code === 'IMAGE_PROXY_TOO_LARGE' ? 'UPSTREAM_TOO_LARGE' : 'UNSAFE_IMAGE_CONTENT' },
+      { status: code === 'IMAGE_PROXY_TOO_LARGE' ? 413 : 415 },
+    )
+  }
+  const body = new ArrayBuffer(bodyBytes.byteLength)
+  new Uint8Array(body).set(bodyBytes)
+  const contentType = image.contentType
 
-  pruneCache(now)
   imageProxyCacheBytes += body.byteLength
   imageProxyCache.set(urlKey, { body, contentType, cachedAt: now })
+  pruneCache(now)
 
   return new Response(body, {
     status: 200,
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'private, max-age=300, stale-while-revalidate=3600',
-      'Content-Length': String(body.byteLength),
-      'X-Proxy-Cache': 'MISS',
-    },
+    headers: safeImageHeaders(contentType, body.byteLength, image.extension, 'MISS'),
   })
 }

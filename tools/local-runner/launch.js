@@ -54,7 +54,7 @@ args.push(path.join(__dirname, 'server.js'))
 
 const child = spawn(process.execPath, args, { stdio: 'inherit', env })
 setTimeout(() => {
-  const url = `http://localhost:${env.LOCAL_RUNNER_PORT || 4317}`
+  const url = `http://127.0.0.1:${env.LOCAL_RUNNER_PORT || 4317}`
   try {
     if (process.platform === 'win32') {
       spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref()

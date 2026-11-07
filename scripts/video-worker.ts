@@ -5,6 +5,10 @@ import { completeStep, failStep, isStepCancelled } from '../lib/workflow-executo
 import { generateOneVideoSegment } from '../lib/video-segment-utils'
 import { uploadFile, getSignedFileUrl } from '../lib/r2'
 import { enterOperationContext } from '../lib/supplier-observability'
+import {
+  markGenerationUnitFailedForLegacySegment,
+  recordGeneratedClipForLegacySegment,
+} from '../lib/video-production-state'
 
 // 动态加载 video client（避免在导入时解析路径别名问题）
 async function getVideoClient() {
@@ -142,6 +146,16 @@ const worker = new Worker('video-generation', async (job) => {
         },
       })
 
+      await recordGeneratedClipForLegacySegment({
+        projectId,
+        legacySegmentId: segmentId,
+        modelId: videoModel,
+        videoUrl: result.url,
+        storageKey: result.storageKey,
+        durationMs: result.duration * 1000,
+        isMock: result.isMock,
+      })
+
       console.log(`[SEGMENT-WORKER] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
     }
 
@@ -160,6 +174,7 @@ const worker = new Worker('video-generation', async (job) => {
             errorMessage: (e?.message || '生成失败').slice(0, 200),
           },
         })
+        await markGenerationUnitFailedForLegacySegment(segmentId, e?.message || '生成失败')
       } catch {}
     }
     await failStep(stepId, e.message)

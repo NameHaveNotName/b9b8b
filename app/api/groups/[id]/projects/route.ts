@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { projectCoreSelect } from '@/lib/db/project-select'
 import { checkGroupAccess } from '@/lib/project-permission'
+import { buildInitialWorkflowSteps } from '@/lib/workflow-steps'
 
 /**
  * POST /api/groups/[id]/projects
@@ -34,17 +35,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       select: projectCoreSelect,
     })
 
-    const stepTypes: string[] = [
-      'IDEATION', 'FRAMEWORK', 'STYLE', 'CHARACTER', 'CONCEPT', 'TRAILER',
-      'STORYBOARD', 'KEYFRAMES', 'VIDEO_DIRECT',
-    ]
     await prisma.workflowStep.createMany({
-      data: stepTypes.map((stepType, index) => ({
-        projectId: project.id,
-        stepType: stepType as any,
-        order: index,
-        status: 'PENDING',
-      })),
+      data: buildInitialWorkflowSteps(project.id),
     })
 
     return NextResponse.json({ project })

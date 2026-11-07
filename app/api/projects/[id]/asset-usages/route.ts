@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
+import type { WorkflowStepType } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
@@ -14,7 +15,7 @@ const MERGES = new Set(['ADD', 'REPLACE', 'MERGE_SELECTED_FIELDS'])
 
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const { id: projectId } = await props.params
-  const access = await checkProjectPermission(projectId)
+  const access = await checkProjectPermission(projectId, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
   const targetStep = new URL(req.url).searchParams.get('targetStep')?.toUpperCase()
   const constraints = await prisma.projectAssetConstraint.findMany({
@@ -29,11 +30,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const { id: projectId } = await props.params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
-  const access = await checkProjectPermission(projectId)
-  if (!access.allowed) return access.response
   const body = await req.json().catch(() => ({}))
   const targetStep = typeof body.targetStep === 'string' ? body.targetStep.toUpperCase() : ''
   if (!TARGET_STEPS.has(targetStep)) return NextResponse.json({ error: 'TARGET_UNSUPPORTED' }, { status: 400 })
+  const access = await checkProjectPermission(projectId, undefined, { mode: 'EDIT_STEP', stepType: targetStep as WorkflowStepType })
+  if (!access.allowed) return access.response
 
   let assetId = typeof body.assetId === 'string' ? body.assetId : ''
   if (typeof body.userAssetId === 'string') {

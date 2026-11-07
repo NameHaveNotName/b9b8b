@@ -15,6 +15,10 @@ import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/point
 import { attachOperationResults, finalizeCurrentSupplierOperation, getCurrentOperationId } from '@/lib/supplier-observability'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { resolveMediaUrl } from '@/lib/resolve-media-url'
+import {
+  markGenerationUnitFailedForLegacySegment,
+  recordGeneratedClipForLegacySegment,
+} from '@/lib/video-production-state'
 
 // ============================================================
 // 向后兼容：旧版一键生成宣传片
@@ -100,6 +104,7 @@ async function getConceptImages(projectId: string) {
 
 /** 后台生成单个 segment */
 async function backgroundGenerateSegment(
+  stepId: string,
   segmentId: string,
   projectId: string,
   stepName: string,
@@ -115,6 +120,9 @@ async function backgroundGenerateSegment(
     prisma.videoSegment.updateMany({ where: { id: segmentId }, data: { updatedAt: new Date() } })
   )
   try {
+    if (await isStepCancelled(stepId)) {
+      return { success: false, errorMessage: '用户已取消' }
+    }
     console.log(`[SEGMENT-BG] 开始生成 segmentId=${segmentId}`)
     const { generateOneVideoSegment } = await import('@/lib/video-segment-utils')
     const resolvedAspectRatio = aspectRatio || (await getProjectDefaultAspectRatio(projectId))
@@ -129,9 +137,12 @@ async function backgroundGenerateSegment(
       aspectRatio: resolvedAspectRatio,
     })
 
-    // 更新 VideoSegment
-    await prisma.videoSegment.update({
-      where: { id: segmentId },
+    if (await isStepCancelled(stepId)) {
+      return { success: false, errorMessage: '用户已取消' }
+    }
+    // 只允许仍在 generating 的任务接纳迟到结果；取消接口已把它改为 failed。
+    const accepted = await prisma.videoSegment.updateMany({
+      where: { id: segmentId, status: 'generating' },
       data: {
         videoUrl: result.url,
         storageKey: result.storageKey,
@@ -140,6 +151,9 @@ async function backgroundGenerateSegment(
         isMock: result.isMock,
       },
     })
+    if (accepted.count !== 1) {
+      return { success: false, errorMessage: '任务已取消或已被其他执行结果终结' }
+    }
 
     // 创建 Asset
     const asset = await prisma.asset.create({
@@ -159,17 +173,28 @@ async function backgroundGenerateSegment(
       },
     })
 
+    await recordGeneratedClipForLegacySegment({
+      projectId,
+      legacySegmentId: segmentId,
+      modelId: videoModel,
+      videoUrl: result.url,
+      storageKey: result.storageKey,
+      durationMs: result.duration * 1000,
+      isMock: result.isMock,
+    })
+
     console.log(`[SEGMENT-BG] 完成 segmentId=${segmentId} isMock=${result.isMock}`)
     return { success: true, resultId: asset.id, isMock: result.isMock }
   } catch (e: any) {
     console.error(`[SEGMENT-BG] 失败 segmentId=${segmentId}:`, e?.message)
-    await prisma.videoSegment.update({
-      where: { id: segmentId },
+    await prisma.videoSegment.updateMany({
+      where: { id: segmentId, status: 'generating' },
       data: {
         status: 'failed',
         errorMessage: (e?.message || '生成失败').slice(0, 200),
       },
     })
+    await markGenerationUnitFailedForLegacySegment(segmentId, e?.message || '生成失败')
     return { success: false, errorMessage: (e?.message || '生成失败').slice(0, 500) }
   } finally {
     stopHeartbeat()
@@ -227,7 +252,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
     }
 
-    const permission = await checkProjectPermission(params.id)
+    const permission = await checkProjectPermission(params.id, undefined, { mode: 'EDIT_STEP', stepType: 'TRAILER' })
     if (!permission.allowed) {
       return permission.response
     }
@@ -259,7 +284,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
     // -------------------- 新版：生成 Segment Prompts --------------------
     if (action === 'generate-segment-prompts') {
-      return handleGeneratePrompts(params.id, step.id, userId)
+      return handleGeneratePrompts(params.id, step.id, userId, body?.videoModel)
     }
 
     // -------------------- 新版：单段生成 --------------------
@@ -408,7 +433,7 @@ async function handleLegacyTrailer(
 }
 
 /** 生成 Segment Prompts（基于 CONCEPT 概念图） */
-async function handleGeneratePrompts(projectId: string, stepId: string, callerUserId: string) {
+async function handleGeneratePrompts(projectId: string, stepId: string, callerUserId: string, videoModel?: string) {
   // 防御性保存：避免某些 minifier/运行时对 catch 块中参数引用的异常行为
   const userId = callerUserId
 
@@ -426,7 +451,7 @@ async function handleGeneratePrompts(projectId: string, stepId: string, callerUs
     }
 
     const { generateConceptSegmentPrompts } = await import('@/lib/video-segment-utils')
-    const segments = await generateConceptSegmentPrompts(projectId, 'TRAILER', conceptImages, userId)
+    const segments = await generateConceptSegmentPrompts(projectId, 'TRAILER', conceptImages, userId, videoModel)
 
     // 更新 step 状态为 PENDING
     await mergeStepOutputData(stepId, {
@@ -511,6 +536,7 @@ async function handleGenerateSegment(projectId: string, stepId: string, body: an
   // 后台生成
   waitUntil((async () => {
     const outcome = await backgroundGenerateSegment(
+      stepId,
       segmentId, projectId, 'TRAILER', segment.prompt, imageUrl,
       segment.duration || 5, body?.videoModel, body?.aspectRatio,
       userId,
@@ -600,6 +626,7 @@ async function handleGenerateAllSegments(projectId: string, stepId: string, body
         continue
       }
       const outcome = await backgroundGenerateSegment(
+        stepId,
         segment.id,
         projectId,
         'TRAILER',
@@ -760,7 +787,7 @@ async function handleGenerateBgm(projectId: string, stepId: string, userId: stri
 // ============================================================
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const access = await checkProjectPermission(params.id)
+  const access = await checkProjectPermission(params.id, undefined, { mode: 'READ' })
   if (!access.allowed) return access.response
 
   const step = await prisma.workflowStep.findUnique({

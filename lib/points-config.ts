@@ -29,12 +29,14 @@ export type ImageGenerationQuality = keyof typeof IMAGE_QUALITY_COSTS
 export const GENERATION_COSTS = {
   // 文本类（DeepSeek chat 等，单次约 0.001 ~ 0.02 元）
   IDEA_DIFFUSION: 1,        // 创意发散
+  IDEA_AGENT_PIPELINE: 10,  // 固定创意 Agent 流程的执行前点数上限（7 路文本 + 3 路联网研究）
   FRAMEWORK: 1,             // 框架搭建
   FRAMEWORK_DEEPEN_ALL: 3,  // 框架自动深化全套（角色+故事+环境）
   STYLE_UNIFY: IMAGE_QUALITY_COSTS.low,       // 风格探索图，low，每张
   CHARACTER_DESIGN: IMAGE_QUALITY_COSTS.medium, // 角色设计图，medium，每张
   CONCEPT_ART: IMAGE_QUALITY_COSTS.low,       // 概念探索图，low，每张
   STORYBOARD_PROMPTS: 1,    // 分镜：仅生成分镜提示词（文本）
+  SCOPED_CHANGE_PROPOSAL: 1, // 框定范围后生成可审查修改草案
   STORYBOARD_IMAGES: 1,     // 分镜：生成所有占位草图（无 AI 图生成本）
   STORYBOARD_ACT_IMAGE: IMAGE_QUALITY_COSTS.medium, // 分镜真实首帧，medium，每张
   KEYFRAME: IMAGE_QUALITY_COSTS.medium,       // 关键帧/尾帧，medium，每张
@@ -120,6 +122,7 @@ export const COST_CATEGORY_MAP: Record<string, OperationCategory> = {
   CHARACTER_DESIGN: 'IMAGE',
   CONCEPT_ART: 'IMAGE',
   STORYBOARD_PROMPTS: 'TEXT',
+  SCOPED_CHANGE_PROPOSAL: 'TEXT',
   STORYBOARD_IMAGES: 'IMAGE',
   STORYBOARD_ACT_IMAGE: 'IMAGE',
   KEYFRAME: 'IMAGE',
@@ -141,6 +144,7 @@ export const COST_ACTION_KEY_MAP: Record<string, string> = {
   CHARACTER_DESIGN: 'generation.character_design',
   CONCEPT_ART: 'generation.concept_art',
   STORYBOARD_PROMPTS: 'generation.storyboard_prompts',
+  SCOPED_CHANGE_PROPOSAL: 'generation.scoped_change_proposal',
   STORYBOARD_IMAGES: 'generation.storyboard_images',
   STORYBOARD_ACT_IMAGE: 'generation.storyboard_act_image',
   KEYFRAME: 'generation.keyframe',
