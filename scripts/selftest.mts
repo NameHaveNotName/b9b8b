@@ -97,6 +97,11 @@ import { runCreativeAgentPipeline } from '../lib/creative-agent-pipeline.ts'
 import { diffText } from '../lib/text-diff.ts'
 import { canReserveSeriesBudget, selectApplicableSeriesApproval } from '../lib/series-generation-policy.ts'
 import {
+  buildScopedMediaCancellationWhere,
+  buildScopedOperationCancellationWhere,
+  buildScopedUnitCancellationWhere,
+} from '../lib/step-cancellation-scope.ts'
+import {
   buildGenerationUnitTimeline,
   buildIndependentFallbackPlan,
   buildGenerationStrategyPreview,
@@ -1117,6 +1122,30 @@ check('新项目资产导入去重限量且只接受结构化创作设定', () =
 })
 
 console.log('\n== 系列短剧基础契约 ==')
+
+check('步骤取消只释放同项目同步骤的媒体和生成单元', () => {
+  assert.deepEqual(buildScopedMediaCancellationWhere('project-a', 'TRAILER'), {
+    projectId: 'project-a', stepName: 'TRAILER', status: 'generating',
+  })
+  assert.deepEqual(buildScopedUnitCancellationWhere('project-a', 'VIDEO_DIRECT'), {
+    projectId: 'project-a', stepName: 'VIDEO_DIRECT', status: { in: ['queued', 'generating'] },
+  })
+})
+
+check('非媒体职责步骤取消不会退化为项目级批量释放', () => {
+  assert.equal(buildScopedMediaCancellationWhere('project-a', 'STORYBOARD'), null)
+  assert.equal(buildScopedUnitCancellationWhere('project-a', 'FRAMEWORK'), null)
+})
+
+check('取消退款同时绑定项目与 workflowStepId', () => {
+  assert.deepEqual(buildScopedOperationCancellationWhere('project-a', 'step-writer'), {
+    projectId: 'project-a',
+    workflowStepId: 'step-writer',
+    pointsRefunded: 0,
+    pointsCost: { gt: 0 },
+    status: { in: ['SUBMITTED', 'RUNNING'] },
+  })
+})
 
 check('系列生成批准严格绑定申请人、单集、有效期和剩余额度', () => {
   const now = new Date('2026-11-07T00:00:00Z')

@@ -6,6 +6,11 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { WORKFLOW_STEP_TYPES } from '@/lib/workflow-steps'
 import { prisma } from '@/lib/prisma'
 import { refundPointsAndLog } from '@/lib/points'
+import {
+  buildScopedMediaCancellationWhere,
+  buildScopedOperationCancellationWhere,
+  buildScopedUnitCancellationWhere,
+} from '@/lib/step-cancellation-scope'
 
 /**
  * 退掉被取消步骤尚未产生成果的预扣点数。
@@ -21,12 +26,9 @@ async function refundCancelledOperation(
   projectId: string
 ): Promise<number> {
   const pending = await prisma.operationLog.findMany({
-    where: {
-      workflowStepId: stepId,
-      pointsRefunded: 0,
-      pointsCost: { gt: 0 },
-      status: { in: ['SUBMITTED', 'RUNNING'] },
-    },
+    // 同时绑定项目与步骤。历史账本缺少任一归属时宁可留给人工对账，
+    // 也不能用 projectId 级查询误退其他职责步骤的费用。
+    where: buildScopedOperationCancellationWhere(projectId, stepId),
     select: {
       id: true,
       userId: true,
@@ -101,16 +103,30 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   // 释放卡在 generating 的片段/配音行：它们的心跳已停止，
   // 15 分钟后会被超时清理翻成 failed，但用户不该等这么久
-  const [releasedSegments, releasedVoiceovers] = await Promise.all([
-    prisma.videoSegment.updateMany({
-      where: { projectId: params.id, status: 'generating' },
-      data: { status: 'failed', errorMessage: '用户已取消' },
-    }),
-    prisma.voiceoverSegment.updateMany({
-      where: { projectId: params.id, status: 'generating' },
-      data: { status: 'failed', errorMessage: '用户已取消' },
-    }),
-  ])
+  const mediaWhere = buildScopedMediaCancellationWhere(params.id, stepType)
+  const unitWhere = buildScopedUnitCancellationWhere(params.id, stepType)
+  let releasedSegments = 0
+  let releasedVoiceovers = 0
+  let releasedUnits = 0
+  if (mediaWhere && unitWhere) {
+    const [segments, voiceovers, units] = await Promise.all([
+      prisma.videoSegment.updateMany({
+        where: mediaWhere,
+        data: { status: 'failed', errorMessage: '用户已取消' },
+      }),
+      prisma.voiceoverSegment.updateMany({
+        where: mediaWhere,
+        data: { status: 'failed', errorMessage: '用户已取消' },
+      }),
+      prisma.generationUnit.updateMany({
+        where: unitWhere,
+        data: { status: 'cancelled', errorMessage: '用户已取消' },
+      }),
+    ])
+    releasedSegments = segments.count
+    releasedVoiceovers = voiceovers.count
+    releasedUnits = units.count
+  }
 
   // 退回本次预扣但尚未产生成果的点数。
   // 用 refundPointsAndLog 而不是直接加余额：它会先 finalize 账本行，
@@ -119,14 +135,15 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   console.log(
     `[CANCEL] 用户 ${userId} 取消了步骤 ${stepType} (项目 ${params.id})，` +
-    `释放片段 ${releasedSegments.count} 个 / 配音 ${releasedVoiceovers.count} 条，退款 ${refunded} 点`
+    `释放片段 ${releasedSegments} 个 / 配音 ${releasedVoiceovers} 条 / 生成单元 ${releasedUnits} 个，退款 ${refunded} 点`
   )
 
   return NextResponse.json({
     success: true,
     message: '已取消',
-    releasedSegments: releasedSegments.count,
-    releasedVoiceovers: releasedVoiceovers.count,
+    releasedSegments,
+    releasedVoiceovers,
+    releasedUnits,
     refundedPoints: refunded,
   })
 }
