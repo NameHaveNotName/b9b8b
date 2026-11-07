@@ -56,6 +56,11 @@ export interface GenerationDraft {
   pointCost: number
   inputDeps: string[]
   isRetry?: boolean
+  resumeInfo?: {
+    completedPhases: number
+    totalPhases: number
+    nextPhaseLabel: string
+  }
   requestBody?: Record<string, any>
   /** 客户端实际提交时刻，用于把快照关联到正确的 OperationLog。 */
   submittedAt?: string

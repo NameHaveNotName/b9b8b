@@ -254,6 +254,21 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
     : []
   const canEditCurrentStep = !isSeriesAccess || Boolean(currentStep && editableSeriesSteps.includes(currentStep.stepType))
 
+  // Vercel 硬超时不会返回业务异常；租约到期时主动刷新一次，
+  // 让“进行中”自动切换为“可从断点继续”，无需用户手动刷新页面。
+  useEffect(() => {
+    const pipeline = currentStep?.stepType === 'IDEATION' ? currentStep.outputData?.agentPipeline : null
+    if (currentStep?.status !== 'PROCESSING' || pipeline?.phaseStatus !== 'RUNNING' || !pipeline?.leaseUntil) return
+    const remainingMs = Date.parse(pipeline.leaseUntil) - Date.now()
+    if (!Number.isFinite(remainingMs)) return
+    if (remainingMs <= 0) {
+      void mutate()
+      return
+    }
+    const timer = window.setTimeout(() => void mutate(), remainingMs + 250)
+    return () => window.clearTimeout(timer)
+  }, [currentStep?.status, currentStep?.stepType, currentStep?.outputData?.agentPipeline?.phaseStatus, currentStep?.outputData?.agentPipeline?.leaseUntil, mutate])
+
   const executeStep = useCallback(
     async (stepType: string, body?: any) => {
       if (project?.collaborationAccess?.isSeriesAccess && !project.collaborationAccess.editableStepTypes?.includes(stepType)) {
@@ -363,6 +378,9 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         if (result.continueRequired) throw new Error('创意扩散阶段数异常，已停止自动续跑以避免重复调用')
 
         if (!result.success) {
+          // 分阶段任务失败时先刷新服务端检查点，确保界面立即显示“从断点继续”，
+          // 而不是继续使用提交前的旧步骤快照。
+          if (stepType === 'IDEATION' && result.resumable) await mutate().catch(() => undefined)
           if (result.error === 'POINTS_001') {
             setLastError('点数不足，请联系管理员充值')
             return { success: false, message: '点数不足，请联系管理员充值' }
@@ -407,6 +425,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         return { success: true, result }
       } catch (e: any) {
         console.error(`[executeStep] ${stepType} error:`, e)
+        if (stepType === 'IDEATION') await mutate().catch(() => undefined)
         setLastError('网络错误：' + e.message)
         return { success: false, message: e.message }
       } finally {
@@ -646,7 +665,15 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
               workbenchRef.current?.configure({}, currentStep.stepType)
             }}
             onRetry={() => {
-              if (currentStep.stepType === 'FRAMEWORK') {
+              if (currentStep.stepType === 'IDEATION') {
+                const pipeline = currentStep.outputData?.agentPipeline
+                const leaseExpired = !pipeline?.leaseUntil || Date.parse(pipeline.leaseUntil) <= Date.now()
+                const canResume = currentStep.status === 'PROCESSING'
+                  && pipeline?.runId
+                  && (['READY', 'FAILED'].includes(pipeline?.phaseStatus)
+                    || (pipeline?.phaseStatus === 'RUNNING' && leaseExpired))
+                workbenchRef.current?.configure(canResume ? {} : { force: true }, 'IDEATION')
+              } else if (currentStep.stepType === 'FRAMEWORK') {
                 workbenchRef.current?.configure({ regenerate: true }, 'FRAMEWORK')
               } else if (currentStep.stepType === 'CONCEPT') {
                 const hasPrompts = (currentStep.outputData?.prompts?.length || 0) > 0
@@ -864,6 +891,24 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       overrideStepType
       || (body?.directionIndex !== undefined && currentStep.stepType === 'IDEATION' ? 'FRAMEWORK' : currentStep.stepType)
     const out = currentStep.outputData || {}
+    const ideationPipeline = targetStepType === 'IDEATION' ? out.agentPipeline : null
+    const completedIdeationPhases = Array.isArray(ideationPipeline?.checkpoint?.completedPhases)
+      ? ideationPipeline.checkpoint.completedPhases.length
+      : 0
+    const ideationPhaseLabels: Record<string, string> = {
+      'goal-contract': '理解目标',
+      research: '联网研究',
+      'strategy-map': '形成策略',
+      concepts: '并行创意',
+      critique: '交叉评审',
+      'creative-plan': '归纳方案',
+    }
+    const canResumeIdeation = targetStepType === 'IDEATION'
+      && currentStep.status === 'PROCESSING'
+      && Boolean(ideationPipeline?.runId)
+      && (['READY', 'FAILED'].includes(ideationPipeline?.phaseStatus)
+        || (ideationPipeline?.phaseStatus === 'RUNNING'
+          && (!ideationPipeline?.leaseUntil || Date.parse(ideationPipeline.leaseUntil) <= Date.now())))
     const prompt = body?.promptOverride
       || out.prompts?.[0]?.englishPrompt
       || out.prompts?.[0]?.chineseDesc
@@ -980,8 +1025,16 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       referencesEditable: ['STYLE', 'CHARACTER', 'CONCEPT', 'STORYBOARD', 'KEYFRAMES'].includes(targetStepType),
       assetConstraints,
       pointCost: estimatedPointCost,
-      isRetry: currentStep.status === 'COMPLETED' || currentStep.status === 'FAILED',
-      requestBody: { ...(body || {}), ...(out.agentPipeline?.runId ? { pipelineRunId: out.agentPipeline.runId } : {}) },
+      isRetry: currentStep.status === 'COMPLETED' || currentStep.status === 'FAILED' || canResumeIdeation,
+      resumeInfo: canResumeIdeation ? {
+        completedPhases: completedIdeationPhases,
+        totalPhases: 6,
+        nextPhaseLabel: ideationPhaseLabels[ideationPipeline.currentPhase] || '下一阶段',
+      } : undefined,
+      requestBody: {
+        ...(body || {}),
+        ...(canResumeIdeation && body?.force !== true ? { pipelineRunId: ideationPipeline.runId } : {}),
+      },
     })
     setRun(null)
     openInspector()
@@ -1315,6 +1368,16 @@ function StepHeader({
 }) {
   const isExecuting = executing === step.stepType
   const isCancelled = step.status === 'FAILED' && step.errorMessage?.startsWith('[CANCELLED]')
+  const ideationPipeline = step.stepType === 'IDEATION' ? step.outputData?.agentPipeline : null
+  const canResumeIdeation = step.status === 'PROCESSING'
+    && Boolean(ideationPipeline?.runId)
+    && (['READY', 'FAILED'].includes(ideationPipeline?.phaseStatus)
+      || (ideationPipeline?.phaseStatus === 'RUNNING'
+        && (!ideationPipeline?.leaseUntil || Date.parse(ideationPipeline.leaseUntil) <= Date.now())))
+  const ideationPhaseLabels: Record<string, string> = {
+    'goal-contract': '理解目标', research: '联网研究', 'strategy-map': '形成策略',
+    concepts: '并行创意', critique: '交叉评审', 'creative-plan': '归纳方案',
+  }
 
   // DAG 状态机计算
   const stepId = prismaTypeToStepId(step.stepType)
@@ -1328,7 +1391,7 @@ function StepHeader({
     { label: string; className: string }
   > = {
     PENDING: { label: isAvailable ? '待开始' : '未解锁', className: 'bg-stone-100 text-stone-500' },
-    PROCESSING: { label: '进行中', className: 'bg-blue-50 text-blue-600' },
+    PROCESSING: { label: canResumeIdeation ? '可从断点继续' : '进行中', className: canResumeIdeation ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-600' },
     COMPLETED: { label: isHidden ? '已完成 · 已归档' : '已完成', className: isHidden ? 'bg-stone-100 text-stone-500' : 'bg-green-50 text-green-600' },
     FAILED: { label: isCancelled ? '已中断' : '失败', className: isCancelled ? 'bg-stone-100 text-stone-500' : 'bg-red-50 text-red-600' },
   }
@@ -1396,14 +1459,26 @@ function StepHeader({
 
         {/* 处理中：显示中断按钮 */}
         {!readOnly && !isHidden && step.status === 'PROCESSING' && (
-          <button
-            onClick={onCancel}
-            disabled={isExecuting && executing !== step.stepType}
-            className="flex items-center gap-2 rounded-lg bg-red-50 px-5 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
-          >
-            <Square className="h-4 w-4 fill-current" />
-            中断
-          </button>
+          <>
+            {canResumeIdeation && (
+              <button
+                onClick={onRetry}
+                disabled={isExecuting}
+                className="flex items-center gap-2 rounded-lg bg-amber-700 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-amber-800 disabled:opacity-50"
+              >
+                <RefreshCw className="h-4 w-4" />
+                从“{ideationPhaseLabels[ideationPipeline.currentPhase] || '下一阶段'}”继续
+              </button>
+            )}
+            <button
+              onClick={onCancel}
+              disabled={isExecuting && executing !== step.stepType}
+              className="flex items-center gap-2 rounded-lg bg-red-50 px-5 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+            >
+              <Square className="h-4 w-4 fill-current" />
+              中断
+            </button>
+          </>
         )}
 
         {/* 失败：显示重试按钮 */}

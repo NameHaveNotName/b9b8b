@@ -142,6 +142,15 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
         {draft.inputDeps.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{draft.inputDeps.map((dep) => <span key={dep} className="rounded-full bg-stone-200/70 px-2 py-0.5 text-[10px] text-stone-600">{dep}</span>)}</div>}
       </section>
 
+      {draft.resumeInfo && (
+        <section className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+          <p className="text-xs font-semibold text-amber-900">检测到可恢复的创意扩散断点</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
+            已保存 {draft.resumeInfo.completedPhases}/{draft.resumeInfo.totalPhases} 个阶段；继续时将从“{draft.resumeInfo.nextPhaseLabel}”开始，前面的供应商调用不会重复。
+          </p>
+        </section>
+      )}
+
       <section>
         <label className="text-xs font-semibold text-stone-700">{draft.prompts?.length ? `最终提示词（${draft.prompts.length} 条）` : '最终提示词'}</label>
         <p className="mt-1 text-[10px] text-stone-500">{draft.promptEditable ? '这里的内容会作为本次生成请求的一部分发送给供应商；批量任务可逐条修改。' : '该步骤的最终提示词由服务端根据项目上下文现场生成；已有内容仅作上下文预览。'}</p>
@@ -195,8 +204,14 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
 
       <div className="flex flex-wrap justify-end gap-2 border-t border-stone-100 pt-4">
         {canEditOriginal && <button type="button" disabled={submitting || !editInstruction.trim()} onClick={() => onSubmit({ ...draft, editInstruction }, 'edit-original')} className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">修改原图</button>}
+        {draft.resumeInfo && <button type="button" disabled={submitting} onClick={() => {
+          if (!window.confirm('确认放弃已保存的断点并从第一阶段重新开始？前面已完成的模型调用不会复用。')) return
+          const requestBody = { ...(draft.requestBody || {}) }
+          delete requestBody.pipelineRunId
+          onSubmit({ ...draft, resumeInfo: undefined, requestBody: { ...requestBody, force: true } }, 'generate')
+        }} className="rounded-lg border border-stone-300 px-3 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-50 disabled:opacity-40">放弃断点并重新开始</button>}
         <button type="button" disabled={submitting || (!draft.prompt.trim() && draft.promptRequired)} onClick={() => onSubmit(draft, 'generate')} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-700 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-40">
-          {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : draft.isRetry ? <RotateCcw className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}{submitting ? '执行中' : draft.isRetry ? '按当前配置重新生成' : '确认并开始生成'}
+          {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : draft.isRetry ? <RotateCcw className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}{submitting ? '执行中' : draft.resumeInfo ? `从“${draft.resumeInfo.nextPhaseLabel}”继续` : draft.isRetry ? '按当前配置重新生成' : '确认并开始生成'}
         </button>
       </div>
     </div>

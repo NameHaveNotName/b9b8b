@@ -137,6 +137,21 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       where: { id: operationId },
       data: { projectId: params.id, workflowStepId: step.id, stepName: 'IDEATION' },
     })
+    const leaseUntilMs = Date.parse(String(resumablePipeline?.leaseUntil || ''))
+    const recoveringExpiredRequest = resumablePipeline?.phaseStatus === 'RUNNING'
+      && Number.isFinite(leaseUntilMs)
+      && leaseUntilMs <= Date.now()
+    if (recoveringExpiredRequest) {
+      await prisma.providerCallAttempt.updateMany({
+        where: { operationId, status: 'RUNNING' },
+        data: {
+          status: 'FAILED',
+          errorCode: 'REQUEST_LEASE_EXPIRED',
+          errorMessage: '服务器请求已超时；该阶段可从持久化检查点重新执行',
+          completedAt: new Date(),
+        },
+      })
+    }
   }
 
   if (!resumablePipeline && creativeInput && typeof creativeInput === 'string' && creativeInput.trim().length > 0) {
