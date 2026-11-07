@@ -29,7 +29,9 @@ import {
   chooseAutomaticOpenLuxModel,
   filterTextModelIds,
   normalizeTextModelId,
+  shouldUseMinimax,
 } from '../lib/text-models.ts'
+import { extractAssistantOutput } from '../lib/supplier-output.ts'
 import {
   computeProjectStateFromSteps,
   getStepDisplayState,
@@ -1378,21 +1380,26 @@ check('自然语言业务目标会贯穿后续阶段，爆款旧目标不会冒�
 await checkAsync('固定创意 Agent 拓扑执行 7 次普通文本和 3 次联网研究并限制来源', async () => {
   let textCalls = 0
   let searchCalls = 0
+  const stageIds: string[] = []
   const run = await runCreativeAgentPipeline({
     goal: '为一款虚构的高科技产品制作可信且适合短视频平台传播的宣传片',
     creativeBrief: '产品解决重复整理资料的问题，所有功效都需要事实依据。',
   }, {
-    text: async () => {
+    text: async (_prompt, stage) => {
       textCalls += 1
+      if (stage?.id) stageIds.push(stage.id)
       return JSON.stringify({ summary: `阶段 ${textCalls}`, title: `候选 ${textCalls}` })
     },
-    search: async () => {
+    search: async (_prompt, stage) => {
       searchCalls += 1
+      if (stage?.id) stageIds.push(stage.id)
       return { text: `研究 ${searchCalls}`, sources: Array.from({ length: 6 }, (_, index) => ({ url: `https://example.com/${searchCalls}/${index}`, copyrightStatus: 'UNCONFIRMED' as const })) }
     },
   })
   assert.equal(textCalls, 7)
   assert.equal(searchCalls, 3)
+  assert.equal(stageIds.length, 10)
+  assert.equal(new Set(stageIds).size, 10)
   assert.equal(run.stages.length, 6)
   assert.equal(run.artifacts.conceptCandidates.length, 3)
   assert.equal(run.sources.length, 12)
@@ -1502,6 +1509,19 @@ check('自动文字模型只从当前可用目录中按优先级选择', () => {
 check('文字模型选项只暴露当前目录并保留自动与已配置 MiniMax', () => {
   const options = buildTextModelOptions(['deepseek-v3-1', 'seedance-2.0'], true)
   assert.deepEqual(options.map(item => item.id), ['auto', 'MiniMax-Text-01', 'deepseek-v3-1'])
+})
+
+check('自动文字路由不再经过 MiniMax，只有明确选择才使用', () => {
+  assert.equal(shouldUseMinimax('auto'), false)
+  assert.equal(shouldUseMinimax('deepseek-v3-1'), false)
+  assert.equal(shouldUseMinimax('MiniMax-Text-01'), true)
+})
+
+check('供应商文字输出只提取助手正文并限制记录长度', () => {
+  assert.equal(extractAssistantOutput({ choices: [{ message: { content: '阶段结果' } }] }), '阶段结果')
+  assert.equal(extractAssistantOutput({ choices: [{ message: { content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }] } }] }), '第一段\n第二段')
+  assert.equal(extractAssistantOutput({ id: 'task-only', choices: [] }), undefined)
+  assert.equal(extractAssistantOutput({ output: 'x'.repeat(21_000) })?.length, 20_000)
 })
 
 check('主画布复用生产分组并把单元内部镜头视为完整输出', () => {

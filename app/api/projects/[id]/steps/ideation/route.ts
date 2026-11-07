@@ -14,6 +14,7 @@ import { createStep, completeStep, failStep, canExecuteStep } from '@/lib/workfl
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 import { getStepAssetConstraints } from '@/lib/asset-constraints'
+import { withSupplierCallContext } from '@/lib/supplier-observability'
 
 export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -126,8 +127,14 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const agentRun = await runCreativeAgentPipeline(
       { goal: businessGoalText, creativeBrief, referenceLabels: refLabels },
       {
-        text: prompt => textClient.generate(prompt, { maxTokens: 8192, model: body.textModel }),
-        search: prompt => generateSearchText(prompt, { model: 'gpt-5-search-api', maxTokens: 6000, maxSources: 12 }),
+        text: (prompt, stage) => withSupplierCallContext(
+          { stageId: stage?.id, stageLabel: stage?.label },
+          () => textClient.generate(prompt, { maxTokens: 8192, model: body.textModel }),
+        ),
+        search: (prompt, stage) => withSupplierCallContext(
+          { stageId: stage?.id, stageLabel: stage?.label },
+          () => generateSearchText(prompt, { model: 'gpt-5-search-api', maxTokens: 6000, maxSources: 12 }),
+        ),
       },
     )
     const directions = agentRun.artifacts.conceptCandidates.map((candidate: any) => ({

@@ -70,20 +70,27 @@ export async function serializeGenerationTask(operation: any) {
     durationMs: operation.durationMs,
     error: operation.errorMessage,
     requestSnapshot: metadata.requestSnapshot || null,
-    attempts: (operation.providerAttempts || []).map((attempt: any) => ({
-      id: attempt.id,
-      provider: attempt.provider,
-      model: attempt.model,
-      status: attempt.status,
-      attemptNo: attempt.attemptNo,
-      externalTaskId: attempt.externalTaskId,
-      httpStatus: attempt.httpStatus,
-      pollCount: attempt.pollCount,
-      startedAt: attempt.startedAt,
-      completedAt: attempt.completedAt,
-      durationMs: attempt.durationMs,
-      error: attempt.errorMessage,
-    })),
+    attempts: (operation.providerAttempts || []).map((attempt: any) => {
+      const attemptMetadata = attempt.metadata && typeof attempt.metadata === 'object' ? attempt.metadata : {}
+      return {
+        id: attempt.id,
+        provider: attempt.provider,
+        model: attempt.model,
+        status: attempt.status,
+        attemptNo: attempt.attemptNo,
+        externalTaskId: attempt.externalTaskId,
+        httpStatus: attempt.httpStatus,
+        pollCount: attempt.pollCount,
+        startedAt: attempt.startedAt,
+        completedAt: attempt.completedAt,
+        durationMs: attempt.durationMs,
+        error: attempt.errorMessage,
+        stageId: typeof attemptMetadata.stageId === 'string' ? attemptMetadata.stageId : undefined,
+        stageLabel: typeof attemptMetadata.stageLabel === 'string' ? attemptMetadata.stageLabel : undefined,
+        outputAvailable: typeof attemptMetadata.outputAvailable === 'boolean' ? attemptMetadata.outputAvailable : undefined,
+        outputText: typeof attemptMetadata.outputText === 'string' ? attemptMetadata.outputText : undefined,
+      }
+    }),
     results,
   }
 }

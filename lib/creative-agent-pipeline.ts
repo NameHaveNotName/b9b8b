@@ -30,8 +30,8 @@ export interface CreativeAgentRun {
   }
 }
 interface PipelineAdapters {
-  text: (prompt: string) => Promise<string>
-  search: (prompt: string) => Promise<WebSearchResult>
+  text: (prompt: string, stage?: { id: string; label: string }) => Promise<string>
+  search: (prompt: string, stage?: { id: string; label: string }) => Promise<WebSearchResult>
 }
 
 function parseObject(text: string, stage: string): Record<string, unknown> {
@@ -96,7 +96,7 @@ ${JSON_RULE}
 字段必须包含：summary, contentType, primaryOutcome, audience, platform, hardConstraints, successCriteria, verificationNeeded, narrativeSubjectCandidates。
 用户目标：${goalInput}
 创作简介：${brief}
-参考资产标签：${(input.referenceLabels || []).join('、') || '无'}`), 'goal-contract')
+参考资产标签：${(input.referenceLabels || []).join('、') || '无'}`, { id: 'goal-contract', label: '理解目标' }), 'goal-contract')
   stages.push({ id: 'goal-contract', label: '理解目标', summary: summaryOf(goalContract, '已形成目标契约'), status: 'completed', output: goalContract })
 
   const researchSpecs = [
@@ -108,7 +108,7 @@ ${JSON_RULE}
     const result = await adapters.search(`你是联网研究 Agent。${focus}
 目标契约：${compact(goalContract)}
 创作简介：${brief}
-输出清晰的研究结论、证据对应关系、仍需核实事项。不要下载图片；如发现可能有帮助的图片，只列所在页面或候选图片 URL，并明确版权状态未知、需人工确认。`)
+输出清晰的研究结论、证据对应关系、仍需核实事项。不要下载图片；如发现可能有帮助的图片，只列所在页面或候选图片 URL，并明确版权状态未知、需人工确认。`, { id: `research-${id}`, label: `联网研究 · ${label}` })
     return { id, label, result }
   }))
   const researchChildren = researchResults.map(({ id, label, result }) => ({
@@ -125,7 +125,7 @@ ${JSON_RULE}
 ${JSON_RULE}
 字段必须包含：summary, audienceInsight, communicationPriority, narrativeOpportunity, platformFit, mustShow, mustAvoid, evidenceGaps, evaluationRubric。
 目标契约：${compact(goalContract)}
-研究资料：${compact(researchBundle, 26000)}`), 'strategy-map')
+研究资料：${compact(researchBundle, 26000)}`, { id: 'strategy-map', label: '形成策略' }), 'strategy-map')
   stages.push({ id: 'strategy-map', label: '形成策略', summary: summaryOf(strategyMap, '已形成策略地图'), status: 'completed', output: strategyMap })
 
   const conceptSpecs = [
@@ -139,7 +139,7 @@ ${JSON_RULE}
 字段必须包含：title, summary, coreIdea, opening, development, ending, audienceValue, risks, productionNotes。
 目标契约：${compact(goalContract)}
 策略地图：${compact(strategyMap)}
-研究摘要：${compact(researchBundle, 18000)}`), `concept-${id}`)
+研究摘要：${compact(researchBundle, 18000)}`, { id: `concept-${id}`, label: `并行创意 · ${label}` }), `concept-${id}`)
     return { id, label, ...value }
   }))
   stages.push({
@@ -156,7 +156,7 @@ ${JSON_RULE}
 字段必须包含：summary, candidateScores, strongestElements, conflicts, factualRisks, productionRisks, recommendation。
 目标契约：${compact(goalContract)}
 策略地图：${compact(strategyMap)}
-创意候选：${compact(conceptCandidates, 22000)}`), 'critique')
+创意候选：${compact(conceptCandidates, 22000)}`, { id: 'critique', label: '交叉评审' }), 'critique')
   stages.push({ id: 'critique', label: '交叉评审', summary: summaryOf(critiqueReport, '已完成候选比较与风险审查'), status: 'completed', output: critiqueReport })
 
   const creativePlan = parseObject(await adapters.text(`你是最终方案归纳 Agent。基于目标、研究、策略、三个候选和评审，产出一份等待用户确认的完整创作方案。方案必须能继续指导叙事框架搭建，但此处不要直接生成正式框架。主角可为人、动物、产品、物品或抽象主体。
@@ -165,7 +165,7 @@ ${JSON_RULE}
 目标契约：${compact(goalContract)}
 策略地图：${compact(strategyMap)}
 候选：${compact(conceptCandidates, 20000)}
-评审：${compact(critiqueReport)}`), 'creative-plan')
+评审：${compact(critiqueReport)}`, { id: 'creative-plan', label: '归纳方案' }), 'creative-plan')
   stages.push({ id: 'creative-plan', label: '归纳方案', summary: summaryOf(creativePlan, '完整创作方案等待确认'), status: 'completed', output: creativePlan })
 
   return {

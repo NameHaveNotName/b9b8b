@@ -223,7 +223,26 @@ function ExecutionView({ run, onBackToConfig }: { run: GenerationRun; onBackToCo
         <div className="mb-4"><p className="text-xs font-semibold text-stone-700">执行过程记录</p><p className="mt-1 text-[10px] text-stone-500">结果出现后，过程记录保留在下方，便于回看任务实际经历的阶段。</p></div>
         <div className="space-y-0">
           <div className="grid grid-cols-[18px_1fr] gap-2.5 pb-4"><div className="flex flex-col items-center"><span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-green-500" /><span className="mt-1 w-px flex-1 bg-stone-200" /></div><div><p className="text-xs font-medium text-stone-700">请求已入库</p><p className="mt-0.5 text-[10px] text-stone-500">任务编号 {run.taskId || '正在关联'}；配置快照可用于刷新后恢复。</p></div></div>
-          {(run.attempts || []).map((attempt, index) => <div key={attempt.id} className="grid grid-cols-[18px_1fr] gap-2.5 pb-4"><div className="flex flex-col items-center"><span className={`mt-0.5 h-2.5 w-2.5 rounded-full ${attempt.status === 'FAILED' ? 'bg-red-500' : attempt.status === 'RUNNING' ? 'animate-pulse bg-blue-500' : 'bg-green-500'}`} /><span className="mt-1 w-px flex-1 bg-stone-200" /></div><div><p className="text-xs font-medium text-stone-700">供应商调用 {index + 1} · {attempt.provider}{attempt.model ? ` · ${attempt.model}` : ''}</p><p className="mt-0.5 text-[10px] text-stone-500">状态 {attempt.status}{attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ''}{attempt.externalTaskId ? ` · 外部任务 ${attempt.externalTaskId}` : ''}</p>{attempt.error && <p className="mt-1 text-[10px] text-red-600">{attempt.error}</p>}</div></div>)}
+          {(run.attempts || []).map((attempt, index) => (
+            <div key={attempt.id} className="grid grid-cols-[18px_1fr] gap-2.5 pb-4">
+              <div className="flex flex-col items-center">
+                <span className={`mt-0.5 h-2.5 w-2.5 rounded-full ${attempt.status === 'FAILED' ? 'bg-red-500' : attempt.status === 'RUNNING' ? 'animate-pulse bg-blue-500' : attempt.outputAvailable === false ? 'bg-amber-500' : 'bg-green-500'}`} />
+                <span className="mt-1 w-px flex-1 bg-stone-200" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-stone-700">{attempt.stageLabel || `供应商调用 ${index + 1}`} · {attempt.provider}{attempt.model ? ` · ${attempt.model}` : ''}</p>
+                <p className="mt-0.5 text-[10px] text-stone-500">状态 {attempt.status}{attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ''}{attempt.durationMs != null ? ` · ${(attempt.durationMs / 1000).toFixed(1)} 秒` : ''}{attempt.externalTaskId ? ` · 外部任务 ${attempt.externalTaskId}` : ''}</p>
+                {attempt.error && <p className="mt-1 text-[10px] text-red-600">{attempt.error}</p>}
+                {attempt.outputAvailable === false && attempt.status === 'SUCCEEDED' && <p className="mt-1 text-[10px] text-amber-700">HTTP 请求成功，但没有提取到可用的文字结果。</p>}
+                {attempt.outputText && (
+                  <details className="mt-2 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2">
+                    <summary className="cursor-pointer select-none text-[10px] font-semibold text-stone-700">查看本步文字输出</summary>
+                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-white p-2.5 font-mono text-[10px] leading-relaxed text-stone-700">{attempt.outputText}</pre>
+                  </details>
+                )}
+              </div>
+            </div>
+          ))}
           <div className="grid grid-cols-[18px_1fr] gap-2.5"><div className="flex flex-col items-center">{running ? <span className="mt-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" /> : success ? <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-green-500" /> : <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-red-500" />}</div><div><p className="text-xs font-medium text-stone-700">{run.stage || (running ? '供应商处理中' : success ? '结果已保存' : '执行已终止')}</p><p className="mt-0.5 text-[10px] text-stone-500">{run.message}；不估算虚假百分比。</p>{run.startedAt && <p className="mt-1 text-[10px] text-stone-400">开始于 {new Date(run.startedAt).toLocaleTimeString()}</p>}</div></div>
         </div>
       </section>

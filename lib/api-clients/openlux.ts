@@ -14,6 +14,7 @@ import {
   chooseAutomaticOpenLuxModel,
   filterTextModelIds,
   normalizeTextModelId,
+  shouldUseMinimax,
 } from '@/lib/text-models'
 import fs from 'fs'
 import path from 'path'
@@ -267,13 +268,9 @@ async function openLuxFetch(path: string, body: any, timeoutMs = 120000) {
   }
 }
 
-// ==================== 文本生成（MiniMax M2.7 优先 + 云雾降级）====================
-// 优先调用 MiniMax 官方 API（最高优先级），失败时回退到 OpenLux 聚合供应商。
-// MiniMax M2.7（模型名 MiniMax-Text-01）作为最高优先级，主要原因：
-//   1. 中文理解与生成质量稳定
-//   2. 价格优于 gpt-4o-mini
-//   3. 上下文窗口大（最新版本支持 128K+）
-// 失败回退：网络错误、API key 未配置、超时、4xx/5xx 错误都触发降级。
+// ==================== 文本生成（OpenLux 自动路由 + 显式 MiniMax）====================
+// 自动模式只从当前 OpenLux 目录选择可用文字模型，避免每个 Agent 阶段重复试探供应商。
+// MiniMax-Text-01 仅在用户明确选择时调用；失败会直接报告，不再静默切换模型。
 export async function generateText(
   prompt: string,
   model: string = AUTO_TEXT_MODEL,
@@ -281,7 +278,7 @@ export async function generateText(
 ): Promise<string> {
   const requestedModel = normalizeTextModelId(model)
   const automatic = requestedModel === AUTO_TEXT_MODEL
-  const useMinimax = requestedModel === MINIMAX_TEXT_MODEL || automatic
+  const useMinimax = shouldUseMinimax(requestedModel)
 
   if (useMinimax && MINIMAX_API_KEY) {
     try {
@@ -298,8 +295,7 @@ export async function generateText(
       return result
     } catch (e: any) {
       const reason = e instanceof MinimaxTextError ? `MinimaxTextError(${e.status || '?'}): ${e.message}` : (e?.message || String(e))
-      if (!automatic) throw new Error(`MINIMAX_TEXT_UNAVAILABLE: ${reason}`)
-      console.warn(`[TEXT-MINIMAX] 自动模式失败，准备选择 OpenLux 当前可用模型: ${reason.slice(0, 200)}`)
+      throw new Error(`MINIMAX_TEXT_UNAVAILABLE: ${reason}`)
     }
   } else if (requestedModel === MINIMAX_TEXT_MODEL) {
     throw new Error('MINIMAX_TEXT_UNAVAILABLE: MINIMAX_API_KEY 未配置')

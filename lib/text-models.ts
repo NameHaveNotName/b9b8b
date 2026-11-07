@@ -28,6 +28,10 @@ export function normalizeTextModelId(model?: string | null): string {
   return LEGACY_ALIASES[value] || value
 }
 
+export function shouldUseMinimax(model?: string | null): boolean {
+  return normalizeTextModelId(model) === MINIMAX_TEXT_MODEL
+}
+
 export function filterTextModelIds(ids: string[]): string[] {
   return [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))]
     .filter((id) => TEXT_FAMILY_PATTERN.test(id) && !NON_TEXT_PATTERN.test(id))

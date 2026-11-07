@@ -3,16 +3,23 @@ import 'server-only'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
+import { extractAssistantOutput } from '@/lib/supplier-output'
 
 type OperationContext = { operationId?: string; userId?: string }
+type SupplierCallContext = { stageId?: string; stageLabel?: string }
 
 const globalStore = globalThis as typeof globalThis & {
   __supplierOperationContext?: AsyncLocalStorage<OperationContext>
+  __supplierCallContext?: AsyncLocalStorage<SupplierCallContext>
 }
 
 const operationContext =
   globalStore.__supplierOperationContext || new AsyncLocalStorage<OperationContext>()
 globalStore.__supplierOperationContext = operationContext
+
+const supplierCallContext =
+  globalStore.__supplierCallContext || new AsyncLocalStorage<SupplierCallContext>()
+globalStore.__supplierCallContext = supplierCallContext
 
 export type OperationCategory = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'MUSIC' | 'OTHER'
 
@@ -35,6 +42,13 @@ function safeMessage(error: unknown) {
 
 export function getCurrentOperationId() {
   return operationContext.getStore()?.operationId
+}
+
+export function withSupplierCallContext<T>(
+  context: SupplierCallContext,
+  action: () => Promise<T>,
+): Promise<T> {
+  return supplierCallContext.run(context, action)
 }
 
 /**
@@ -378,6 +392,7 @@ export async function trackedSupplierFetch(
     typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
   const provider = inferProvider(rawUrl)
   const context = operationContext.getStore()
+  const callContext = supplierCallContext.getStore()
   if (!provider || !context?.operationId) return fetch(input, init)
 
   const url = new URL(rawUrl)
@@ -406,6 +421,12 @@ export async function trackedSupplierFetch(
         method: init?.method || (input instanceof Request ? input.method : 'GET'),
         attemptNo: count + 1,
         status: 'RUNNING',
+        metadata: callContext?.stageId || callContext?.stageLabel
+          ? {
+              ...(callContext.stageId ? { stageId: callContext.stageId } : {}),
+              ...(callContext.stageLabel ? { stageLabel: callContext.stageLabel } : {}),
+            }
+          : undefined,
       },
     })
     attemptId = attempt.id
@@ -437,12 +458,22 @@ export async function trackedSupplierFetch(
       let externalTaskId: string | undefined
       let errorCode: string | undefined
       let usage: ReturnType<typeof extractUsage> = {}
+      let outputText: string | undefined
       try {
         const data = await response.clone().json()
         externalTaskId = findString(data, ['task_id', 'taskId', 'id'])
         errorCode = !response.ok ? findString(data, ['error_code', 'errorCode', 'code']) : undefined
         usage = extractUsage(data)
+        if (category === 'TEXT' && response.ok) outputText = extractAssistantOutput(data)
       } catch {}
+      const attemptMetadata = category === 'TEXT' || callContext?.stageId || callContext?.stageLabel
+        ? {
+            ...(callContext?.stageId ? { stageId: callContext.stageId } : {}),
+            ...(callContext?.stageLabel ? { stageLabel: callContext.stageLabel } : {}),
+            ...(category === 'TEXT' ? { outputAvailable: Boolean(outputText) } : {}),
+            ...(outputText ? { outputText } : {}),
+          }
+        : undefined
       await prisma.providerCallAttempt.update({
         where: { id: attemptId },
         data: {
@@ -455,6 +486,7 @@ export async function trackedSupplierFetch(
             undefined,
           externalTaskId,
           errorCode,
+          metadata: attemptMetadata,
           ...usage,
           completedAt,
           durationMs: completedAt.getTime() - startedAt.getTime(),

@@ -86,6 +86,10 @@ export interface GenerationRun {
     completedAt?: string | null
     durationMs?: number | null
     error?: string | null
+    stageId?: string
+    stageLabel?: string
+    outputAvailable?: boolean
+    outputText?: string
   }>
 }
 // End of generation workbench contracts.
