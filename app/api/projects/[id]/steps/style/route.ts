@@ -28,7 +28,8 @@ async function generateStylePrompts(
   project: any,
   frameworkStep: any,
   stepId: string,
-  aspectRatio: string = '16:9'
+  aspectRatio: string = '16:9',
+  textModel?: string,
 ): Promise<{ prompts: any[]; styleOptions: any[] }> {
   const framework = project.framework || (frameworkStep.outputData as any)
   const storyBrief = framework?.synopsis || framework?.storyBrief || ''
@@ -70,7 +71,7 @@ async function generateStylePrompts(
       maxTokens: 4096,
     })
   } else {
-    resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+    resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: textModel })
   }
   const parsed = extractJsonFromMarkdown(resultText)
 
@@ -177,7 +178,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     try {
       console.log('[STYLE-PROMPT] 收到 generate-prompts 请求')
       const aspectRatio = body?.aspectRatio || '16:9'
-      const { prompts } = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio)
+      const { prompts } = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio, body.textModel)
       await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       return NextResponse.json({
         success: true,
@@ -221,7 +222,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
       try {
-        const generated = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio)
+        const generated = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio, body.textModel)
         resolvedPrompts = generated.prompts
         resolvedStyleOptions = generated.styleOptions
         console.log(`[STYLE-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)

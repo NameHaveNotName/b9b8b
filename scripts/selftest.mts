@@ -24,6 +24,13 @@ import {
 } from '../lib/safe-image-response.ts'
 import { calculateBatchCost, GENERATION_COSTS } from '../lib/points-config.ts'
 import {
+  AUTO_TEXT_MODEL,
+  buildTextModelOptions,
+  chooseAutomaticOpenLuxModel,
+  filterTextModelIds,
+  normalizeTextModelId,
+} from '../lib/text-models.ts'
+import {
   computeProjectStateFromSteps,
   getStepDisplayState,
   hasConceptImage,
@@ -1473,6 +1480,29 @@ check('行内差异高亮可无损还原修改前和修改后文字', () => {
 })
 
 console.log('\n== 故事与镜头主画布 ==')
+
+check('文字模型旧别名迁移到当前模型或自动模式', () => {
+  assert.equal(normalizeTextModelId('deepseek-v3'), 'deepseek-v3-1')
+  assert.equal(normalizeTextModelId('deepseek-chat'), AUTO_TEXT_MODEL)
+  assert.equal(normalizeTextModelId('deepseek-v4-pro'), 'deepseek-v4-pro')
+})
+
+check('文字模型目录排除图片视频和搜索专用模型', () => {
+  assert.deepEqual(filterTextModelIds([
+    'deepseek-v3-1', 'gpt-4o-mini', 'gpt-image-1', 'doubao-seedance-2-0', 'gpt-5-search-api',
+  ]), ['deepseek-v3-1', 'gpt-4o-mini'])
+})
+
+check('自动文字模型只从当前可用目录中按优先级选择', () => {
+  assert.equal(chooseAutomaticOpenLuxModel(['deepseek-v4-pro', 'deepseek-v3-1']), 'deepseek-v3-1')
+  assert.equal(chooseAutomaticOpenLuxModel(['deepseek-v4-pro']), 'deepseek-v4-pro')
+  assert.equal(chooseAutomaticOpenLuxModel(['gpt-image-1']), null)
+})
+
+check('文字模型选项只暴露当前目录并保留自动与已配置 MiniMax', () => {
+  const options = buildTextModelOptions(['deepseek-v3-1', 'seedance-2.0'], true)
+  assert.deepEqual(options.map(item => item.id), ['auto', 'MiniMax-Text-01', 'deepseek-v3-1'])
+})
 
 check('主画布复用生产分组并把单元内部镜头视为完整输出', () => {
   const units = buildStoryCanvasUnits([

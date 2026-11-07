@@ -261,30 +261,28 @@ Object.defineProperty(IMAGE_MODELS, 'KEYFRAME', {
 };
 
 export const TEXT_MODELS = {
-  // 创意扩散、框架搭建、分镜设计：推荐 DeepSeek（便宜，中文好）
-  IDEATION: 'deepseek-v3',
-  FRAMEWORK: 'deepseek-v3',
-  STORYBOARD: 'deepseek-v3',
+  // 普通文本步骤默认自动路由：优先已配置的官方通道，再从当前 OpenLux 目录选可用模型。
+  IDEATION: 'auto',
+  FRAMEWORK: 'auto',
+  STORYBOARD: 'auto',
 
-  // 风格统一：推荐 DeepSeek（JSON 结构化输出稳定，中文理解好）
-  STYLE: 'deepseek-v3',
+  // 风格、评测、情感与音色分配同样避免写死可能下线的历史型号。
+  STYLE: 'auto',
 
-  // 评测、一致性检测：推荐 GPT-4o（结构化输出稳定）
-  REVIEW: 'gpt-4o-mini',
+  REVIEW: 'auto',
 
-  // 情感分析：推荐 Claude（长文本理解强）
-  EMOTION: 'claude-3-5-sonnet',
+  EMOTION: 'auto',
 
   // 工作指令.txt（Round 7）：宣传片每个 5s 片段的视频提示词生成
-  // 需要输出 JSON {videoPrompt, cameraMotion, duration}，DeepSeek 即可
-  TRAILER_PROMPT: 'deepseek-v3',
+  // 需要输出 JSON {videoPrompt, cameraMotion, duration}
+  TRAILER_PROMPT: 'auto',
   TRAILER_PROMPT_FALLBACK: 'gpt-4o-mini',
 
   // 多模态视觉文本生成（用户上传参考图时使用）
   VISION: 'gpt-4o-mini',
 
-  // 音色匹配：使用 MiniMax M3（角色描述 → 最佳音色 ID）
-  VOICE_ASSIGNMENT: 'deepseek-v3',
+  // 音色匹配：角色描述 → 最佳音色 ID
+  VOICE_ASSIGNMENT: 'auto',
 }
 
 export const VIDEO_MODELS = {

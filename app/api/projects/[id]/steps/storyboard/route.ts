@@ -90,7 +90,7 @@ function normalizeStoryboardActResults(actResults: any[][], acts: any[]) {
   })
 }
 
-async function generateStoryboardByAct(textClient: any, framework: any, act: any, tagInstructions?: string, actNumberOverride?: number, estimatedShotsOverride?: number) {
+async function generateStoryboardByAct(textClient: any, framework: any, act: any, tagInstructions?: string, actNumberOverride?: number, estimatedShotsOverride?: number, textModel?: string) {
   const actNumber = actNumberOverride || normalizeOptionalInt(act.actNo ?? act.actNumber, 1)
   const prompt = loadPromptTemplate('storyboard-act-dynamic', {
     USER_INPUT: JSON.stringify(framework),
@@ -103,7 +103,7 @@ async function generateStoryboardByAct(textClient: any, framework: any, act: any
     TAG_INSTRUCTIONS: tagInstructions || '',
     VIDEO_MODEL_CAPABILITIES: getStoryboardVideoCapabilityInstruction(),
   })
-  const text = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+  const text = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: textModel })
   return extractJsonFromMarkdown(text) || []
 }
 
@@ -248,7 +248,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
       const shotBudgets = distributeStoryboardShotBudget(acts)
       const actResults = await Promise.all(
-        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, storyboardInstructions, actIndex + 1, shotBudgets[actIndex]))
+        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, storyboardInstructions, actIndex + 1, shotBudgets[actIndex], body.textModel))
       )
       let allShots = normalizeStoryboardActResults(actResults, acts)
       if (!Array.isArray(allShots) || allShots.length === 0) {
@@ -341,7 +341,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
 
       const shotBudgets = distributeStoryboardShotBudget(acts)
       const actResults = await Promise.all(
-        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, storyboardInstructions2, actIndex + 1, shotBudgets[actIndex]))
+        acts.map((act: any, actIndex: number) => generateStoryboardByAct(textClient, framework, act, storyboardInstructions2, actIndex + 1, shotBudgets[actIndex], body.textModel))
       )
       currentAllShots = normalizeStoryboardActResults(actResults, acts)
       if (!Array.isArray(currentAllShots) || currentAllShots.length === 0) {

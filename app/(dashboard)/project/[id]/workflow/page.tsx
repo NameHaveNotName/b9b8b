@@ -274,7 +274,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
           setExecuting(null)
           return { success: false, message: '请先选择一个创意方向' }
         }
-        body = { directionIndex: idx }
+        body = { ...(body || {}), directionIndex: idx }
       }
 
       // 防御：未解锁步骤不允许执行，避免后端返回 WORKFLOW_002
@@ -947,7 +947,8 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
           : ['TRAILER', 'VIDEO_DIRECT'].includes(targetStepType)
             ? 'video'
             : 'image'
-    const resolvedModel = body?.imageModel
+    const resolvedModel = body?.textModel
+      || body?.imageModel
       || body?.videoModel
       || out.imageModel
       || out.modelId
@@ -963,7 +964,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       targetLabel: STEP_LABELS[targetStepType] || targetStepType,
       inputDeps: getInputDeps(targetStepType),
       model: resolvedModel,
-      modelEditable: kind === 'image' || kind === 'video',
+      modelEditable: kind === 'text' || kind === 'image' || kind === 'video',
       aspectRatio: body?.aspectRatio || out.aspectRatio || project.selectedAspectRatio || '16:9',
       aspectRatioEditable: kind === 'image' || kind === 'video',
       prompt,
@@ -1157,6 +1158,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       ...(nextDraft.requestBody || {}),
       ...(nextDraft.kind === 'image' ? { imageModel: nextDraft.model } : {}),
       ...(nextDraft.kind === 'video' ? { videoModel: nextDraft.model } : {}),
+      ...(nextDraft.kind === 'text' ? { textModel: nextDraft.model } : {}),
       aspectRatio: nextDraft.aspectRatio,
       ...(nextDraft.promptEditable && nextDraft.prompt ? { promptOverride: nextDraft.prompt } : {}),
       ...(nextDraft.referencesResolved ? { refImages: nextDraft.references.filter((ref) => ref.type !== 'original' && ref.removable).map((ref) => ref.url) } : {}),

@@ -7,6 +7,7 @@ import {
   FileText, History, Images, Loader2, LocateFixed, LockKeyhole, Plus, RotateCcw, Send, Settings2, Trash2, Users, X,
 } from 'lucide-react'
 import { ASPECT_RATIO_OPTIONS, IMAGE_MODELS, VIDEO_MODELS } from '@/lib/models-config'
+import { AUTO_TEXT_MODEL, normalizeTextModelId, type TextModelOption } from '@/lib/text-models'
 import type { GenerationDraft, GenerationRun } from './types'
 
 export type { GenerationDraft, GenerationRun } from './types'
@@ -117,9 +118,17 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
   const [editInstruction, setEditInstruction] = useState(draft.editInstruction || '')
   const submitting = run?.status === 'running'
   const canEditOriginal = Boolean(draft.originalImageUrl)
-  const modelOptions = draft.kind === 'video'
+  const { data: textModelCatalog, isLoading: textModelsLoading } = useSWR<{ models: TextModelOption[]; catalogAvailable: boolean; message?: string }>(
+    draft.kind === 'text' ? '/api/models/text' : null,
+    assetFetcher,
+    { revalidateOnFocus: false },
+  )
+  const modelOptions = draft.kind === 'text'
+    ? (textModelCatalog?.models || [{ id: AUTO_TEXT_MODEL, label: '自动选择（推荐）', provider: 'auto' as const }])
+    : draft.kind === 'video'
     ? VIDEO_MODELS.direct.available
     : IMAGE_MODELS.available.filter((model) => !('disabled' in model && model.disabled))
+  const selectedModel = draft.kind === 'text' ? normalizeTextModelId(draft.model) : draft.model
 
   useEffect(() => setEditInstruction(draft.editInstruction || ''), [draft.editInstruction, draft.targetId])
 
@@ -167,10 +176,11 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
 
       <section className="grid grid-cols-2 gap-3">
         <label className="text-[10px] font-medium text-stone-500">模型
-          <select disabled={!draft.modelEditable} value={draft.model} onChange={(event) => onChange({ ...draft, model: event.target.value })} className="mt-1.5 w-full rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-xs text-stone-700 outline-none focus:border-amber-400 disabled:bg-stone-50 disabled:text-stone-500">
-            {!modelOptions.some((model) => model.id === draft.model) && <option value={draft.model}>{draft.model || '步骤默认模型'}</option>}
+          <select disabled={!draft.modelEditable || (draft.kind === 'text' && textModelsLoading)} value={selectedModel} onChange={(event) => onChange({ ...draft, model: event.target.value })} className="mt-1.5 w-full rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-xs text-stone-700 outline-none focus:border-amber-400 disabled:bg-stone-50 disabled:text-stone-500">
+            {!modelOptions.some((model) => model.id === selectedModel) && <option value={selectedModel}>{selectedModel || '步骤默认模型'}</option>}
             {modelOptions.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
           </select>
+          {draft.kind === 'text' && <span className="mt-1 block text-[9px] leading-relaxed text-stone-500">{textModelsLoading ? '正在读取当前账号可用模型…' : textModelCatalog?.catalogAvailable === false ? textModelCatalog.message : '列表来自当前 OpenLux 账号的实时模型目录；明确选择后不会被其他供应商覆盖。'}</span>}
         </label>
         <label className="text-[10px] font-medium text-stone-500">画幅
           <select disabled={!draft.aspectRatioEditable} value={draft.aspectRatio} onChange={(event) => onChange({ ...draft, aspectRatio: event.target.value })} className="mt-1.5 w-full rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-xs text-stone-700 outline-none focus:border-amber-400 disabled:bg-stone-50 disabled:text-stone-500">
@@ -578,7 +588,7 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
       referencesResolved: true,
       referencesEditable: snapshot.kind === 'image' || snapshot.kind === 'video',
       model: snapshot.model || '',
-      modelEditable: snapshot.kind === 'image' || snapshot.kind === 'video',
+      modelEditable: snapshot.kind === 'text' || snapshot.kind === 'image' || snapshot.kind === 'video',
       aspectRatio: snapshot.aspectRatio || '16:9',
       aspectRatioEditable: snapshot.kind === 'image' || snapshot.kind === 'video',
       pointCost: 0,

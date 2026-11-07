@@ -54,7 +54,8 @@ async function generateCharacterPrompts(
   project: any,
   frameworkStep: any,
   stepId: string,
-  imageModel?: string
+  imageModel?: string,
+  textModel?: string,
 ): Promise<{ prompts: any[]; characterCount: number }> {
   const framework = (project.framework || frameworkStep.outputData) as any
   const allCharacters: Array<{ id: string; name: string; role: string; description: string }> =
@@ -78,7 +79,7 @@ async function generateCharacterPrompts(
     LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(imageModel || IMAGE_MODELS.primary),
   })
   const textClient = await getTextClient()
-  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: textModel })
   const parsed = extractJsonFromMarkdown(resultText)
   const parsedChars = parsed.characters || []
 
@@ -149,7 +150,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     try {
       console.log('[CHARACTER-PROMPT] 收到 generate-prompts 请求')
       const promptImageModel = body?.imageModel || (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
-      const { prompts } = await generateCharacterPrompts(project, frameworkStep, step.id, promptImageModel)
+      const { prompts } = await generateCharacterPrompts(project, frameworkStep, step.id, promptImageModel, body.textModel)
       await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
@@ -187,7 +188,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
       try {
-        const generated = await generateCharacterPrompts(project, frameworkStep, step.id, imageModel)
+        const generated = await generateCharacterPrompts(project, frameworkStep, step.id, imageModel, body.textModel)
         resolvedPrompts = generated.prompts
         console.log(`[CHARACTER-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
         await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })

@@ -221,7 +221,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         maxTokens: 16000,
       })
     } else {
-      fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000 })
+      fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000, model: body.textModel })
     }
 
     const parsed = extractJsonFromMarkdown(fullText)

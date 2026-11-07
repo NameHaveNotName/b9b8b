@@ -126,7 +126,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const agentRun = await runCreativeAgentPipeline(
       { goal: businessGoalText, creativeBrief, referenceLabels: refLabels },
       {
-        text: prompt => textClient.generate(prompt, { maxTokens: 8192 }),
+        text: prompt => textClient.generate(prompt, { maxTokens: 8192, model: body.textModel }),
         search: prompt => generateSearchText(prompt, { model: 'gpt-5-search-api', maxTokens: 6000, maxSources: 12 }),
       },
     )

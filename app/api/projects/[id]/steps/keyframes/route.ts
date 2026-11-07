@@ -141,7 +141,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           USER_INPUT: userInputBlock,
           LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(promptImageModel),
         })
-        const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024 })
+        const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024, model: body.textModel })
         const parsedLast = extractJsonFromMarkdown(lastPromptText)
         const lastImagePrompt = parsedLast.keyframe?.imagePrompt || lastPromptText
 
@@ -416,7 +416,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           USER_INPUT: (shot.description || `${shot.shotId} - ${shot.sceneName}`) + defaultRefHint,
           LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(IMAGE_MODELS.primary),
         })
-        const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024 })
+        const lastPromptText = await textClient.generate(lastPrompt, { temperature: 0.7, maxTokens: 1024, model: body.textModel })
         const parsedLast = extractJsonFromMarkdown(lastPromptText)
         const lastImagePrompt = parsedLast.keyframe?.imagePrompt || lastPromptText
 

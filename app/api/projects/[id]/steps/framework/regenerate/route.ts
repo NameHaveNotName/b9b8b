@@ -89,6 +89,7 @@ ${userInput}
 
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
+  const body = await req.json().catch(() => ({}))
   const userId = await getCurrentUserId()
   if (!userId) {
     return NextResponse.json({ error: 'AUTH_001' }, { status: 401 })
@@ -184,7 +185,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const creativeSource = currentIteration?.creativeContent || project.rawIdea
     const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, combinedInstructions)
     const textClient = await getTextClient()
-    const fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000 })
+    const fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000, model: body.textModel })
 
     const parsed = extractJsonFromMarkdown(fullText)
     const fw = parsed.framework || parsed

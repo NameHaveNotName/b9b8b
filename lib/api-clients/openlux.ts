@@ -8,6 +8,13 @@ import {
 import { generateTextMinimax, MinimaxTextError } from './minimax-text'
 import { trackedSupplierFetch } from '@/lib/supplier-observability'
 import { buildSeedanceVideoRequest } from '@/lib/video-request-formats'
+import {
+  AUTO_TEXT_MODEL,
+  MINIMAX_TEXT_MODEL,
+  chooseAutomaticOpenLuxModel,
+  filterTextModelIds,
+  normalizeTextModelId,
+} from '@/lib/text-models'
 import fs from 'fs'
 import path from 'path'
 
@@ -51,6 +58,27 @@ const API_KEY = process.env.OPENLUX_API_KEY
 // MiniMax 官方 API（2026-05-18）：当配置了 MINIMAX_API_KEY 时走官方 endpoint
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || ''
 const MINIMAX_BASE_URL = 'https://api.minimax.chat'
+
+let openLuxModelCatalogCache: { ids: string[]; expiresAt: number } | null = null
+
+export async function getAvailableOpenLuxModelIds(forceRefresh = false): Promise<string[]> {
+  if (!API_KEY) throw new Error('OPENLUX_API_KEY not configured in .env.local')
+  const now = Date.now()
+  if (!forceRefresh && openLuxModelCatalogCache && openLuxModelCatalogCache.expiresAt > now) {
+    return openLuxModelCatalogCache.ids
+  }
+  const response = await fetch(`${BASE_URL}/v1/models`, {
+    headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!response.ok) throw new Error(`OPENLUX_MODEL_CATALOG_HTTP_${response.status}`)
+  const payload = await response.json().catch(() => null)
+  const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : []
+  const ids = rows.map((row: any) => typeof row === 'string' ? row : row?.id).filter((id: unknown): id is string => typeof id === 'string')
+  openLuxModelCatalogCache = { ids, expiresAt: now + 5 * 60 * 1000 }
+  return ids
+}
 
 // 工作指令.txt（防御版额外检查清单 #3）：prompt 软截断到 ≤ 900 字符
 const PROMPT_MAX_LEN = 900
@@ -248,13 +276,16 @@ async function openLuxFetch(path: string, body: any, timeoutMs = 120000) {
 // 失败回退：网络错误、API key 未配置、超时、4xx/5xx 错误都触发降级。
 export async function generateText(
   prompt: string,
-  model: string = 'deepseek-chat',
+  model: string = AUTO_TEXT_MODEL,
   maxTokens: number = 12000
 ): Promise<string> {
-  if (MINIMAX_API_KEY) {
+  const requestedModel = normalizeTextModelId(model)
+  const automatic = requestedModel === AUTO_TEXT_MODEL
+  const useMinimax = requestedModel === MINIMAX_TEXT_MODEL || automatic
+
+  if (useMinimax && MINIMAX_API_KEY) {
     try {
-      // step 1: 优先用 MiniMax（模型名映射 deepseek-chat → MiniMax-Text-01）
-      const minimaxModel = 'MiniMax-Text-01'
+      const minimaxModel = MINIMAX_TEXT_MODEL
       const t0 = Date.now()
       const result = await generateTextMinimax(prompt, {
         model: minimaxModel,
@@ -262,25 +293,33 @@ export async function generateText(
         temperature: 0.7,
         timeoutMs: 120000,
       })
+      if (!result.trim()) throw new Error('MINIMAX_TEXT_EMPTY_RESPONSE')
       console.log(`[TEXT-MINIMAX] 模型=${minimaxModel} 耗时=${Date.now() - t0}ms 长度=${result.length} ✅`)
       return result
     } catch (e: any) {
-      // step 2: MiniMax 失败 → 回退到云雾
       const reason = e instanceof MinimaxTextError ? `MinimaxTextError(${e.status || '?'}): ${e.message}` : (e?.message || String(e))
-      console.warn(`[TEXT-MINIMAX] 失败,回退云雾 (${model}): ${reason.slice(0, 200)}`)
+      if (!automatic) throw new Error(`MINIMAX_TEXT_UNAVAILABLE: ${reason}`)
+      console.warn(`[TEXT-MINIMAX] 自动模式失败，准备选择 OpenLux 当前可用模型: ${reason.slice(0, 200)}`)
     }
-  } else {
-    console.log(`[TEXT-MINIMAX] MINIMAX_API_KEY 未配置,直接走云雾 (${model})`)
+  } else if (requestedModel === MINIMAX_TEXT_MODEL) {
+    throw new Error('MINIMAX_TEXT_UNAVAILABLE: MINIMAX_API_KEY 未配置')
   }
 
-  // step 3: OpenLux 聚合供应商降级
+  const catalogIds = await getAvailableOpenLuxModelIds()
+  const availableTextIds = filterTextModelIds(catalogIds)
+  const resolvedModel = automatic ? chooseAutomaticOpenLuxModel(availableTextIds) : requestedModel
+  if (!resolvedModel || !availableTextIds.includes(resolvedModel)) {
+    throw new Error(`TEXT_MODEL_UNAVAILABLE: ${requestedModel}`)
+  }
   const data = await openLuxFetch('/v1/chat/completions', {
-    model,
+    model: resolvedModel,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: maxTokens,
   })
-  return data.choices[0].message.content
+  const content = data?.choices?.[0]?.message?.content
+  if (typeof content !== 'string' || !content.trim()) throw new Error('OPENLUX_TEXT_EMPTY_RESPONSE')
+  return content
 }
 
 export interface WebSearchSource {
