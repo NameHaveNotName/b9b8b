@@ -56,6 +56,10 @@ export async function serializeGenerationTask(operation: any) {
     url: result.externalUrl || (result.storageKey ? await getSignedFileUrl(result.storageKey, 3600).catch(() => null) : null),
   })))
   const metadata = operation.metadata && typeof operation.metadata === 'object' ? operation.metadata : {}
+  const pipelinePrefix = operation.projectId ? `ideation-pipeline:${operation.projectId}:` : ''
+  const pipelineRunId = pipelinePrefix && typeof operation.idempotencyKey === 'string' && operation.idempotencyKey.startsWith(pipelinePrefix)
+    ? operation.idempotencyKey.slice(pipelinePrefix.length)
+    : null
   return {
     id: operation.id,
     projectId: operation.projectId,
@@ -70,6 +74,7 @@ export async function serializeGenerationTask(operation: any) {
     completedAt: operation.completedAt,
     durationMs: operation.durationMs,
     error: operation.errorMessage,
+    pipelineRunId,
     requestSnapshot: metadata.requestSnapshot || null,
     attempts: (operation.providerAttempts || []).map((attempt: any) => {
       const attemptMetadata = attempt.metadata && typeof attempt.metadata === 'object' ? attempt.metadata : {}

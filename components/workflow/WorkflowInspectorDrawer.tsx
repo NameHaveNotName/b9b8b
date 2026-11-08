@@ -523,7 +523,8 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
     requestSnapshot: localDraft || undefined,
   } : null)
   const persisted = (taskData?.tasks || []).find((task: any) =>
-    (baseRun?.taskId && task.id === baseRun.taskId)
+    (localDraft?.requestBody?.pipelineRunId && task.pipelineRunId === localDraft.requestBody.pipelineRunId)
+    || (baseRun?.taskId && task.id === baseRun.taskId)
     || (!baseRun?.taskId && localDraft && task.stepType === localDraft.stepType && (!baseRun?.startedAt || new Date(task.startedAt).getTime() >= new Date(baseRun.startedAt).getTime() - 15000))
   )
   const effectiveRun: GenerationRun | null = baseRun && persisted && baseRun.status !== 'interrupted' ? {
@@ -634,7 +635,7 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
       pointCost: 0,
       inputDeps: [],
       isRetry: true,
-      requestBody: {},
+      requestBody: task.pipelineRunId ? { pipelineRunId: task.pipelineRunId } : {},
     }
     setSelectedTask(task)
     updateDraft(restored)

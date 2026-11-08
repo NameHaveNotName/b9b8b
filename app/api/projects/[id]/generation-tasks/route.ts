@@ -39,6 +39,7 @@ function sanitizeSnapshot(raw: any) {
     aspectRatio: cleanText(raw.aspectRatio, 40),
     mode: cleanText(raw.mode, 40),
     submittedAt: cleanText(raw.submittedAt, 60),
+    pipelineRunId: cleanText(raw.requestBody?.pipelineRunId || raw.pipelineRunId, 100) || undefined,
   }
 }
 
@@ -66,20 +67,33 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const access = await checkProjectPermission(projectId, undefined, { mode: 'EDIT_STEP', stepType: stepType as WorkflowStepType })
   if (!access.allowed) return access.response
 
-  const submittedAtMs = snapshot.submittedAt ? Date.parse(snapshot.submittedAt) : Number.NaN
-  const lowerBound = Number.isFinite(submittedAtMs)
-    ? new Date(submittedAtMs - 5_000)
-    : new Date(Date.now() - 10 * 60 * 1000)
-  const recent = await prisma.operationLog.findMany({
-    where: {
-      projectId,
-      userId: access.user.id,
-      startedAt: { gte: lowerBound },
-    },
-    orderBy: { startedAt: 'desc' },
-    take: 20,
-  })
-  const operation = recent.find((item: any) => stepTypeFromAction(item.actionKey, item.stepName) === stepType)
+  let operation = null
+  if (snapshot.pipelineRunId && stepType === 'IDEATION') {
+    // 断点续跑复用的是很早以前创建的统一 OperationLog，不能再按“本次点击前 5 秒”查找。
+    // pipelineRunId 与项目、用户共同约束，避免把快照绑定到其他任务。
+    operation = await prisma.operationLog.findFirst({
+      where: {
+        projectId,
+        userId: access.user.id,
+        idempotencyKey: `ideation-pipeline:${projectId}:${snapshot.pipelineRunId}`,
+      },
+    })
+  } else {
+    const submittedAtMs = snapshot.submittedAt ? Date.parse(snapshot.submittedAt) : Number.NaN
+    const lowerBound = Number.isFinite(submittedAtMs)
+      ? new Date(submittedAtMs - 5_000)
+      : new Date(Date.now() - 10 * 60 * 1000)
+    const recent = await prisma.operationLog.findMany({
+      where: {
+        projectId,
+        userId: access.user.id,
+        startedAt: { gte: lowerBound },
+      },
+      orderBy: { startedAt: 'desc' },
+      take: 20,
+    })
+    operation = recent.find((item: any) => stepTypeFromAction(item.actionKey, item.stepName) === stepType) || null
+  }
   if (!operation) return NextResponse.json({ error: 'TASK_NOT_FOUND' }, { status: 404 })
   const metadata = operation.metadata && typeof operation.metadata === 'object' ? operation.metadata as Record<string, unknown> : {}
   await prisma.operationLog.update({
