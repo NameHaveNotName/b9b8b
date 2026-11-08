@@ -510,7 +510,9 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
     assetFetcher,
     { revalidateOnFocus: false }
   )
-  const baseRun: GenerationRun | null = run || (selectedTask ? {
+  // 浏览历史任务时必须以用户选中的记录为准。否则父组件保留的最近一次 run
+  // 会覆盖每一个历史条目，让任务总览看起来全部是同一个“已中断”任务。
+  const baseRun: GenerationRun | null = selectedTask ? {
     status: selectedTask.status,
     message: selectedTask.message,
     taskId: selectedTask.id,
@@ -521,13 +523,21 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
     error: selectedTask.error,
     attempts: selectedTask.attempts || [],
     requestSnapshot: localDraft || undefined,
-  } : null)
+  } : run
   const persisted = (taskData?.tasks || []).find((task: any) =>
     (localDraft?.requestBody?.pipelineRunId && task.pipelineRunId === localDraft.requestBody.pipelineRunId)
     || (baseRun?.taskId && task.id === baseRun.taskId)
     || (!baseRun?.taskId && localDraft && task.stepType === localDraft.stepType && (!baseRun?.startedAt || new Date(task.startedAt).getTime() >= new Date(baseRun.startedAt).getTime() - 15000))
   )
-  const effectiveRun: GenerationRun | null = baseRun && persisted && baseRun.status !== 'interrupted' ? {
+  // 断点续跑复用旧 OperationLog。新请求刚提交、供应商调用尚未写入 RUNNING
+  // 的几秒内，接口仍会返回上次的 INTERRUPTED 状态；旧状态不能覆盖本次
+  // 已经开始的本地 running 状态。历史查看则始终允许读取所选任务。
+  const persistedUpdatedAt = persisted?.updatedAt ? new Date(persisted.updatedAt).getTime() : Number.NaN
+  const baseStartedAt = baseRun?.startedAt ? new Date(baseRun.startedAt).getTime() : Number.NaN
+  const persistedBelongsToCurrentAttempt = Boolean(selectedTask)
+    || !Number.isFinite(baseStartedAt)
+    || (Number.isFinite(persistedUpdatedAt) && persistedUpdatedAt >= baseStartedAt - 2_000)
+  const effectiveRun: GenerationRun | null = baseRun && persisted && persistedBelongsToCurrentAttempt && baseRun.status !== 'interrupted' ? {
     ...baseRun,
     taskId: persisted.id,
     status: persisted.status,

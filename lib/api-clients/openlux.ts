@@ -231,7 +231,11 @@ class OpenLuxHttpError extends Error {
   }
 }
 
-async function openLuxFetch(path: string, body: any, timeoutMs = 120000) {
+// 文字模型在复杂长输出时经常需要 120 秒以上。这里保留在 Vercel 300 秒
+// 请求上限之内，同时给路由保存检查点和返回响应预留约一分钟。
+const OPENLUX_REQUEST_TIMEOUT_MS = 240_000
+
+async function openLuxFetch(path: string, body: any, timeoutMs = OPENLUX_REQUEST_TIMEOUT_MS) {
   if (!API_KEY) throw new Error('OPENLUX_API_KEY not configured in .env.local')
 
   const controller = new AbortController()
@@ -264,6 +268,9 @@ async function openLuxFetch(path: string, body: any, timeoutMs = 120000) {
     }
   } catch (e) {
     clearTimeout(id)
+    if (controller.signal.aborted) {
+      throw new Error(`OpenLux 请求超过 ${Math.round(timeoutMs / 1000)} 秒，当前阶段已保留，可从断点继续`)
+    }
     throw e
   }
 }
