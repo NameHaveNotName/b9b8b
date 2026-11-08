@@ -68,14 +68,29 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (!access.allowed) return access.response
 
   let operation = null
-  if (snapshot.pipelineRunId && stepType === 'IDEATION') {
+  let pipelineRunId = snapshot.pipelineRunId
+  if (!pipelineRunId && stepType === 'IDEATION') {
+    // 兼容部署前已经打开的旧页面：旧前端保存快照时不会带 pipelineRunId，
+    // 但服务端检查点已经持久化了 runId。用项目内 IDEATION 步骤恢复它，
+    // 避免按“本次点击时间”查不到早先创建的统一账本而返回 404。
+    const ideationStep = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId, stepType: 'IDEATION' } },
+      select: { outputData: true },
+    })
+    const outputData = ideationStep?.outputData && typeof ideationStep.outputData === 'object'
+      ? ideationStep.outputData as Record<string, any>
+      : {}
+    const checkpointRunId = outputData.agentPipeline?.runId
+    if (typeof checkpointRunId === 'string' && checkpointRunId.length <= 100) pipelineRunId = checkpointRunId
+  }
+  if (pipelineRunId && stepType === 'IDEATION') {
     // 断点续跑复用的是很早以前创建的统一 OperationLog，不能再按“本次点击前 5 秒”查找。
     // pipelineRunId 与项目、用户共同约束，避免把快照绑定到其他任务。
     operation = await prisma.operationLog.findFirst({
       where: {
         projectId,
         userId: access.user.id,
-        idempotencyKey: `ideation-pipeline:${projectId}:${snapshot.pipelineRunId}`,
+        idempotencyKey: `ideation-pipeline:${projectId}:${pipelineRunId}`,
       },
     })
   } else {
@@ -96,9 +111,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
   if (!operation) return NextResponse.json({ error: 'TASK_NOT_FOUND' }, { status: 404 })
   const metadata = operation.metadata && typeof operation.metadata === 'object' ? operation.metadata as Record<string, unknown> : {}
+  const normalizedSnapshot = pipelineRunId && stepType === 'IDEATION'
+    ? { ...snapshot, pipelineRunId }
+    : snapshot
   await prisma.operationLog.update({
     where: { id: operation.id },
-    data: { metadata: { ...metadata, requestSnapshot: snapshot } },
+    data: { metadata: { ...metadata, requestSnapshot: normalizedSnapshot } },
   })
   return NextResponse.json({ success: true, taskId: operation.id })
 }
