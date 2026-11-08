@@ -52,6 +52,7 @@ import SuggestionBar from '@/components/workflow/SuggestionBar'
 import { exportStoryboardExcel } from '@/lib/storyboard-excel-export'
 import { proxiedMediaUrl } from '@/lib/media-url'
 import { ApiError } from '@/lib/api-client'
+import AgentOutputViewer from '@/components/workflow/AgentOutputViewer'
 
 const fetcher = async (url: string) => {
   const response = await fetch(url)
@@ -1810,7 +1811,7 @@ function CreativeAgentProgress({ run }: { run: any }) {
             <summary className="cursor-pointer list-none text-sm text-stone-700"><span className="mr-2 text-green-600">✓</span>{stage.label}<span className="ml-2 text-xs text-stone-400">{stage.summary}</span></summary>
             <div className="mt-3 space-y-2 border-t border-stone-100 pt-3">
               {stage.children?.map((child: any) => <div key={child.id} className="rounded bg-stone-50 p-2 text-xs text-stone-600"><span className="font-medium">{child.label}：</span>{child.summary}</div>)}
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-stone-950 p-3 text-[11px] leading-relaxed text-stone-200">{JSON.stringify(stage.output, null, 2)}</pre>
+              <AgentOutputViewer stageId={stage.id} output={stage.output} />
             </div>
           </details>
         ))}
