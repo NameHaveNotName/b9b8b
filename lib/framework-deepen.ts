@@ -3,6 +3,7 @@ import { getTextClient } from './api-clients'
 import { loadPromptTemplate, extractJsonFromMarkdown } from './prompts'
 import { PROJECT_TAG_PROMPTS } from './project-tags'
 import { getBusinessGoalPrompt } from './business-goals'
+import { finalizeCurrentSupplierOperation, withSupplierCallContext } from './supplier-observability'
 
 function isPresentationTag(projectTag?: string): boolean {
   return projectTag === 'trailer' || projectTag === 'product'
@@ -121,7 +122,10 @@ export async function deepenCharacters(framework: any, stepId: string, projectTa
         TAG_INSTRUCTIONS: tagInstructions,
       })
 
-      const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 4096 })
+      const resultText = await withSupplierCallContext(
+        { stageId: `framework-character-${i + 1}`, stageLabel: `深化角色 · ${char.name || `角色 ${i + 1}`}` },
+        () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 4096 }),
+      )
       const parsed = extractJsonFromMarkdown(resultText)
 
       const deepenedChar = {
@@ -189,7 +193,10 @@ export async function deepenSynopsis(framework: any, stepId: string, projectTag?
       TAG_INSTRUCTIONS: tagInstructions,
     })
 
-    const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 })
+    const resultText = await withSupplierCallContext(
+      { stageId: 'framework-synopsis', stageLabel: '深化故事梗概' },
+      () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 }),
+    )
     const deepenedSynopsis = resultText.trim()
 
     framework = { ...framework, deepenedSynopsis }
@@ -235,7 +242,10 @@ export async function deepenActs(framework: any, stepId: string, projectTag?: st
         TAG_INSTRUCTIONS: tagInstructions,
       })
 
-      const resultText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 })
+      const resultText = await withSupplierCallContext(
+        { stageId: `framework-act-${i + 1}`, stageLabel: `深化幕结构 · 第 ${act.actNo || i + 1} 幕${act.title ? `《${act.title}》` : ''}` },
+        () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 }),
+      )
       const deepenedContent = resultText.trim()
 
       const deepenedAct = {
@@ -283,7 +293,10 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
       })), null, 2),
     })
 
-    const extractResult = await textClient.generate(extractPrompt, { temperature: 0.7, maxTokens: 4096 })
+    const extractResult = await withSupplierCallContext(
+      { stageId: 'framework-environment-extract', stageLabel: '识别主要环境' },
+      () => textClient.generate(extractPrompt, { temperature: 0.7, maxTokens: 4096 }),
+    )
     const parsed = extractJsonFromMarkdown(extractResult)
     const envList = parsed.environments || []
 
@@ -321,7 +334,10 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
           ENV_BRIEF: env.brief || '',
         })
 
-        const deepenResult = await textClient.generate(deepenPrompt, { temperature: 0.8, maxTokens: 4096 })
+        const deepenResult = await withSupplierCallContext(
+          { stageId: `framework-environment-${i + 1}`, stageLabel: `深化环境 · ${env.name || `环境 ${i + 1}`}` },
+          () => textClient.generate(deepenPrompt, { temperature: 0.8, maxTokens: 4096 }),
+        )
         const envParsed = extractJsonFromMarkdown(deepenResult)
 
         const deepenedEnv = {
@@ -383,6 +399,14 @@ export async function runDeepening(projectId: string, stepId: string, initialFra
       }),
     ])
 
+    // completeStep 会先保存基础框架；深化期间的供应商调用会把同一账本重新置为
+    // RUNNING，因此必须在全部深化落库后再次收口，避免任务永久停在运行中。
+    await finalizeCurrentSupplierOperation({
+      status: 'SUCCEEDED',
+      projectId,
+      workflowStepId: stepId,
+    })
+
     console.log('[DEEPEN] 自动深化流程全部完成')
   } catch (e: any) {
     console.error('[DEEPEN] 自动深化流程失败:', e.message)
@@ -390,6 +414,12 @@ export async function runDeepening(projectId: string, stepId: string, initialFra
       current: 0,
       total: 1,
       phase: `深化失败: ${e.message}`,
+    })
+    await finalizeCurrentSupplierOperation({
+      status: 'PARTIAL',
+      projectId,
+      workflowStepId: stepId,
+      errorMessage: `基础框架已保存；自动深化失败: ${e.message}`,
     })
   }
 }

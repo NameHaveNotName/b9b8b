@@ -254,6 +254,13 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       overallPacing: fw.overallPacing || '',
       visualStyle: fw.styleGuide || '',
       assetConstraints: assetConstraints.snapshots,
+      // 基础框架返回后还会自动完成角色、梗概、幕结构与环境深化。
+      // 先写入 queued，副工作台便能把两段工作展示为同一条连续任务。
+      deepening: {
+        status: 'queued',
+        progress: { current: 0, total: 1, phase: '基础框架已保存，等待自动深化' },
+        updatedAt: new Date().toISOString(),
+      },
     }
 
     // 更新项目表：保存框架数据和选定的方向标题

@@ -218,6 +218,46 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
   )
 }
 
+function FrameworkDeepeningProgress({ deepening }: { deepening: NonNullable<GenerationRun['frameworkDeepening']> }) {
+  const completedCharacters = deepening.characters.filter((item) => item.status === 'completed').length
+  const completedActs = deepening.acts.filter((item) => item.status === 'completed').length
+  const completedEnvironments = deepening.environments.filter((item) => item.status === 'completed').length
+  const finished = deepening.status === 'completed'
+  const failed = deepening.status === 'error'
+  const summaryItems = [
+    { label: '角色设定', value: `${completedCharacters}/${deepening.characters.length}`, done: deepening.characters.length === completedCharacters },
+    { label: '故事梗概', value: deepening.synopsis ? '已完成' : '等待中', done: Boolean(deepening.synopsis) },
+    { label: '幕结构', value: `${completedActs}/${deepening.acts.length}`, done: deepening.acts.length === completedActs },
+    { label: '环境设定', value: deepening.environments.length ? `${completedEnvironments}/${deepening.environments.length}` : finished ? '无需补充' : '等待识别', done: finished || (deepening.environments.length > 0 && completedEnvironments === deepening.environments.length) },
+  ]
+  return (
+    <section className={`rounded-xl border p-4 ${failed ? 'border-red-200 bg-red-50/50' : finished ? 'border-emerald-200 bg-emerald-50/50' : 'border-blue-200 bg-blue-50/50'}`}>
+      <div className="flex items-start gap-3">
+        {finished ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" /> : failed ? <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" /> : <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-blue-600" />}
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-stone-800">自动深化工作</p>
+          <p className="mt-1 text-xs leading-relaxed text-stone-600">基础框架生成后，系统会自动继续补足角色、故事梗概、每幕内容和主要环境；这不是另一项独立任务。</p>
+          <p className={`mt-2 text-xs font-medium ${failed ? 'text-red-700' : finished ? 'text-emerald-700' : 'text-blue-700'}`}>当前：{deepening.phase}</p>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {summaryItems.map((item) => <div key={item.label} className="rounded-lg border border-white/80 bg-white p-2.5 shadow-sm"><p className="text-[10px] text-stone-500">{item.label}</p><p className={`mt-1 text-xs font-semibold ${item.done ? 'text-emerald-700' : 'text-stone-700'}`}>{item.value}</p></div>)}
+      </div>
+
+      {deepening.characters.length > 0 && <details className="mt-3 rounded-lg border border-stone-200 bg-white px-3 py-2.5">
+        <summary className="cursor-pointer text-xs font-semibold text-stone-700">查看角色深化结果（{completedCharacters}/{deepening.characters.length}）</summary>
+        <div className="mt-3 space-y-2">{deepening.characters.map((character, index) => <div key={`${character.name}-${index}`} className="rounded-lg bg-stone-50 p-3"><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-stone-800">{character.name}{character.role ? ` · ${character.role}` : ''}</p><span className={`rounded-full px-2 py-0.5 text-[10px] ${character.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : character.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-stone-200 text-stone-600'}`}>{character.status === 'completed' ? '已深化' : character.status === 'failed' ? '深化失败' : '等待中'}</span></div>{character.error && <p className="mt-2 text-[11px] text-red-600">{character.error}</p>}{character.appearance && <p className="mt-2 text-[11px] leading-relaxed text-stone-600"><span className="font-medium text-stone-700">外形：</span>{character.appearance}</p>}{character.personality && <p className="mt-1 text-[11px] leading-relaxed text-stone-600"><span className="font-medium text-stone-700">性格：</span>{character.personality}</p>}{character.catchphrase && <p className="mt-1 text-[11px] leading-relaxed text-stone-600"><span className="font-medium text-stone-700">标志性表达：</span>{character.catchphrase}</p>}{character.memoryPoints && <p className="mt-1 text-[11px] leading-relaxed text-stone-600"><span className="font-medium text-stone-700">一致性记忆点：</span>{character.memoryPoints}</p>}</div>)}</div>
+      </details>}
+
+      {deepening.synopsis && <details className="mt-2 rounded-lg border border-stone-200 bg-white px-3 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-stone-700">查看深化后的故事梗概</summary><p className="mt-3 whitespace-pre-wrap text-[11px] leading-relaxed text-stone-600">{deepening.synopsis}</p></details>}
+
+      {deepening.acts.length > 0 && <details className="mt-2 rounded-lg border border-stone-200 bg-white px-3 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-stone-700">查看幕结构深化结果（{completedActs}/{deepening.acts.length}）</summary><div className="mt-3 space-y-2">{deepening.acts.map((act) => <div key={`${act.actNo}-${act.title}`} className="rounded-lg bg-stone-50 p-3"><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-stone-800">第 {act.actNo} 幕 · {act.title}</p><span className={`rounded-full px-2 py-0.5 text-[10px] ${act.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-200 text-stone-600'}`}>{act.status === 'completed' ? '已深化' : '等待中'}</span></div>{act.content && <p className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-stone-600">{act.content}</p>}</div>)}</div></details>}
+
+      {deepening.environments.length > 0 && <details className="mt-2 rounded-lg border border-stone-200 bg-white px-3 py-2.5"><summary className="cursor-pointer text-xs font-semibold text-stone-700">查看环境深化结果（{completedEnvironments}/{deepening.environments.length}）</summary><div className="mt-3 space-y-2">{deepening.environments.map((environment, index) => <div key={`${environment.name}-${index}`} className="rounded-lg bg-stone-50 p-3"><p className="text-xs font-semibold text-stone-800">{environment.name}</p>{environment.brief && <p className="mt-2 text-[11px] leading-relaxed text-stone-600"><span className="font-medium text-stone-700">用途：</span>{environment.brief}</p>}{environment.architecture && <p className="mt-1 text-[11px] leading-relaxed text-stone-600"><span className="font-medium text-stone-700">空间与建筑：</span>{environment.architecture}</p>}{environment.atmosphere && <p className="mt-1 text-[11px] leading-relaxed text-stone-600"><span className="font-medium text-stone-700">氛围：</span>{environment.atmosphere}</p>}{environment.storyFunction && <p className="mt-1 text-[11px] leading-relaxed text-stone-600"><span className="font-medium text-stone-700">叙事功能：</span>{environment.storyFunction}</p>}</div>)}</div></details>}
+    </section>
+  )
+}
+
 function ExecutionView({ run, onBackToConfig }: { run: GenerationRun; onBackToConfig: () => void }) {
   const running = run.status === 'running'
   const success = run.status === 'completed'
@@ -233,6 +273,8 @@ function ExecutionView({ run, onBackToConfig }: { run: GenerationRun; onBackToCo
         {run.isMock && <p className="mt-2 text-xs font-medium text-red-700">供应商返回了占位结果，原资产已保留且本次不应计费。</p>}
         {!running && <button type="button" onClick={onBackToConfig} className={`mt-3 rounded-lg px-3 py-2 text-xs font-semibold ${success ? 'border border-green-300 bg-white text-green-800' : 'border border-red-300 bg-white text-red-800'}`}>调整配置并再次生成</button>}
       </section>
+
+      {run.frameworkDeepening && <FrameworkDeepeningProgress deepening={run.frameworkDeepening} />}
 
       <section className="rounded-xl border border-stone-200 bg-white p-4">
         <div className="mb-4"><p className="text-xs font-semibold text-stone-700">执行过程记录</p><p className="mt-1 text-[10px] text-stone-500">结果出现后，过程记录保留在下方，便于回看任务实际经历的阶段。</p></div>
@@ -502,7 +544,7 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
   const { data: taskData } = useSWR(
     isOpen ? `/api/projects/${projectId}/generation-tasks?limit=20` : null,
     assetFetcher,
-    { refreshInterval: run?.status === 'running' ? 3000 : 10000, revalidateOnFocus: true }
+    { refreshInterval: (latestData) => run?.status === 'running' || latestData?.tasks?.some((task: any) => task.status === 'running') ? 3000 : 10000, revalidateOnFocus: true }
   )
   const constraintStep = localDraft && ['IDEATION', 'FRAMEWORK'].includes(localDraft.stepType) ? localDraft.stepType : null
   const { data: constraintData, mutate: refreshConstraints } = useSWR(
@@ -522,6 +564,7 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
     completedAt: selectedTask.completedAt,
     error: selectedTask.error,
     attempts: selectedTask.attempts || [],
+    frameworkDeepening: selectedTask.frameworkDeepening || undefined,
     requestSnapshot: localDraft || undefined,
   } : run
   const persisted = (taskData?.tasks || []).find((task: any) =>
@@ -545,9 +588,10 @@ export default function WorkflowInspectorDrawer({ isOpen, projectId, onClose, dr
     rawStatus: persisted.rawStatus,
     message: persisted.message || baseRun.message,
     startedAt: persisted.startedAt || baseRun.startedAt,
-    completedAt: persisted.completedAt || baseRun.completedAt,
+    completedAt: persisted.status === 'running' ? undefined : persisted.completedAt || baseRun.completedAt,
     error: persisted.error || baseRun.error,
     attempts: persisted.attempts || [],
+    frameworkDeepening: persisted.frameworkDeepening || baseRun.frameworkDeepening,
   } : baseRun
   useEffect(() => {
     const handleStructuredDrop = async (event: Event) => {

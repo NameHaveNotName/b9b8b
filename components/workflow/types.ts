@@ -79,6 +79,35 @@ export interface GenerationRun {
   isMock?: boolean
   error?: string
   requestSnapshot?: GenerationDraft
+  frameworkDeepening?: {
+    status: string
+    phase: string
+    current: number
+    total: number
+    updatedAt?: string
+    characters: Array<{
+      name: string
+      role?: string
+      status: 'completed' | 'failed' | 'pending'
+      appearance?: string
+      personality?: string
+      catchphrase?: string
+      memoryPoints?: string
+      error?: string
+    }>
+    synopsis?: string
+    acts: Array<{ actNo: number; title: string; status: 'completed' | 'pending'; content?: string }>
+    environments: Array<{
+      name: string
+      status: 'completed' | 'pending'
+      brief?: string
+      architecture?: string
+      atmosphere?: string
+      culture?: string
+      distinctive?: string
+      storyFunction?: string
+    }>
+  }
   attempts?: Array<{
     id: string
     provider: string

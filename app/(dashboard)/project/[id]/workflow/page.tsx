@@ -53,6 +53,7 @@ import { exportStoryboardExcel } from '@/lib/storyboard-excel-export'
 import { proxiedMediaUrl } from '@/lib/media-url'
 import { ApiError } from '@/lib/api-client'
 import AgentOutputViewer from '@/components/workflow/AgentOutputViewer'
+import { buildFrameworkDeepeningView } from '@/lib/framework-deepening-view'
 
 const fetcher = async (url: string) => {
   const response = await fetch(url)
@@ -1246,7 +1247,23 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
         || payload.data?.results?.[0]?.lastFrameUrl
         || payload.videoUrl
         || payload.combinedVideoUrl
-      setRun((previous) => ({ ...previous, taskId: taskId || previous?.taskId, status: 'completed', message: payload.message || '步骤请求已经完成，最新资产已写入项目。', completedAt: new Date().toISOString(), previewUrl, previewType: nextDraft.kind === 'video' ? 'video' : 'image' }))
+      const frameworkDeepening = nextDraft.stepType === 'FRAMEWORK'
+        ? buildFrameworkDeepeningView(payload.data)
+        : null
+      const frameworkStillDeepening = Boolean(frameworkDeepening && !['completed', 'error'].includes(frameworkDeepening.status))
+      setRun((previous) => ({
+        ...previous,
+        taskId: taskId || previous?.taskId,
+        status: frameworkStillDeepening ? 'running' : 'completed',
+        stage: frameworkStillDeepening ? 'framework-deepening' : previous?.stage,
+        message: frameworkStillDeepening
+          ? `基础框架已保存；${frameworkDeepening?.phase || '正在自动深化'}。深化完成前不算整项结束`
+          : payload.message || '步骤请求已经完成，最新资产已写入项目。',
+        completedAt: frameworkStillDeepening ? undefined : new Date().toISOString(),
+        previewUrl,
+        previewType: nextDraft.kind === 'video' ? 'video' : 'image',
+        frameworkDeepening: frameworkDeepening || undefined,
+      }))
     } catch (error: any) {
       const taskId = await attachRequestSnapshot(submittedDraft, mode).catch(() => null)
       setRun((previous) => ({ ...previous, taskId: taskId || previous?.taskId, status: 'failed', message: error?.message || '生成失败', completedAt: new Date().toISOString(), error: error?.message }))

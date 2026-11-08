@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { getSignedFileUrl } from '@/lib/r2'
+import { buildFrameworkDeepeningView } from '@/lib/framework-deepening-view'
 
 const FINAL_STATUSES = new Set(['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'])
 
@@ -46,8 +47,22 @@ function stageFor(operation: any) {
   return { status: 'running', stage: 'processing', message: '供应商调用已返回，正在整理并保存结果' }
 }
 
-export async function serializeGenerationTask(operation: any) {
-  const state = stageFor(operation)
+export async function serializeGenerationTask(operation: any, workflowOutputData?: any) {
+  let state = stageFor(operation)
+  const frameworkDeepening = stepTypeFromAction(operation.actionKey, operation.stepName) === 'FRAMEWORK'
+    ? buildFrameworkDeepeningView(workflowOutputData)
+    : null
+  if (frameworkDeepening && !['completed', 'error'].includes(frameworkDeepening.status)) {
+    state = {
+      status: 'running',
+      stage: 'framework-deepening',
+      message: `基础框架已保存；${frameworkDeepening.phase}。深化完成前不算整项结束`,
+    }
+  } else if (frameworkDeepening?.status === 'completed') {
+    state = { status: 'completed', stage: 'saved', message: '基础框架与自动深化均已完成并保存' }
+  } else if (frameworkDeepening?.status === 'error') {
+    state = { status: 'failed', stage: 'framework-deepening-failed', message: `基础框架已保存，但${frameworkDeepening.phase}` }
+  }
   const results = await Promise.all((operation.results || []).slice(0, 6).map(async (result: any) => ({
     id: result.id,
     kind: result.kind,
@@ -71,11 +86,12 @@ export async function serializeGenerationTask(operation: any) {
     ...state,
     startedAt: operation.startedAt,
     updatedAt: operation.updatedAt,
-    completedAt: operation.completedAt,
+    completedAt: state.status === 'running' ? null : operation.completedAt,
     durationMs: operation.durationMs,
     error: operation.errorMessage,
     pipelineRunId,
     requestSnapshot: metadata.requestSnapshot || null,
+    frameworkDeepening,
     attempts: (operation.providerAttempts || []).map((attempt: any) => {
       const attemptMetadata = attempt.metadata && typeof attempt.metadata === 'object' ? attempt.metadata : {}
       return {

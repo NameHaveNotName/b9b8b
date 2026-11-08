@@ -55,7 +55,17 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
     take: limit,
     include: generationTaskInclude,
   })
-  return NextResponse.json({ tasks: await Promise.all(operations.map(serializeGenerationTask)) })
+  const stepIds = operations.map((operation) => operation.workflowStepId).filter((id): id is string => Boolean(id))
+  const steps = stepIds.length > 0
+    ? await prisma.workflowStep.findMany({ where: { id: { in: stepIds } }, select: { id: true, outputData: true } })
+    : []
+  const outputByStepId = new Map(steps.map((step) => [step.id, step.outputData]))
+  return NextResponse.json({
+    tasks: await Promise.all(operations.map((operation) => serializeGenerationTask(
+      operation,
+      operation.workflowStepId ? outputByStepId.get(operation.workflowStepId) : undefined,
+    ))),
+  })
 }
 
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {

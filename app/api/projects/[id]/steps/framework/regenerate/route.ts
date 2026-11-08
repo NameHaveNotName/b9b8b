@@ -171,7 +171,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const oldOutput = (step.outputData as any) || {}
     const clearedOutput = {
       ...oldOutput,
-      deepening: { status: 'idle', progress: { current: 0, total: 1, phase: '等待深化' } },
+      deepening: {
+        status: 'queued',
+        progress: { current: 0, total: 1, phase: '基础框架已保存，等待自动深化' },
+        updatedAt: new Date().toISOString(),
+      },
     }
     await prisma.workflowStep.update({
       where: { id: step.id },

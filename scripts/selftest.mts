@@ -32,6 +32,7 @@ import {
   shouldUseMinimax,
 } from '../lib/text-models.ts'
 import { extractAssistantOutput } from '../lib/supplier-output.ts'
+import { buildFrameworkDeepeningView } from '../lib/framework-deepening-view.ts'
 import {
   computeProjectStateFromSteps,
   getStepDisplayState,
@@ -1561,6 +1562,30 @@ check('供应商文字输出只提取助手正文并限制记录长度', () => {
   assert.equal(extractAssistantOutput({ choices: [{ message: { content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }] } }] }), '第一段\n第二段')
   assert.equal(extractAssistantOutput({ id: 'task-only', choices: [] }), undefined)
   assert.equal(extractAssistantOutput({ output: 'x'.repeat(21_000) })?.length, 20_000)
+})
+
+check('框架自动深化状态可转换为副工作台的可读进度与结果', () => {
+  const view = buildFrameworkDeepeningView({
+    deepening: { status: 'deepening_acts', progress: { current: 1, total: 2, phase: '幕结构深化中（1/2）' } },
+    characters: [
+      { name: '阿岚', role: '主角', deepened: { appearance: '短发', personality: '谨慎' } },
+      { name: '老周', role: '配角' },
+    ],
+    deepenedSynopsis: '两人在暴雨夜完成一次艰难营救。',
+    acts: [
+      { actNo: 1, title: '危机出现', deepenedContent: '暴雨切断道路。' },
+      { actNo: 2, title: '协力营救' },
+    ],
+    environmentsDeepened: [{ name: '山路', architecture: '狭窄盘山路', atmosphere: '暴雨压迫' }],
+  })
+  assert.equal(view?.phase, '幕结构深化中（1/2）')
+  assert.deepEqual(view?.characters.map(item => item.status), ['completed', 'pending'])
+  assert.deepEqual(view?.acts.map(item => item.status), ['completed', 'pending'])
+  assert.equal(view?.environments[0].storyFunction, undefined)
+})
+
+check('旧框架没有深化状态时不会伪造自动深化记录', () => {
+  assert.equal(buildFrameworkDeepeningView({ synopsis: '旧框架' }), null)
 })
 
 check('主画布复用生产分组并把单元内部镜头视为完整输出', () => {
