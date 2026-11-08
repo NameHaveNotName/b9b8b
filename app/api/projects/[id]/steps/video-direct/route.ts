@@ -21,6 +21,7 @@ import {
   markGenerationUnitFailedForLegacySegment,
   recordGeneratedClipForLegacySegment,
 } from '@/lib/video-production-state'
+import { buildKeyframeCoverageReview } from '@/lib/keyframe-coverage'
 
 /** 获取 storyboard shots 和 keyframes */
 async function getStoryboardAndKeyframes(projectId: string) {
@@ -37,7 +38,12 @@ async function getStoryboardAndKeyframes(projectId: string) {
   const rawKeyframes = keyframesData.keyframes || keyframesData.results || []
   const { shots: keyframes } = await refreshShotsUrls(rawKeyframes)
 
-  return { shots, keyframes }
+  return { shots, keyframes, coverageOverrides: keyframesData.coverageReview }
+}
+
+async function getCoverageGate(projectId: string) {
+  const { shots, keyframes, coverageOverrides } = await getStoryboardAndKeyframes(projectId)
+  return buildKeyframeCoverageReview({ shots, keyframes, overrides: coverageOverrides })
 }
 
 /** Use a user-confirmed recovery candidate without rewriting the storyboard source asset. */
@@ -257,6 +263,22 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const videoModel = body?.videoModel
 
   console.log(`[VIDEO-DIRECT-POST] action=${action} projectId=${params.id}`)
+
+  if (action === 'generate-segment-video' || action === 'generate-all-segments') {
+    const coverage = await getCoverageGate(params.id)
+    if (!coverage.summary.readyForVideo) {
+      return NextResponse.json({
+        error: 'KEYFRAME_COVERAGE_INCOMPLETE',
+        message: `关键帧覆盖审计仍有 ${coverage.summary.hardGapCount} 个A级硬缺口，请先补帧或明确标记为后期处理。`,
+        coverageSummary: coverage.summary,
+        hardGaps: coverage.rows.filter((row) => row.hardGap).map((row) => ({
+          shotId: row.shotId,
+          actNumber: row.actNumber,
+          note: row.note,
+        })),
+      }, { status: 409 })
+    }
+  }
 
   // -------------------- 新版：生成 Segment Prompts --------------------
   if (action === 'generate-segment-prompts') {

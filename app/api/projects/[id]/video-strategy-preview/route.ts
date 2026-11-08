@@ -15,6 +15,7 @@ import {
   storyboardShotLookupKey,
   type ShotProductionStructure,
 } from '@/lib/video-shot-structure'
+import { buildKeyframeCoverageReview } from '@/lib/keyframe-coverage'
 
 const SUPPORTED_STEPS = new Set(['TRAILER', 'VIDEO_DIRECT'])
 
@@ -197,6 +198,35 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (body.action === 'activate-multi-shot-draft') {
     if (typeof body.planId !== 'string' || !body.planId) {
       return NextResponse.json({ error: 'PLAN_ID_REQUIRED', message: '缺少待确认的草案编号' }, { status: 400 })
+    }
+    if (stepName === 'VIDEO_DIRECT') {
+      const [storyboardStep, keyframeStep] = await Promise.all([
+        prisma.workflowStep.findUnique({
+          where: { projectId_stepType: { projectId, stepType: 'STORYBOARD' } },
+          select: { outputData: true },
+        }),
+        prisma.workflowStep.findUnique({
+          where: { projectId_stepType: { projectId, stepType: 'KEYFRAMES' } },
+          select: { outputData: true },
+        }),
+      ])
+      const storyboardOutput = (storyboardStep?.outputData as any) || {}
+      const keyframeOutput = (keyframeStep?.outputData as any) || {}
+      const coverage = buildKeyframeCoverageReview({
+        shots: Array.isArray(storyboardOutput.shots) ? storyboardOutput.shots : [],
+        keyframes: Array.isArray(keyframeOutput.keyframes)
+          ? keyframeOutput.keyframes
+          : Array.isArray(keyframeOutput.results) ? keyframeOutput.results : [],
+        overrides: keyframeOutput.coverageReview,
+      })
+      if (!coverage.summary.readyForVideo) {
+        return NextResponse.json({
+          error: 'KEYFRAME_COVERAGE_INCOMPLETE',
+          message: `关键帧覆盖审计仍有 ${coverage.summary.hardGapCount} 个A级硬缺口，不能确认为正式视频计划。`,
+          coverageSummary: coverage.summary,
+          hardGaps: coverage.rows.filter((row) => row.hardGap),
+        }, { status: 409 })
+      }
     }
     try {
       const result = await activateMultiShotProductionPlanDraft({

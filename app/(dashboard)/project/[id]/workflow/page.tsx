@@ -6617,6 +6617,7 @@ function StoryboardPanel({
 }
 
 import KeyframesTable from './_components/KeyframesTable'
+import KeyframeCoverageAudit from './_components/KeyframeCoverageAudit'
 import type { Shot as KeyframeShot } from '@/app/(dashboard)/project/[id]/storyboard/_components/StoryboardTable'
 import StoryboardCanvas from '@/app/(dashboard)/project/[id]/storyboard/_components/StoryboardCanvas'
 import { Table2, LayoutGrid } from 'lucide-react'
@@ -6676,6 +6677,7 @@ function KeyframesPanel({
 
   // 从 KEYFRAMES outputData 读取 keyframes 数据（包含 lastFrameUrl 和 actionChange）
   const keyframesData = keyframesRes?.outputData?.keyframes || keyframesRes?.outputData?.results || []
+  const coverageReview = keyframesRes?.outputData?.coverageReview || []
   // 使用 composite key (actNumber|shotId) 避免跨幕同名镜头冲突
   const lastFrameMap: Record<string, string> = {}
   const actionChangeMap: Record<string, string> = {}
@@ -6853,6 +6855,13 @@ function KeyframesPanel({
   if (hasShots) {
     return (
       <div className="space-y-4">
+        <KeyframeCoverageAudit
+          projectId={projectId}
+          rows={coverageReview}
+          readOnly={readOnly}
+          onSaved={async () => { await mutateKeyframes() }}
+          onToast={setToast}
+        />
         {/* 顶部工具栏 */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">

@@ -92,6 +92,7 @@ import {
   shouldUsePreviousShotContinuity,
 } from '../lib/video-shot-structure.ts'
 import { parseVideoTechnicalQualityOutput } from '../lib/video-technical-quality.ts'
+import { buildKeyframeCoverageReview, sanitizeCoverageOverrides } from '../lib/keyframe-coverage.ts'
 import {
   BUSINESS_GOAL_OPTIONS,
   getBusinessGoalPrompt,
@@ -1615,6 +1616,49 @@ check('创作时长解析保留 0.1 秒精度且不伪造缺失值', () => {
   assert.equal(parseCreativeDurationSeconds('1.29秒'), 1.3)
   assert.equal(parseCreativeDurationSeconds('4s'), 4)
   assert.equal(parseCreativeDurationSeconds('待定'), 0)
+})
+
+console.log('\n== 关键帧覆盖审计 ==')
+
+check('首帧或尾帧证据会自动判为已覆盖', () => {
+  const review = buildKeyframeCoverageReview({
+    shots: [
+      { actNumber: 1, shotId: 's1', firstFrameUrl: 'https://example.com/first.png' },
+      { actNumber: 1, shotId: 's2' },
+      { actNumber: 1, shotId: 's3' },
+    ],
+    keyframes: [
+      { actNumber: 1, shotId: 's2', lastFrameUrl: 'https://example.com/last.png' },
+      { actNumber: 1, shotId: 's3', firstFrameUrl: 'https://example.com/generated-first.png' },
+    ],
+  })
+  assert.deepEqual(review.rows.map(row => row.status), ['COVERED', 'COVERED', 'COVERED'])
+  assert.equal(review.summary.readyForVideo, true)
+})
+
+check('同一明确单元有锚点时可推导，但不按同幕猜测', () => {
+  const review = buildKeyframeCoverageReview({
+    shots: [
+      { actNumber: 1, shotId: 's1', generationUnitId: 'U1', firstFrameUrl: 'https://example.com/first.png' },
+      { actNumber: 1, shotId: 's2', generationUnitId: 'U1' },
+      { actNumber: 1, shotId: 's3' },
+    ],
+  })
+  assert.deepEqual(review.rows.map(row => row.status), ['COVERED', 'DERIVABLE', 'NEEDS_KEYFRAME'])
+  assert.equal(review.summary.hardGapCount, 1)
+  assert.equal(review.summary.readyForVideo, false)
+})
+
+check('人工后期结论可以解除A级硬缺口且非法覆盖值会被丢弃', () => {
+  const overrides = sanitizeCoverageOverrides([
+    { actNumber: 1, shotId: 's1', status: 'POST_ONLY', note: '字幕与界面由后期叠加' },
+    { actNumber: 1, shotId: 's2', status: 'UNKNOWN' },
+  ])
+  assert.equal(overrides.length, 1)
+  const review = buildKeyframeCoverageReview({ shots: [{ actNumber: 1, shotId: 's1' }], overrides })
+  assert.equal(review.rows[0].status, 'POST_ONLY')
+  assert.equal(review.rows[0].source, 'HUMAN')
+  assert.equal(review.summary.readyForVideo, true)
 })
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败\n`)

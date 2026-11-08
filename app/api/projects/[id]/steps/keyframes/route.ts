@@ -13,6 +13,10 @@ import { IMAGE_MODELS, getPromptLanguageInstruction } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { refreshShotsUrls } from '@/lib/resolve-media-url'
+import {
+  buildKeyframeCoverageReview,
+  sanitizeCoverageOverrides,
+} from '@/lib/keyframe-coverage'
 
 export async function POST(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -554,6 +558,22 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     console.log(`[TEXT-EDIT-KEYFRAMES] 保存 prompts 成功, 数量=${body.prompts.length}`)
   }
 
+  if (Array.isArray(body.coverageReview)) {
+    const storyboardStep = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId: params.id, stepType: 'STORYBOARD' } },
+      select: { outputData: true },
+    })
+    const shots = Array.isArray((storyboardStep?.outputData as any)?.shots)
+      ? (storyboardStep?.outputData as any).shots
+      : []
+    const validKeys = new Set(shots.map((shot: any) => `${Number(shot?.actNumber) || 0}|${String(shot?.shotId || '').trim()}`))
+    const now = new Date().toISOString()
+    nextOutput.coverageReview = sanitizeCoverageOverrides(body.coverageReview)
+      .filter((item) => validKeys.has(`${Number(item.actNumber) || 0}|${String(item.shotId || '').trim()}`))
+      .map((item) => ({ ...item, updatedAt: now, updatedById: permission.user.id }))
+    console.log(`[KEYFRAMES-PATCH] 保存覆盖审计, 项目=${params.id}, 数量=${nextOutput.coverageReview.length}`)
+  }
+
   await prisma.workflowStep.update({
     where: { id: step.id },
     data: { outputData: nextOutput }
@@ -594,10 +614,20 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
     ...kf,
     firstFrameUrl: kf.firstFrameUrl || shotFirstFrames[kf.shotId] || '',
   }))
+  const coverage = buildKeyframeCoverageReview({
+    shots: storyboardShots.shots,
+    keyframes: enrichedKeyframes,
+    overrides: outputData.coverageReview,
+  })
 
   return NextResponse.json({
     status: step.status,
-    outputData: { ...outputData, keyframes: enrichedKeyframes },
+    outputData: {
+      ...outputData,
+      keyframes: enrichedKeyframes,
+      coverageReview: coverage.rows,
+      coverageSummary: coverage.summary,
+    },
     assets: step.resultAssets,
   })
 }
