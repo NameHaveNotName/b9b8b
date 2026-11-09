@@ -1,4 +1,5 @@
 import { prisma } from './prisma'
+import { randomUUID } from 'crypto'
 import {
   estimateVideoCost,
   getVideoModelConfig,
@@ -20,7 +21,9 @@ import {
   type VideoReferenceInput,
 } from './video-reference-manifest.ts'
 import { getProductionPlanActivationIssue } from './video-production-activation.ts'
-import { analyzeRemoteVideoTechnicalQuality } from './video-technical-quality.ts'
+import { analyzeRemoteVideoEvidence } from './video-technical-quality.ts'
+import { uploadFile } from './r2.ts'
+import { buildAdoptedTimelineRange } from './video-evidence.ts'
 
 function isMissingProductionSchema(error: any): boolean {
   return error?.code === 'P2021' || error?.code === 'P2022'
@@ -29,34 +32,50 @@ function isMissingProductionSchema(error: any): boolean {
 /** Attach a complete clip after an explicit user adoption action. */
 export async function attachGeneratedClipToTimeline(
   tx: any,
-  args: { generationUnitId: string; generatedClipId: string; durationMs: number }
+  args: {
+    generationUnitId: string
+    generatedClipId: string
+    durationMs: number
+    sourceStartMs?: number
+    sourceEndMs?: number
+    evidencePackageId?: string
+    disposition?: string
+  }
 ): Promise<boolean> {
   const timeline = await tx.timelineSegment.findFirst({
     where: { generationUnitId: args.generationUnitId },
   })
   if (!timeline) return false
-  const durationDeltaMs = args.durationMs - timeline.durationMs
+  const adopted = buildAdoptedTimelineRange({
+    clipDurationMs: args.durationMs,
+    sourceStartMs: args.sourceStartMs,
+    sourceEndMs: args.sourceEndMs,
+    timelineStartMs: timeline.timelineStartMs,
+    previousDurationMs: timeline.durationMs,
+  })
   await tx.timelineSegment.update({
     where: { id: timeline.id },
     data: {
       generatedClipId: args.generatedClipId,
-      sourceStartMs: 0,
-      sourceEndMs: args.durationMs,
-      durationMs: args.durationMs,
-      timelineEndMs: timeline.timelineStartMs + args.durationMs,
+      sourceStartMs: adopted.sourceStartMs,
+      sourceEndMs: adopted.sourceEndMs,
+      durationMs: adopted.durationMs,
+      timelineEndMs: adopted.timelineEndMs,
       metadata: {
         ...((timeline.metadata as Record<string, unknown> | null) || {}),
         userAdopted: true,
         userAdoptedAt: new Date().toISOString(),
+        evidencePackageId: args.evidencePackageId || null,
+        evidenceDisposition: args.disposition || null,
       },
     },
   })
-  if (durationDeltaMs !== 0 && timeline.planId) {
+  if (adopted.durationDeltaMs !== 0 && timeline.planId) {
     await tx.timelineSegment.updateMany({
       where: { planId: timeline.planId, sequence: { gt: timeline.sequence } },
       data: {
-        timelineStartMs: { increment: durationDeltaMs },
-        timelineEndMs: { increment: durationDeltaMs },
+        timelineStartMs: { increment: adopted.durationDeltaMs },
+        timelineEndMs: { increment: adopted.durationDeltaMs },
       },
     })
   }
@@ -531,18 +550,34 @@ export async function recordGeneratedClipForLegacySegment(args: {
       orderBy: { createdAt: 'desc' },
     })
     if (!item) return false
-    let technicalProbe: Awaited<ReturnType<typeof analyzeRemoteVideoTechnicalQuality>> | null = null
+    const clipId = randomUUID()
+    let technicalProbe: Awaited<ReturnType<typeof analyzeRemoteVideoEvidence>>['technical'] | null = null
+    let contactSheetStorageKey: string | null = null
+    let contactSheetFrameTimesMs: number[] = []
+    let contactSheetError: string | null = null
     if (!args.isMock) {
       try {
-        technicalProbe = await analyzeRemoteVideoTechnicalQuality(args.videoUrl)
+        const evidence = await analyzeRemoteVideoEvidence(args.videoUrl, args.durationMs)
+        technicalProbe = evidence.technical
+        contactSheetFrameTimesMs = evidence.frameTimesMs
+        contactSheetError = evidence.contactSheetError
+        if (evidence.contactSheet) {
+          const candidateKey = `projects/${args.projectId}/video-evidence/${clipId}-contact-sheet.jpg`
+          await uploadFile(candidateKey, evidence.contactSheet, 'image/jpeg')
+          contactSheetStorageKey = candidateKey
+        }
       } catch (probeError: any) {
         console.warn('[VIDEO-QUALITY] 技术探测不可用，保留人工审核门控:', probeError?.message || probeError)
+        contactSheetStorageKey = null
+        contactSheetFrameTimesMs = []
+        contactSheetError = String(probeError?.message || probeError).slice(0, 1000)
       }
     }
     const measuredDurationMs = technicalProbe?.measuredDurationMs || args.durationMs
     await prisma.$transaction(async (tx) => {
       const clip = await tx.generatedClip.create({
         data: {
+          id: clipId,
           projectId: args.projectId,
           generationUnitId: item.generationUnitId,
           modelId: args.modelId || item.generationUnit.modelId,
@@ -582,6 +617,25 @@ export async function recordGeneratedClipForLegacySegment(args: {
             measuredDurationMs: technicalProbe?.measuredDurationMs ?? null,
           },
           reasons: quality.reasons,
+        },
+      })
+      await tx.videoEvidencePackage.create({
+        data: {
+          projectId: args.projectId,
+          generatedClipId: clip.id,
+          contactSheetStorageKey,
+          contactSheetFrameTimesMs,
+          contactSheetStatus: contactSheetStorageKey ? 'READY' : contactSheetError ? 'FAILED' : 'PENDING',
+          contactSheetError,
+          technicalEvidence: {
+            expectedDurationMs: item.generationUnit.requestedDurationMs,
+            actualDurationMs: measuredDurationMs,
+            isMock: args.isMock,
+            hasVideoStream: technicalProbe?.hasVideoStream ?? null,
+            blackFrameRatio: technicalProbe?.blackFrameRatio ?? null,
+            freezeFrameRatio: technicalProbe?.freezeFrameRatio ?? null,
+            measuredDurationMs: technicalProbe?.measuredDurationMs ?? null,
+          },
         },
       })
       await tx.generationUnit.update({

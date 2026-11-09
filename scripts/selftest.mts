@@ -94,6 +94,12 @@ import {
 import { parseVideoTechnicalQualityOutput } from '../lib/video-technical-quality.ts'
 import { buildKeyframeCoverageReview, sanitizeCoverageOverrides } from '../lib/keyframe-coverage.ts'
 import {
+  buildContactSheetFrameTimes,
+  buildAdoptedTimelineRange,
+  evidenceDispositionCanEnterTimeline,
+  normalizeVideoEvidenceReview,
+} from '../lib/video-evidence.ts'
+import {
   BUSINESS_GOAL_OPTIONS,
   getBusinessGoalPrompt,
   isBusinessGoalKey,
@@ -1659,6 +1665,52 @@ check('人工后期结论可以解除A级硬缺口且非法覆盖值会被丢弃
   assert.equal(review.rows[0].status, 'POST_ONLY')
   assert.equal(review.rows[0].source, 'HUMAN')
   assert.equal(review.summary.readyForVideo, true)
+})
+
+console.log('\n== 视频素材证据包 ==')
+
+check('九帧联系表时间点与均匀抽帧频率一致且保持递增', () => {
+  const times = buildContactSheetFrameTimes(8000)
+  assert.equal(times.length, 9)
+  assert.equal(times[0], 0)
+  assert.equal(times[8], 7111)
+  assert.equal(times.every((time, index) => index === 0 || time > times[index - 1]), true)
+})
+
+check('整条采用固定使用完整范围，区间采用严格限制在原片内', () => {
+  assert.deepEqual(normalizeVideoEvidenceReview({ disposition: 'WHOLE_CLIP' }, 5000), {
+    disposition: 'WHOLE_CLIP', usableStartMs: 0, usableEndMs: 5000, reviewNote: '',
+  })
+  assert.deepEqual(normalizeVideoEvidenceReview({
+    disposition: 'USABLE_RANGE', usableStartMs: 900, usableEndMs: 4200, reviewNote: '尾帧漂移',
+  }, 5000), {
+    disposition: 'USABLE_RANGE', usableStartMs: 900, usableEndMs: 4200, reviewNote: '尾帧漂移',
+  })
+  assert.throws(() => normalizeVideoEvidenceReview({
+    disposition: 'USABLE_RANGE', usableStartMs: 4200, usableEndMs: 5200,
+  }, 5000), /可用区间/)
+})
+
+check('弃用素材不能进入时间线，画面或主体可用仍需保留明确范围', () => {
+  assert.equal(evidenceDispositionCanEnterTimeline('REJECTED'), false)
+  assert.equal(evidenceDispositionCanEnterTimeline('VISUAL_ONLY'), true)
+  assert.throws(() => normalizeVideoEvidenceReview({ disposition: 'SUBJECT_ONLY' }, 5000), /可用区间/)
+})
+
+check('采用审核区间会同步缩短当前片段并平移后续时间线', () => {
+  assert.deepEqual(buildAdoptedTimelineRange({
+    clipDurationMs: 8000,
+    sourceStartMs: 1000,
+    sourceEndMs: 6500,
+    timelineStartMs: 12000,
+    previousDurationMs: 8000,
+  }), {
+    sourceStartMs: 1000,
+    sourceEndMs: 6500,
+    durationMs: 5500,
+    timelineEndMs: 17500,
+    durationDeltaMs: -2500,
+  })
 })
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败\n`)

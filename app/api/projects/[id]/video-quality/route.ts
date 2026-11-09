@@ -1,12 +1,20 @@
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
+import type { WorkflowStepType } from '@prisma/client'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import {
   attachGeneratedClipToTimeline,
 } from '@/lib/video-production-state'
 import { assessVideoQuality } from '@/lib/video-quality'
+import { analyzeRemoteVideoEvidence } from '@/lib/video-technical-quality'
+import {
+  evidenceDispositionCanEnterTimeline,
+  normalizeVideoEvidenceReview,
+  VideoEvidenceValidationError,
+} from '@/lib/video-evidence'
+import { getSignedFileUrl, uploadFile } from '@/lib/r2'
 
 const SEMANTIC_FIELDS = [
   'identityWardrobe',
@@ -55,11 +63,26 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
           generationUnit: {
             select: { id: true, stepName: true, strategy: true, tier: true, planId: true },
           },
+          evidencePackage: true,
         },
       },
     },
   })
-  return NextResponse.json({ assessments })
+  const resolved = await Promise.all(assessments.map(async (assessment) => ({
+    ...assessment,
+    generatedClip: {
+      ...assessment.generatedClip,
+      evidencePackage: assessment.generatedClip.evidencePackage
+        ? {
+            ...assessment.generatedClip.evidencePackage,
+            contactSheetUrl: assessment.generatedClip.evidencePackage.contactSheetStorageKey
+              ? await getSignedFileUrl(assessment.generatedClip.evidencePackage.contactSheetStorageKey, 3600).catch(() => null)
+              : null,
+          }
+        : null,
+    },
+  })))
+  return NextResponse.json({ assessments: resolved })
 }
 
 /**
@@ -68,41 +91,139 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
  */
 export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
   const { id: projectId } = await props.params
-  const permission = await checkProjectPermission(projectId, undefined, { mode: 'EDIT_STEP', stepType: 'VIDEO_DIRECT' })
-  if (!permission.allowed) return permission.response
+  const readPermission = await checkProjectPermission(projectId, undefined, { mode: 'READ' })
+  if (!readPermission.allowed) return readPermission.response
 
   const body = await req.json().catch(() => ({}))
+  const generatedClipId = typeof body.generatedClipId === 'string' ? body.generatedClipId : ''
+  if (!generatedClipId) return NextResponse.json({ error: 'INVALID_CLIP_ID' }, { status: 400 })
+  const clip = await prisma.generatedClip.findFirst({
+    where: { id: generatedClipId, projectId },
+    include: {
+      evidencePackage: true,
+      generationUnit: { select: { requestedDurationMs: true, strategy: true, tier: true, stepName: true } },
+    },
+  })
+  if (!clip) return NextResponse.json({ error: 'CLIP_NOT_FOUND' }, { status: 404 })
+  if (clip.generationUnit.stepName !== 'TRAILER' && clip.generationUnit.stepName !== 'VIDEO_DIRECT') {
+    return NextResponse.json({ error: 'UNSUPPORTED_CLIP_STEP' }, { status: 409 })
+  }
+  const permission = await checkProjectPermission(projectId, undefined, {
+    mode: 'EDIT_STEP',
+    stepType: clip.generationUnit.stepName as WorkflowStepType,
+  })
+  if (!permission.allowed) return permission.response
+
   if (body.action === 'adopt') {
-    const generatedClipId = typeof body.generatedClipId === 'string' ? body.generatedClipId : ''
-    const clip = await prisma.generatedClip.findFirst({
-      where: { id: generatedClipId, projectId, videoUrl: { not: null }, isMock: false },
-      select: { id: true, generationUnitId: true, durationMs: true },
-    })
-    if (!clip) return NextResponse.json({ error: 'PLAYABLE_CLIP_NOT_FOUND' }, { status: 404 })
+    if (!clip.videoUrl || clip.isMock) return NextResponse.json({ error: 'PLAYABLE_CLIP_NOT_FOUND' }, { status: 404 })
+    const evidence = clip.evidencePackage
+    if (!evidence || !evidence.reviewedAt || !evidenceDispositionCanEnterTimeline(evidence.disposition)) {
+      return NextResponse.json({
+        error: 'EVIDENCE_REVIEW_REQUIRED',
+        message: evidence?.disposition === 'REJECTED' ? '该素材已判定弃用，不能进入时间线。' : '请先完成素材证据包审片并保存可用范围。',
+      }, { status: 409 })
+    }
     const adoptedToTimeline = await prisma.$transaction((tx) => attachGeneratedClipToTimeline(tx, {
       generationUnitId: clip.generationUnitId,
       generatedClipId: clip.id,
       durationMs: clip.durationMs,
+      sourceStartMs: evidence.usableStartMs ?? 0,
+      sourceEndMs: evidence.usableEndMs ?? clip.durationMs,
+      evidencePackageId: evidence.id,
+      disposition: evidence.disposition,
     }))
     return NextResponse.json({ adoptedToTimeline, providerRequestsSubmitted: false, pointsDeducted: false })
+  }
+
+  if (body.action === 'prepare-evidence') {
+    if (clip.isMock) return NextResponse.json({ error: 'MOCK_CLIP_HAS_NO_EVIDENCE' }, { status: 409 })
+    const sourceUrl = clip.storageKey
+      ? await getSignedFileUrl(clip.storageKey, 3600)
+      : clip.videoUrl
+    if (!sourceUrl) return NextResponse.json({ error: 'VIDEO_SOURCE_NOT_FOUND' }, { status: 404 })
+    try {
+      const evidence = await analyzeRemoteVideoEvidence(sourceUrl, clip.durationMs)
+      if (!evidence.contactSheet) throw new Error(evidence.contactSheetError || '九帧联系表生成失败')
+      const storageKey = `projects/${projectId}/video-evidence/${clip.id}-contact-sheet.jpg`
+      await uploadFile(storageKey, evidence.contactSheet, 'image/jpeg')
+      const evidencePackage = await prisma.videoEvidencePackage.upsert({
+        where: { generatedClipId: clip.id },
+        create: {
+          projectId,
+          generatedClipId: clip.id,
+          contactSheetStorageKey: storageKey,
+          contactSheetFrameTimesMs: evidence.frameTimesMs,
+          contactSheetStatus: 'READY',
+          technicalEvidence: { ...evidence.technical },
+        },
+        update: {
+          contactSheetStorageKey: storageKey,
+          contactSheetFrameTimesMs: evidence.frameTimesMs,
+          contactSheetStatus: 'READY',
+          contactSheetError: null,
+          technicalEvidence: { ...evidence.technical },
+        },
+      })
+      return NextResponse.json({
+        evidencePackage: {
+          ...evidencePackage,
+          contactSheetUrl: await getSignedFileUrl(storageKey, 3600).catch(() => null),
+        },
+        providerRequestsSubmitted: false,
+        pointsDeducted: false,
+      })
+    } catch (error: any) {
+      await prisma.videoEvidencePackage.upsert({
+        where: { generatedClipId: clip.id },
+        create: {
+          projectId,
+          generatedClipId: clip.id,
+          contactSheetStatus: 'FAILED',
+          contactSheetError: String(error?.message || error).slice(0, 1000),
+        },
+        update: {
+          contactSheetStatus: 'FAILED',
+          contactSheetError: String(error?.message || error).slice(0, 1000),
+        },
+      })
+      return NextResponse.json({ error: 'EVIDENCE_PREPARATION_FAILED', message: String(error?.message || error) }, { status: 422 })
+    }
+  }
+
+  if (body.action === 'review-evidence') {
+    try {
+      const review = normalizeVideoEvidenceReview(body, clip.durationMs)
+      const evidencePackage = await prisma.videoEvidencePackage.upsert({
+        where: { generatedClipId: clip.id },
+        create: {
+          projectId,
+          generatedClipId: clip.id,
+          ...review,
+          reviewedById: permission.user.id,
+          reviewedAt: new Date(),
+        },
+        update: {
+          ...review,
+          reviewedById: permission.user.id,
+          reviewedAt: new Date(),
+        },
+      })
+      return NextResponse.json({ evidencePackage, providerRequestsSubmitted: false, pointsDeducted: false })
+    } catch (error) {
+      if (error instanceof VideoEvidenceValidationError) {
+        return NextResponse.json({ error: error.code, message: error.message }, { status: 400 })
+      }
+      throw error
+    }
   }
 
   if (body.action !== 'assess') {
     return NextResponse.json({ error: 'INVALID_ACTION' }, { status: 400 })
   }
-  const generatedClipId = typeof body.generatedClipId === 'string' ? body.generatedClipId : ''
   const source = body.source === 'AI' || body.source === 'HUMAN' ? body.source : null
   if (!generatedClipId || !source) {
     return NextResponse.json({ error: 'INVALID_ASSESSMENT_INPUT' }, { status: 400 })
   }
-  const clip = await prisma.generatedClip.findFirst({
-    where: { id: generatedClipId, projectId },
-    include: {
-      generationUnit: { select: { requestedDurationMs: true, strategy: true, tier: true } },
-    },
-  })
-  if (!clip) return NextResponse.json({ error: 'CLIP_NOT_FOUND' }, { status: 404 })
-
   const semantic: Record<(typeof SEMANTIC_FIELDS)[number], number | null> = {
     identityWardrobe: null,
     actionTemporal: null,

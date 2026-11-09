@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
+import Image from 'next/image'
 import useSWR from 'swr'
-import { AlertTriangle, CheckCircle2, LoaderCircle, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Images, LoaderCircle, Save, ShieldCheck } from 'lucide-react'
 
 const fetcher = async (url: string) => {
   const response = await fetch(url)
@@ -19,6 +20,16 @@ const SCORE_FIELDS = [
 
 type ScoreField = (typeof SCORE_FIELDS)[number][0]
 
+const DISPOSITIONS = [
+  ['WHOLE_CLIP', '整条可用'],
+  ['USABLE_RANGE', '仅指定区间可用'],
+  ['VISUAL_ONLY', '仅画面可用'],
+  ['SUBJECT_ONLY', '主体可用'],
+  ['REJECTED', '弃用'],
+] as const
+
+type ReviewDraft = { disposition: string; startSeconds: number; endSeconds: number; reviewNote: string }
+
 export default function VideoQualityReviewCard({
   projectId,
   stepName,
@@ -34,6 +45,7 @@ export default function VideoQualityReviewCard({
   const [reviewingClipId, setReviewingClipId] = useState<string | null>(null)
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({})
   const [scores, setScores] = useState<Record<ScoreField, number>>({
     identityWardrobe: 85,
     actionTemporal: 85,
@@ -71,6 +83,20 @@ export default function VideoQualityReviewCard({
     }
   }
 
+  const draftFor = (clip: any): ReviewDraft => {
+    const evidence = clip.evidencePackage
+    return reviewDrafts[clip.id] || {
+      disposition: evidence?.disposition && evidence.disposition !== 'PENDING' ? evidence.disposition : 'WHOLE_CLIP',
+      startSeconds: Number(((evidence?.usableStartMs ?? 0) / 1000).toFixed(2)),
+      endSeconds: Number(((evidence?.usableEndMs ?? clip.durationMs) / 1000).toFixed(2)),
+      reviewNote: evidence?.reviewNote || '',
+    }
+  }
+
+  const updateDraft = (clip: any, patch: Partial<ReviewDraft>) => {
+    setReviewDrafts((current) => ({ ...current, [clip.id]: { ...draftFor(clip), ...patch } }))
+  }
+
   if (error || latestAssessments.length === 0) return null
   const failedCount = latestAssessments.filter((item: any) => item.decision === 'DELIVERY_FAILED').length
 
@@ -79,7 +105,7 @@ export default function VideoQualityReviewCard({
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
         <span className="flex items-center gap-2 text-sm font-medium text-violet-900">
           <ShieldCheck className="h-4 w-4" />
-          成片质量报告
+          素材证据与质量报告
         </span>
         <span className="text-xs text-violet-700">
           {failedCount > 0 ? `${failedCount} 条交付失败` : `${latestAssessments.length} 条待用户决定`}
@@ -91,6 +117,11 @@ export default function VideoQualityReviewCard({
           const deliveryFailed = assessment.decision === 'DELIVERY_FAILED'
           const reasons = Array.isArray(assessment.reasons) ? assessment.reasons : []
           const recordedScores = assessment.scores || {}
+          const evidence = clip.evidencePackage
+          const draft = draftFor(clip)
+          const reviewed = Boolean(evidence?.reviewedAt && evidence?.disposition !== 'PENDING')
+          const canAdopt = reviewed && evidence?.disposition !== 'REJECTED'
+          const needsRange = draft.disposition !== 'WHOLE_CLIP' && draft.disposition !== 'REJECTED'
           return (
             <div key={assessment.id} className="rounded-md border border-stone-200 bg-white p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -111,6 +142,15 @@ export default function VideoQualityReviewCard({
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
+                      disabled={pendingId === `prepare:${clip.id}`}
+                      onClick={() => void submit({ action: 'prepare-evidence', generatedClipId: clip.id }, `prepare:${clip.id}`)}
+                      className="inline-flex items-center gap-1 rounded-md border border-stone-300 px-2.5 py-1 text-[11px] font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+                    >
+                      {pendingId === `prepare:${clip.id}` ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Images className="h-3 w-3" />}
+                      {evidence?.contactSheetStatus === 'READY' ? '刷新联系表' : '生成九帧联系表'}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setReviewingClipId(reviewingClipId === clip.id ? null : clip.id)}
                       className="rounded-md border border-violet-300 px-2.5 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-50"
                     >
@@ -118,16 +158,16 @@ export default function VideoQualityReviewCard({
                     </button>
                     <button
                       type="button"
-                      disabled={pendingId === `adopt:${clip.id}`}
+                      disabled={pendingId === `adopt:${clip.id}` || !canAdopt}
                       onClick={() => {
-                        if (window.confirm('确认把这条完整视频采用到成片时间线？')) {
+                        if (window.confirm('确认按证据包中已审核的可用区间采用到成片时间线？')) {
                           void submit({ action: 'adopt', generatedClipId: clip.id }, `adopt:${clip.id}`)
                         }
                       }}
                       className="inline-flex items-center gap-1 rounded-md bg-violet-700 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-800 disabled:opacity-50"
                     >
                       {pendingId === `adopt:${clip.id}` && <LoaderCircle className="h-3 w-3 animate-spin" />}
-                      采用此视频
+                      {canAdopt ? '按审核区间采用' : evidence?.disposition === 'REJECTED' ? '已弃用' : '先完成审片'}
                     </button>
                   </div>
                 )}
@@ -140,6 +180,69 @@ export default function VideoQualityReviewCard({
               </div>
               {reasons.length > 0 && <p className="mt-2 text-[11px] leading-5 text-stone-500">{reasons.join(' ')}</p>}
               {clip.videoUrl && <video className="mt-2 max-h-52 w-full rounded bg-black" controls preload="metadata" src={clip.videoUrl} />}
+              <div className="mt-3 rounded-md border border-stone-200 bg-stone-50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-stone-700">原始素材证据包</p>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${reviewed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {reviewed ? '人工审片已完成' : '等待人工审片'}
+                  </span>
+                </div>
+                {evidence?.contactSheetUrl ? (
+                  <div className="mt-2">
+                    <Image src={evidence.contactSheetUrl} alt="九帧联系表" width={960} height={540} unoptimized
+                      className="h-auto w-full rounded border border-stone-200" />
+                    {Array.isArray(evidence.contactSheetFrameTimesMs) && (
+                      <p className="mt-1 text-[10px] text-stone-400">
+                        抽帧时间：{evidence.contactSheetFrameTimesMs.map((value: number) => `${(value / 1000).toFixed(2)}s`).join(' · ')}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[11px] text-stone-500">
+                    {evidence?.contactSheetStatus === 'FAILED' ? `联系表生成失败：${evidence.contactSheetError || '未知错误'}` : '尚未生成九帧联系表。'}
+                  </p>
+                )}
+                {evidence?.technicalEvidence && (
+                  <div className="mt-2 grid grid-cols-2 gap-1 text-[10px] text-stone-500 sm:grid-cols-4">
+                    <span>视频流：{evidence.technicalEvidence.hasVideoStream === false ? '缺失' : evidence.technicalEvidence.hasVideoStream === true ? '存在' : '未探测'}</span>
+                    <span>实测时长：{evidence.technicalEvidence.measuredDurationMs ? `${(evidence.technicalEvidence.measuredDurationMs / 1000).toFixed(2)}秒` : '未知'}</span>
+                    <span>黑帧：{evidence.technicalEvidence.blackFrameRatio == null ? '未知' : `${(evidence.technicalEvidence.blackFrameRatio * 100).toFixed(1)}%`}</span>
+                    <span>冻结帧：{evidence.technicalEvidence.freezeFrameRatio == null ? '未知' : `${(evidence.technicalEvidence.freezeFrameRatio * 100).toFixed(1)}%`}</span>
+                  </div>
+                )}
+                <div className="mt-3 grid gap-2 sm:grid-cols-[180px_1fr]">
+                  <select value={draft.disposition} onChange={(event) => updateDraft(clip, { disposition: event.target.value })}
+                    className="rounded border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-700">
+                    {DISPOSITIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                  <input value={draft.reviewNote} onChange={(event) => updateDraft(clip, { reviewNote: event.target.value })}
+                    className="rounded border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-700" placeholder="记录身份、动作、声音、UI、接镜等人工结论" />
+                </div>
+                {needsRange && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-stone-600">
+                    <label>可用起点（秒）<input type="number" min="0" max={clip.durationMs / 1000} step="0.01" value={draft.startSeconds}
+                      onChange={(event) => updateDraft(clip, { startSeconds: Number(event.target.value) })}
+                      className="ml-1 w-24 rounded border border-stone-200 bg-white px-2 py-1" /></label>
+                    <label>可用终点（秒）<input type="number" min="0" max={clip.durationMs / 1000} step="0.01" value={draft.endSeconds}
+                      onChange={(event) => updateDraft(clip, { endSeconds: Number(event.target.value) })}
+                      className="ml-1 w-24 rounded border border-stone-200 bg-white px-2 py-1" /></label>
+                    <span>原片 {(clip.durationMs / 1000).toFixed(2)} 秒</span>
+                  </div>
+                )}
+                <button type="button" disabled={pendingId === `review:${clip.id}`}
+                  onClick={() => void submit({
+                    action: 'review-evidence',
+                    generatedClipId: clip.id,
+                    disposition: draft.disposition,
+                    usableStartMs: Math.round(draft.startSeconds * 1000),
+                    usableEndMs: Math.round(draft.endSeconds * 1000),
+                    reviewNote: draft.reviewNote,
+                  }, `review:${clip.id}`)}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-stone-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                  {pendingId === `review:${clip.id}` ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  保存人工审片结论
+                </button>
+              </div>
               {reviewingClipId === clip.id && (
                 <div className="mt-3 rounded-md bg-stone-50 p-3">
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -165,7 +268,7 @@ export default function VideoQualityReviewCard({
         })}
         {actionError && <p className="text-xs text-red-600">{actionError}</p>}
         <p className="text-[10px] text-stone-400">
-          FFmpeg 只提供时长、视频流、黑帧和冻结帧等客观证据；评分不会触发自动采用、自动重试或拆回逐镜。重新生成仍由用户在对应视频卡片主动发起。
+          九帧联系表和 FFmpeg 只提供可核对的客观证据；人工处置与可用区间必须单独保存。评分和审片都不会触发自动重做，收费重新生成仍由用户在对应视频卡片主动发起。
         </p>
       </div>
     </details>

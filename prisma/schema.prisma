@@ -285,6 +285,7 @@ model Project {
   generatedClips          GeneratedClip[]
   timelineSegments        TimelineSegment[]
   videoQualityAssessments VideoQualityAssessment[]
+  videoEvidencePackages   VideoEvidencePackage[]
   voiceoverSegments       VoiceoverSegment[]
   assetBindings           AssetBinding[]
   assetConstraints        ProjectAssetConstraint[]
@@ -967,11 +968,37 @@ model GeneratedClip {
   createdAt          DateTime                 @default(now()) @map("created_at")
   timelineSegments   TimelineSegment[]
   qualityAssessments VideoQualityAssessment[]
+  evidencePackage    VideoEvidencePackage?
 
   @@index([projectId, createdAt])
   @@index([generationUnitId, createdAt])
   @@index([providerTaskId])
   @@map("generated_clips")
+}
+
+// 原始视频素材的审片证据包。技术证据与人工处置分开保存，避免评分冒充验收。
+model VideoEvidencePackage {
+  id                       String        @id @default(cuid())
+  projectId                String        @map("project_id")
+  project                  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generatedClipId          String        @unique @map("generated_clip_id")
+  generatedClip            GeneratedClip @relation(fields: [generatedClipId], references: [id], onDelete: Cascade)
+  contactSheetStorageKey   String?       @map("contact_sheet_storage_key")
+  contactSheetFrameTimesMs Json          @default("[]") @map("contact_sheet_frame_times_ms")
+  contactSheetStatus       String        @default("PENDING") @map("contact_sheet_status") // PENDING | READY | FAILED
+  contactSheetError        String?       @map("contact_sheet_error") @db.Text
+  technicalEvidence        Json?         @map("technical_evidence")
+  disposition              String        @default("PENDING") // PENDING | WHOLE_CLIP | USABLE_RANGE | VISUAL_ONLY | SUBJECT_ONLY | REJECTED
+  usableStartMs            Int?          @map("usable_start_ms")
+  usableEndMs              Int?          @map("usable_end_ms")
+  reviewNote               String?       @map("review_note") @db.Text
+  reviewedById             String?       @map("reviewed_by_id")
+  reviewedAt               DateTime?     @map("reviewed_at")
+  createdAt                DateTime      @default(now()) @map("created_at")
+  updatedAt                DateTime      @updatedAt @map("updated_at")
+
+  @@index([projectId, disposition, updatedAt])
+  @@map("video_evidence_packages")
 }
 
 // 成片时间线上的生成单元。一个完整生成视频对应一行；内部镜头不自动拆片。
