@@ -7,6 +7,7 @@ import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import GenerationStrategyPreviewCard from './GenerationStrategyPreviewCard'
 import VideoQualityReviewCard from './VideoQualityReviewCard'
 import ReferenceRecoveryCard from './ReferenceRecoveryCard'
+import ProductionDeliveryStatusCard from './ProductionDeliveryStatusCard'
 
 const SHOW_BATCH_VIDEO_GENERATION = false
 /** 合成看门狗：超过这个时间仍拿不到 combinedVideoUrl 就认为合成失败 */
@@ -919,6 +920,7 @@ export default function VideoDirectPanel({
       <div className="space-y-6">
         {errorBanner}
         <GenerationStrategyPreviewCard projectId={projectId} stepName="VIDEO_DIRECT" />
+        <ProductionDeliveryStatusCard projectId={projectId} readOnly={readOnly} />
         <VideoQualityReviewCard projectId={projectId} stepName="VIDEO_DIRECT" />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>

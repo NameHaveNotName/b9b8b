@@ -286,6 +286,8 @@ model Project {
   timelineSegments        TimelineSegment[]
   videoQualityAssessments VideoQualityAssessment[]
   videoEvidencePackages   VideoEvidencePackage[]
+  productionDeliveryState ProductionDeliveryState?
+  productionMilestones    ProductionDeliveryMilestone[]
   voiceoverSegments       VoiceoverSegment[]
   assetBindings           AssetBinding[]
   assetConstraints        ProjectAssetConstraint[]
@@ -1005,6 +1007,37 @@ model VideoEvidencePackage {
 
   @@index([projectId, disposition, updatedAt])
   @@map("video_evidence_packages")
+}
+
+// 与九步生成工作流分离的制作/交付状态，避免“素材生成完成”被误报为最终成片完成。
+model ProductionDeliveryState {
+  id           String                        @id @default(cuid())
+  projectId    String                        @unique @map("project_id")
+  project      Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  currentStage String                        @map("current_stage")
+  updatedById  String?                       @map("updated_by_id")
+  createdAt    DateTime                      @default(now()) @map("created_at")
+  updatedAt    DateTime                      @updatedAt @map("updated_at")
+  milestones   ProductionDeliveryMilestone[]
+
+  @@map("production_delivery_states")
+}
+
+model ProductionDeliveryMilestone {
+  id          String                  @id @default(cuid())
+  stateId     String                  @map("state_id")
+  state       ProductionDeliveryState @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  projectId   String                  @map("project_id")
+  project     Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stage       String
+  evidence    Json
+  note        String?                 @db.Text
+  createdById String?                 @map("created_by_id")
+  createdAt   DateTime                @default(now()) @map("created_at")
+
+  @@unique([stateId, stage])
+  @@index([projectId, createdAt])
+  @@map("production_delivery_milestones")
 }
 
 // 成片时间线上的生成单元。一个完整生成视频对应一行；内部镜头不自动拆片。

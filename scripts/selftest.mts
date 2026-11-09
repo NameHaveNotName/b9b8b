@@ -106,6 +106,12 @@ import {
   removeContinuityReferenceAsset,
 } from '../lib/video-continuity-policy.ts'
 import {
+  evaluateSystemProductionGates,
+  nextProductionDeliveryStage,
+  normalizeManualDeliveryEvidence,
+  PRODUCTION_DELIVERY_STAGES,
+} from '../lib/production-delivery.ts'
+import {
   BUSINESS_GOAL_OPTIONS,
   getBusinessGoalPrompt,
   isBusinessGoalKey,
@@ -1756,6 +1762,42 @@ check('连续性锚点按证据包独立替换和撤销，不污染其他参考�
   assert.equal(merged.images[1].sourceEvidencePackageId, 'evidence-1')
   const removed = removeContinuityReferenceAsset(merged, 'evidence-1')
   assert.deepEqual(removed.images, [{ index: 1, url: 'identity.png', roles: ['identity'] }])
+})
+
+console.log('\n== 制作完成状态与交付分层 ==')
+
+check('六个制作阶段只能按固定顺序推进，生成完成后仍是素材验收', () => {
+  assert.equal(nextProductionDeliveryStage(null), 'PRODUCTION_PREPARED')
+  assert.equal(nextProductionDeliveryStage('PRODUCTION_PREPARED'), 'GENERATION_COMPLETE')
+  assert.equal(nextProductionDeliveryStage('GENERATION_COMPLETE'), 'MATERIALS_ACCEPTED')
+  assert.equal(nextProductionDeliveryStage('PLATFORM_DELIVERED'), null)
+  assert.equal(PRODUCTION_DELIVERY_STAGES.length, 6)
+})
+
+check('生成与素材验收门控分别核对可播放素材和人工采用时间线', () => {
+  const incomplete = evaluateSystemProductionGates({
+    coverageReady: true,
+    hardGapCount: 0,
+    planExists: true,
+    unitCount: 2,
+    completedUnitCount: 2,
+    playableUnitCount: 2,
+    timelineSegmentCount: 2,
+    acceptedTimelineSegmentCount: 1,
+  })
+  assert.equal(incomplete.PRODUCTION_PREPARED.ready, true)
+  assert.equal(incomplete.GENERATION_COMPLETE.ready, true)
+  assert.equal(incomplete.MATERIALS_ACCEPTED.ready, false)
+  assert.match(incomplete.MATERIALS_ACCEPTED.reasons[0], /人工素材验收/)
+})
+
+check('剪辑、母版与平台交付必须提供对应人工证据', () => {
+  assert.throws(() => normalizeManualDeliveryEvidence('POST_PRODUCTION', { evidenceReference: '', note: '' }), /可核对/)
+  assert.throws(() => normalizeManualDeliveryEvidence('MASTER_ACCEPTED', { evidenceReference: 'v01', note: '' }), /实际完成/)
+  assert.throws(() => normalizeManualDeliveryEvidence('PLATFORM_DELIVERED', { platform: '', evidenceReference: 'delivery-1' }), /交付平台/)
+  assert.deepEqual(normalizeManualDeliveryEvidence('PLATFORM_DELIVERED', {
+    platform: 'B站', evidenceReference: 'BV-test', note: '发布完成',
+  }), { platform: 'B站', evidenceReference: 'BV-test', note: '发布完成' })
 })
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败\n`)
