@@ -8,13 +8,15 @@ import {
   attachGeneratedClipToTimeline,
 } from '@/lib/video-production-state'
 import { assessVideoQuality } from '@/lib/video-quality'
-import { analyzeRemoteVideoEvidence } from '@/lib/video-technical-quality'
+import { analyzeRemoteVideoEvidence, extractRemoteVideoFrame } from '@/lib/video-technical-quality'
 import {
   evidenceDispositionCanEnterTimeline,
   normalizeVideoEvidenceReview,
   VideoEvidenceValidationError,
 } from '@/lib/video-evidence'
 import { getSignedFileUrl, uploadFile } from '@/lib/r2'
+import { continuityPropagationIssue } from '@/lib/video-continuity-policy'
+import { syncContinuityReferenceToNextUnit } from '@/lib/video-continuity-reference'
 
 const SEMANTIC_FIELDS = [
   'identityWardrobe',
@@ -77,6 +79,9 @@ export async function GET(req: Request, props: { params: Promise<{ id: string }>
             ...assessment.generatedClip.evidencePackage,
             contactSheetUrl: assessment.generatedClip.evidencePackage.contactSheetStorageKey
               ? await getSignedFileUrl(assessment.generatedClip.evidencePackage.contactSheetStorageKey, 3600).catch(() => null)
+              : null,
+            continuityAnchorUrl: assessment.generatedClip.evidencePackage.continuityAnchorStorageKey
+              ? await getSignedFileUrl(assessment.generatedClip.evidencePackage.continuityAnchorStorageKey, 3600).catch(() => null)
               : null,
           }
         : null,
@@ -193,6 +198,16 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   if (body.action === 'review-evidence') {
     try {
       const review = normalizeVideoEvidenceReview(body, clip.durationMs)
+      const anchorTimeMs = clip.evidencePackage?.continuityAnchorTimeMs
+      const invalidatesAnchor = clip.evidencePackage?.continuityReferenceStatus === 'ELIGIBLE'
+        && (
+          review.disposition === 'REJECTED'
+          || anchorTimeMs == null
+          || review.usableStartMs == null
+          || review.usableEndMs == null
+          || anchorTimeMs < review.usableStartMs
+          || anchorTimeMs > review.usableEndMs
+        )
       const evidencePackage = await prisma.videoEvidencePackage.upsert({
         where: { generatedClipId: clip.id },
         create: {
@@ -206,8 +221,17 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           ...review,
           reviewedById: permission.user.id,
           reviewedAt: new Date(),
+          ...(invalidatesAnchor ? {
+            continuityReferenceStatus: 'PENDING',
+            continuityAnchorStorageKey: null,
+            continuityAnchorTimeMs: null,
+            continuityReferenceNote: '可用区间或处置发生变化，需要重新确认连续性锚点。',
+            continuityReviewedById: null,
+            continuityReviewedAt: null,
+          } : {}),
         },
       })
+      if (invalidatesAnchor) await syncContinuityReferenceToNextUnit(evidencePackage.id)
       return NextResponse.json({ evidencePackage, providerRequestsSubmitted: false, pointsDeducted: false })
     } catch (error) {
       if (error instanceof VideoEvidenceValidationError) {
@@ -215,6 +239,77 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       }
       throw error
     }
+  }
+
+  if (body.action === 'set-continuity-reference') {
+    const eligibility = String(body.eligibility || '').trim().toUpperCase()
+    if (eligibility !== 'ELIGIBLE' && eligibility !== 'INELIGIBLE') {
+      return NextResponse.json({ error: 'INVALID_CONTINUITY_ELIGIBILITY' }, { status: 400 })
+    }
+    const note = typeof body.continuityReferenceNote === 'string'
+      ? body.continuityReferenceNote.trim().slice(0, 2000)
+      : ''
+    if (eligibility === 'INELIGIBLE') {
+      const evidencePackage = await prisma.videoEvidencePackage.upsert({
+        where: { generatedClipId: clip.id },
+        create: {
+          projectId,
+          generatedClipId: clip.id,
+          continuityReferenceStatus: 'INELIGIBLE',
+          continuityReferenceNote: note,
+          continuityReviewedById: permission.user.id,
+          continuityReviewedAt: new Date(),
+        },
+        update: {
+          continuityReferenceStatus: 'INELIGIBLE',
+          continuityAnchorStorageKey: null,
+          continuityAnchorTimeMs: null,
+          continuityReferenceNote: note,
+          continuityReviewedById: permission.user.id,
+          continuityReviewedAt: new Date(),
+        },
+      })
+      const propagation = await syncContinuityReferenceToNextUnit(evidencePackage.id)
+      return NextResponse.json({ evidencePackage, propagation, providerRequestsSubmitted: false, pointsDeducted: false })
+    }
+
+    const anchorTimeMs = Math.round(Number(body.continuityAnchorTimeMs))
+    const candidate = {
+      ...clip.evidencePackage,
+      continuityReferenceStatus: 'ELIGIBLE',
+      continuityAnchorStorageKey: 'pending-anchor',
+      continuityAnchorTimeMs: anchorTimeMs,
+    }
+    const issue = continuityPropagationIssue(candidate)
+    if (issue) return NextResponse.json({ error: 'CONTINUITY_REFERENCE_INELIGIBLE', message: issue }, { status: 409 })
+    const sourceUrl = clip.storageKey
+      ? await getSignedFileUrl(clip.storageKey, 3600)
+      : clip.videoUrl
+    if (!sourceUrl) return NextResponse.json({ error: 'VIDEO_SOURCE_NOT_FOUND' }, { status: 404 })
+    const anchor = await extractRemoteVideoFrame(sourceUrl, anchorTimeMs)
+    const anchorStorageKey = `projects/${projectId}/video-evidence/${clip.id}-continuity-${anchorTimeMs}.jpg`
+    await uploadFile(anchorStorageKey, anchor, 'image/jpeg')
+    const evidencePackage = await prisma.videoEvidencePackage.update({
+      where: { generatedClipId: clip.id },
+      data: {
+        continuityReferenceStatus: 'ELIGIBLE',
+        continuityAnchorStorageKey: anchorStorageKey,
+        continuityAnchorTimeMs: anchorTimeMs,
+        continuityReferenceNote: note,
+        continuityReviewedById: permission.user.id,
+        continuityReviewedAt: new Date(),
+      },
+    })
+    const propagation = await syncContinuityReferenceToNextUnit(evidencePackage.id)
+    return NextResponse.json({
+      evidencePackage: {
+        ...evidencePackage,
+        continuityAnchorUrl: await getSignedFileUrl(anchorStorageKey, 3600).catch(() => null),
+      },
+      propagation,
+      providerRequestsSubmitted: false,
+      pointsDeducted: false,
+    })
   }
 
   if (body.action !== 'assess') {

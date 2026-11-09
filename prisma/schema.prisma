@@ -978,24 +978,30 @@ model GeneratedClip {
 
 // 原始视频素材的审片证据包。技术证据与人工处置分开保存，避免评分冒充验收。
 model VideoEvidencePackage {
-  id                       String        @id @default(cuid())
-  projectId                String        @map("project_id")
-  project                  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  generatedClipId          String        @unique @map("generated_clip_id")
-  generatedClip            GeneratedClip @relation(fields: [generatedClipId], references: [id], onDelete: Cascade)
-  contactSheetStorageKey   String?       @map("contact_sheet_storage_key")
-  contactSheetFrameTimesMs Json          @default("[]") @map("contact_sheet_frame_times_ms")
-  contactSheetStatus       String        @default("PENDING") @map("contact_sheet_status") // PENDING | READY | FAILED
-  contactSheetError        String?       @map("contact_sheet_error") @db.Text
-  technicalEvidence        Json?         @map("technical_evidence")
-  disposition              String        @default("PENDING") // PENDING | WHOLE_CLIP | USABLE_RANGE | VISUAL_ONLY | SUBJECT_ONLY | REJECTED
-  usableStartMs            Int?          @map("usable_start_ms")
-  usableEndMs              Int?          @map("usable_end_ms")
-  reviewNote               String?       @map("review_note") @db.Text
-  reviewedById             String?       @map("reviewed_by_id")
-  reviewedAt               DateTime?     @map("reviewed_at")
-  createdAt                DateTime      @default(now()) @map("created_at")
-  updatedAt                DateTime      @updatedAt @map("updated_at")
+  id                         String        @id @default(cuid())
+  projectId                  String        @map("project_id")
+  project                    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generatedClipId            String        @unique @map("generated_clip_id")
+  generatedClip              GeneratedClip @relation(fields: [generatedClipId], references: [id], onDelete: Cascade)
+  contactSheetStorageKey     String?       @map("contact_sheet_storage_key")
+  contactSheetFrameTimesMs   Json          @default("[]") @map("contact_sheet_frame_times_ms")
+  contactSheetStatus         String        @default("PENDING") @map("contact_sheet_status") // PENDING | READY | FAILED
+  contactSheetError          String?       @map("contact_sheet_error") @db.Text
+  technicalEvidence          Json?         @map("technical_evidence")
+  disposition                String        @default("PENDING") // PENDING | WHOLE_CLIP | USABLE_RANGE | VISUAL_ONLY | SUBJECT_ONLY | REJECTED
+  usableStartMs              Int?          @map("usable_start_ms")
+  usableEndMs                Int?          @map("usable_end_ms")
+  reviewNote                 String?       @map("review_note") @db.Text
+  reviewedById               String?       @map("reviewed_by_id")
+  reviewedAt                 DateTime?     @map("reviewed_at")
+  continuityReferenceStatus  String        @default("PENDING") @map("continuity_reference_status") // PENDING | ELIGIBLE | INELIGIBLE
+  continuityAnchorStorageKey String?       @map("continuity_anchor_storage_key")
+  continuityAnchorTimeMs     Int?          @map("continuity_anchor_time_ms")
+  continuityReferenceNote    String?       @map("continuity_reference_note") @db.Text
+  continuityReviewedById     String?       @map("continuity_reviewed_by_id")
+  continuityReviewedAt       DateTime?     @map("continuity_reviewed_at")
+  createdAt                  DateTime      @default(now()) @map("created_at")
+  updatedAt                  DateTime      @updatedAt @map("updated_at")
 
   @@index([projectId, disposition, updatedAt])
   @@map("video_evidence_packages")

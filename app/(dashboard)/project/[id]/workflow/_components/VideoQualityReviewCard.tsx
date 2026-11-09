@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import Image from 'next/image'
 import useSWR from 'swr'
-import { AlertTriangle, CheckCircle2, Images, LoaderCircle, Save, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Images, Link2, LoaderCircle, Save, ShieldCheck } from 'lucide-react'
 
 const fetcher = async (url: string) => {
   const response = await fetch(url)
@@ -28,7 +28,15 @@ const DISPOSITIONS = [
   ['REJECTED', '弃用'],
 ] as const
 
-type ReviewDraft = { disposition: string; startSeconds: number; endSeconds: number; reviewNote: string }
+type ReviewDraft = {
+  disposition: string
+  startSeconds: number
+  endSeconds: number
+  reviewNote: string
+  continuityEligibility: 'ELIGIBLE' | 'INELIGIBLE'
+  anchorSeconds: number
+  continuityNote: string
+}
 
 export default function VideoQualityReviewCard({
   projectId,
@@ -85,11 +93,16 @@ export default function VideoQualityReviewCard({
 
   const draftFor = (clip: any): ReviewDraft => {
     const evidence = clip.evidencePackage
+    const startSeconds = Number(((evidence?.usableStartMs ?? 0) / 1000).toFixed(2))
+    const endSeconds = Number(((evidence?.usableEndMs ?? clip.durationMs) / 1000).toFixed(2))
     return reviewDrafts[clip.id] || {
       disposition: evidence?.disposition && evidence.disposition !== 'PENDING' ? evidence.disposition : 'WHOLE_CLIP',
-      startSeconds: Number(((evidence?.usableStartMs ?? 0) / 1000).toFixed(2)),
-      endSeconds: Number(((evidence?.usableEndMs ?? clip.durationMs) / 1000).toFixed(2)),
+      startSeconds,
+      endSeconds,
       reviewNote: evidence?.reviewNote || '',
+      continuityEligibility: evidence?.continuityReferenceStatus === 'ELIGIBLE' ? 'ELIGIBLE' : 'INELIGIBLE',
+      anchorSeconds: Number(((evidence?.continuityAnchorTimeMs ?? Math.round(((startSeconds + endSeconds) / 2) * 1000)) / 1000).toFixed(2)),
+      continuityNote: evidence?.continuityReferenceNote || '',
     }
   }
 
@@ -242,6 +255,52 @@ export default function VideoQualityReviewCard({
                   {pendingId === `review:${clip.id}` ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                   保存人工审片结论
                 </button>
+                <div className="mt-3 border-t border-stone-200 pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="flex items-center gap-1.5 text-xs font-semibold text-stone-700">
+                      <Link2 className="h-3.5 w-3.5" />下游连续性参考资格
+                    </p>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] ${evidence?.continuityReferenceStatus === 'ELIGIBLE' ? 'bg-sky-100 text-sky-700' : 'bg-stone-200 text-stone-600'}`}>
+                      {evidence?.continuityReferenceStatus === 'ELIGIBLE' ? '可传播' : evidence?.continuityReferenceStatus === 'INELIGIBLE' ? '禁止传播' : '尚未确认'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[10px] leading-4 text-stone-500">
+                    可进入成片不代表可传给下一单元。只有已审片区间内人工指定的锚点会传播；系统不会默认使用尾帧。
+                  </p>
+                  {evidence?.continuityAnchorUrl && (
+                    <Image src={evidence.continuityAnchorUrl} alt="连续性锚点" width={640} height={360} unoptimized
+                      className="mt-2 h-auto max-h-48 w-auto rounded border border-stone-200" />
+                  )}
+                  <div className="mt-2 grid gap-2 sm:grid-cols-[160px_130px_1fr]">
+                    <select value={draft.continuityEligibility}
+                      onChange={(event) => updateDraft(clip, { continuityEligibility: event.target.value as 'ELIGIBLE' | 'INELIGIBLE' })}
+                      className="rounded border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-700">
+                      <option value="INELIGIBLE">禁止向后传播</option>
+                      <option value="ELIGIBLE">建立合格锚点</option>
+                    </select>
+                    <input type="number" min={draft.startSeconds} max={draft.endSeconds} step="0.01"
+                      value={draft.anchorSeconds} disabled={draft.continuityEligibility !== 'ELIGIBLE'}
+                      onChange={(event) => updateDraft(clip, { anchorSeconds: Number(event.target.value) })}
+                      className="rounded border border-stone-200 bg-white px-2 py-1.5 text-xs disabled:bg-stone-100" aria-label="连续性锚点秒数" />
+                    <input value={draft.continuityNote}
+                      onChange={(event) => updateDraft(clip, { continuityNote: event.target.value })}
+                      className="rounded border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-700"
+                      placeholder="说明哪些人物、姿态、道具或空间状态允许继承" />
+                  </div>
+                  <button type="button"
+                    disabled={pendingId === `continuity:${clip.id}` || (draft.continuityEligibility === 'ELIGIBLE' && !reviewed)}
+                    onClick={() => void submit({
+                      action: 'set-continuity-reference',
+                      generatedClipId: clip.id,
+                      eligibility: draft.continuityEligibility,
+                      continuityAnchorTimeMs: Math.round(draft.anchorSeconds * 1000),
+                      continuityReferenceNote: draft.continuityNote,
+                    }, `continuity:${clip.id}`)}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-sky-300 bg-white px-3 py-1.5 text-xs font-medium text-sky-700 disabled:opacity-50">
+                    {pendingId === `continuity:${clip.id}` ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+                    保存连续性资格
+                  </button>
+                </div>
               </div>
               {reviewingClipId === clip.id && (
                 <div className="mt-3 rounded-md bg-stone-50 p-3">

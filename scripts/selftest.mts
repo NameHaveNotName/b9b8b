@@ -100,6 +100,12 @@ import {
   normalizeVideoEvidenceReview,
 } from '../lib/video-evidence.ts'
 import {
+  continuityPropagationIssue,
+  continuityReferenceCanPropagate,
+  mergeContinuityReferenceAsset,
+  removeContinuityReferenceAsset,
+} from '../lib/video-continuity-policy.ts'
+import {
   BUSINESS_GOAL_OPTIONS,
   getBusinessGoalPrompt,
   isBusinessGoalKey,
@@ -1711,6 +1717,45 @@ check('采用审核区间会同步缩短当前片段并平移后续时间线', (
     timelineEndMs: 17500,
     durationDeltaMs: -2500,
   })
+})
+
+console.log('\n== 下游连续性参考资格 ==')
+
+const eligibleContinuityEvidence = {
+  id: 'evidence-1',
+  disposition: 'USABLE_RANGE',
+  reviewedAt: '2026-11-09T00:00:00.000Z',
+  usableStartMs: 1000,
+  usableEndMs: 6000,
+  continuityReferenceStatus: 'ELIGIBLE',
+  continuityAnchorStorageKey: 'projects/p/video-evidence/anchor.jpg',
+  continuityAnchorTimeMs: 3500,
+}
+
+check('只有已审片且锚点位于可用区间的素材可向后传播', () => {
+  assert.equal(continuityReferenceCanPropagate(eligibleContinuityEvidence), true)
+  assert.equal(continuityReferenceCanPropagate({ ...eligibleContinuityEvidence, reviewedAt: null }), false)
+  assert.equal(continuityReferenceCanPropagate({ ...eligibleContinuityEvidence, disposition: 'REJECTED' }), false)
+  assert.match(continuityPropagationIssue({ ...eligibleContinuityEvidence, continuityAnchorTimeMs: 6500 }) || '', /可用区间/)
+})
+
+check('连续性锚点按证据包独立替换和撤销，不污染其他参考图', () => {
+  const base = { images: [{ index: 1, url: 'identity.png', roles: ['identity'] }] }
+  const merged = mergeContinuityReferenceAsset(base, {
+    url: 'storage:projects/p/video-evidence/anchor.jpg',
+    storageKey: 'projects/p/video-evidence/anchor.jpg',
+    label: '合格中间帧',
+    roles: ['continuity'],
+    authority: '仅继承连续状态',
+    exclude: ['错误尾帧'],
+    sourceEvidencePackageId: 'evidence-1',
+    anchorTimeMs: 3500,
+    propagationEligibility: 'ELIGIBLE',
+  })
+  assert.equal(merged.images.length, 2)
+  assert.equal(merged.images[1].sourceEvidencePackageId, 'evidence-1')
+  const removed = removeContinuityReferenceAsset(merged, 'evidence-1')
+  assert.deepEqual(removed.images, [{ index: 1, url: 'identity.png', roles: ['identity'] }])
 })
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败\n`)

@@ -22,6 +22,7 @@ import {
   recordGeneratedClipForLegacySegment,
 } from '@/lib/video-production-state'
 import { buildKeyframeCoverageReview } from '@/lib/keyframe-coverage'
+import { resolveEligibleContinuityAnchorForLegacySegment } from '@/lib/video-continuity-reference'
 
 /** 获取 storyboard shots 和 keyframes */
 async function getStoryboardAndKeyframes(projectId: string) {
@@ -378,7 +379,11 @@ async function handleGenerateDirectSegment(projectId: string, stepId: string, bo
 
   const { shots, keyframes } = await getStoryboardAndKeyframes(projectId)
   const shot = shots[segment.sequence] || shots.find((s: any) => s.shotId === segment.shotId)
+  const continuityAnchor = shot?.continuityFromPrevious === true
+    ? await resolveEligibleContinuityAnchorForLegacySegment({ projectId, segmentId: segment.id })
+    : null
   const firstFrameUrl = await getConfirmedReferenceOverride(segment.id)
+    || continuityAnchor?.url
     || shot?.firstFrameUrl || shot?.referenceImageUrl || shot?.imageUrl || ''
   if (!firstFrameUrl) {
     return NextResponse.json({ error: 'NO_IMAGE', message: '该分镜没有可用的首帧' }, { status: 400 })
@@ -498,7 +503,11 @@ async function handleGenerateAllDirectSegments(projectId: string, stepId: string
     let mockCount = 0
     for (const segment of segmentsToRun) {
       const shot = shots.find((s: any) => s.shotId === segment.shotId)
+      const continuityAnchor = shot?.continuityFromPrevious === true
+        ? await resolveEligibleContinuityAnchorForLegacySegment({ projectId, segmentId: segment.id })
+        : null
       const firstFrameUrl = await getConfirmedReferenceOverride(segment.id)
+        || continuityAnchor?.url
         || shot?.firstFrameUrl || shot?.referenceImageUrl || shot?.imageUrl || ''
       if (!firstFrameUrl) {
         await prisma.videoSegment.update({

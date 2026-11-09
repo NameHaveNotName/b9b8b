@@ -101,6 +101,36 @@ export async function createVideoContactSheetFile(
   return buildContactSheetFrameTimes(safeDurationMs, 9)
 }
 
+export async function createVideoFrameFile(
+  inputPath: string,
+  outputPath: string,
+  timeMs: number
+): Promise<void> {
+  const ffmpeg = getFfmpegExecutablePath()
+  const seekSeconds = Math.max(0, Math.round(timeMs)) / 1000
+  await execFileAsync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-y',
+    '-ss', seekSeconds.toFixed(3),
+    '-i', inputPath,
+    '-frames:v', '1',
+    '-q:v', '2',
+    outputPath,
+  ], { maxBuffer: 32 * 1024 * 1024 })
+}
+
+export async function extractRemoteVideoFrame(videoUrl: string, timeMs: number): Promise<Buffer> {
+  const tempDir = await makeTempDir('video-anchor-')
+  const localPath = path.join(tempDir, 'candidate.mp4')
+  const framePath = path.join(tempDir, 'anchor.jpg')
+  try {
+    await downloadUrlToTemp(videoUrl, localPath)
+    await createVideoFrameFile(localPath, framePath, timeMs)
+    return await fs.readFile(framePath)
+  } finally {
+    await removeDir(tempDir)
+  }
+}
+
 /** Download once, then produce both objective probe data and a nine-frame contact sheet. */
 export async function analyzeRemoteVideoEvidence(
   videoUrl: string,
