@@ -10,6 +10,17 @@ export async function DELETE(_req: Request, props: { params: Promise<{ id: strin
   if (!access.allowed) return access.response
   const binding = await prisma.assetBinding.findFirst({ where: { id: params.bindingId, projectId: params.id } })
   if (!binding) return NextResponse.json({ error: 'ASSET_BINDING_404' }, { status: 404 })
-  await prisma.assetBinding.delete({ where: { id: binding.id } })
+  await prisma.$transaction(async (tx) => {
+    await tx.assetBinding.delete({ where: { id: binding.id } })
+    if (binding.assetId && binding.targetType === 'CHARACTER' && binding.referenceRole === 'IDENTITY') {
+      const asset = await tx.asset.findUnique({ where: { id: binding.assetId } })
+      const metadata = { ...((asset?.metadata as any) || {}) }
+      if (metadata.targetCharacterId === binding.targetKey) {
+        metadata.referenceRole = 'UNASSIGNED'
+        metadata.targetCharacterId = null
+        await tx.asset.update({ where: { id: binding.assetId }, data: { metadata } })
+      }
+    }
+  })
   return NextResponse.json({ success: true })
 }

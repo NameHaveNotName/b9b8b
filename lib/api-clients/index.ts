@@ -10,6 +10,7 @@ import { generateText, generateImage, generateConceptSceneWithEdit, generateVisi
 import type { GenerateVisionTextParams } from './openlux'
 import { IMAGE_MODELS, TEXT_MODELS } from '@/lib/models-config'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
+import { buildCharacterImagePrompt } from '@/lib/character-generation-policy'
 
 /**
  * 工作指令.txt（Round 4 修复 #4）：R2 上传失败兜底。
@@ -209,26 +210,26 @@ export async function getImageClient(): Promise<ImageClient> {
         return results
       },
 
-      async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?, userReferenceUrls?, priorityReferenceUrls?) {
-        const hasUserRefs = userReferenceUrls && userReferenceUrls.length > 0
-        const styleHint = _stylePrompt ? `Style reference: ${_stylePrompt}. ` : ''
-        const refHint = hasUserRefs ? 'Strictly match the character appearance, colors, outfit, hairstyle and iconic accessories from the provided reference image(s). ' : ''
+      async generateCharacterPortrait(projectId, character, styleRefUrl, _stylePrompt?, aspectRatio?, imageModel?, _userReferenceUrls?, priorityReferenceUrls?) {
         const ar = aspectRatio || '16:9'
-        const orientationHint = /^9:16|3:4|2:3|portrait/i.test(ar)
-          ? 'portrait orientation, vertical composition, full body shot, tall frame, character centered vertically. '
-          : /^16:9|21:9|4:3|landscape/i.test(ar)
-            ? 'landscape orientation, cinematic widescreen, horizontal frame. '
-            : ''
-        const prompt = `${styleHint}${refHint}${orientationHint}${character.description || character.name || ''}, solo, single person, only one character. Avoid: multiple people, crowd, group shot. Keep all iconic visual elements from the reference consistent.`
+        const priorityRefs = (priorityReferenceUrls || []).filter(Boolean)
+        const prompt = buildCharacterImagePrompt({
+          description: character.description || character.name || '',
+          stylePrompt: _stylePrompt,
+          entityType: character.entityType,
+          hasIdentityReferences: priorityRefs.length > 0,
+          hasStyleReference: priorityRefs.length > 0 && !!styleRefUrl,
+          aspectRatio: ar,
+        })
         console.log(`[ASPECT-RATIO] [generateCharacterPortrait] 比例: ${ar}`)
         const model = imageModel || IMAGE_MODELS.primary
-        console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: style=${!!styleRefUrl} user=${hasUserRefs} (${userReferenceUrls?.map((u: string) => u.slice(0, 30)).join(', ')})`)
-        const priorityRefs = (priorityReferenceUrls || []).filter(Boolean)
-        const primaryReference = priorityRefs[0] || styleRefUrl
+        console.log(`[MODEL-SELECT] [generateCharacterPortrait] 模型: ${model}, refs: identity=${priorityRefs.length} style=${!!styleRefUrl}`)
+        // 风格样图经常包含示例人物。没有角色身份参考时仅使用风格文字，
+        // 不把风格图作为图生图主参考，避免示例人物的脸、服装或物种串入新角色。
+        const primaryReference = priorityRefs[0]
         const secondaryReferences = [
           ...priorityRefs.slice(1),
           ...(priorityRefs.length > 0 && styleRefUrl ? [styleRefUrl] : []),
-          ...(userReferenceUrls || []),
         ].filter((url, index, all) => Boolean(url) && url !== primaryReference && all.indexOf(url) === index)
         const { buffer, isMock, lastError } = await generateImage({
           model,

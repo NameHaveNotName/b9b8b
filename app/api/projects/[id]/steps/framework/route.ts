@@ -15,6 +15,7 @@ import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '
 import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 import { getStepAssetConstraints } from '@/lib/asset-constraints'
+import { normalizeFrameworkEntities } from '@/lib/character-generation-policy'
 
 const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: string; shots: string; desc: string }> = {
   sketch: { label: '速写', range: '1-3分钟', acts: '1-2幕', shots: '10-20镜', desc: '极快节奏，单一场景/单一冲突' },
@@ -46,6 +47,10 @@ ${tagInstructions || ''}
 4. 决定整体节奏策略（哪里紧凑、哪里舒缓）。
 5. 动作/惊悚类 ASL 可低至 2-4s，情感/艺术片 ASL 可高至 8-15s，由你根据故事类型自行决定。
 6. 无论什么风格，都需要尽量谨慎地使用特效（包括闪光，火花，全息等），尽量避免出现相关内容。
+7. 严格区分“需要跨镜保持身份一致的角色”和“道具、产品、屏幕内容、字幕、PPT、后期素材”。后者不得放入 characters，应放入 productionElements。
+8. 用户写“昵称（某形象）”“角色A使用某形象”时，昵称是剧中称呼，括号或后半句是视觉身份。不得把昵称按字面改造成另一物种，也不得因品牌或授权猜测静默替换用户明确指定的形象；如需确认，只记录 referenceNeedsConfirmation。
+9. 参考图只在其用途明确时生效。不得让某角色参考图污染其他角色，也不得把画风参考中的人物当作故事角色。
+10. 混合媒介必须拆成环境层、角色渲染层和合成层。例如“真实环境中的Q版二维角色”必须保留真实摄影背景，并说明二维角色的接触阴影、透视和环境光融合，不能把整张图统一画成纯动画。
 
 输出格式（严格 JSON，不要 Markdown 代码块）：
 {
@@ -58,9 +63,28 @@ ${tagInstructions || ''}
         "id": "char_001",
         "name": "角色名",
         "role": "主角/配角",
+        "entityType": "HUMAN/ANIMAL/CREATURE/MASCOT/PRODUCT",
+        "requiresCharacterAsset": true,
+        "visualIdentity": "角色不可变的视觉身份；昵称不得覆盖此身份",
+        "identityReferenceHint": "如有明确参考图，写明它只属于哪个角色；没有则留空",
         "description": "性格、形象等基本信息..."
       }
     ],
+    "productionElements": [
+      {
+        "id": "element_001",
+        "name": "PPT、屏幕内容、字幕、道具或后期素材",
+        "type": "SCREEN_CONTENT/POST_PRODUCTION/PROP/PRODUCT",
+        "description": "用途说明",
+        "handling": "实拍道具/后期剪入/单独产品素材；不得生成角色母版"
+      }
+    ],
+    "visualStyleLayers": {
+      "environment": "真实或绘制环境的媒介、光线、镜头与景深",
+      "characterRendering": "角色自身的造型、描边、上色和材质",
+      "compositing": "角色与环境之间的透视、比例、接触阴影和环境光关系"
+    },
+    "referenceNeedsConfirmation": [],
     "synopsis": "用一段话概括整个故事的核心冲突和结局...",
     "storyLength": "${storyLengthKey}",
     "totalDuration": "预估总时长，如'4分钟'",
@@ -195,14 +219,15 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const combinedInstructions = [goalInstructions, creativePlanInstructions, tagInstructions, assetConstraints.promptBlock].filter(Boolean).join('\n\n')
 
   const references = await getProjectReferences(params.id).catch(() => [])
-  const hasRefs = references.length > 0 && references.some(r => r.url)
+  const effectiveReferences = references.filter(r => r.url && r.role !== 'UNASSIGNED')
+  const hasRefs = effectiveReferences.length > 0
 
   let visualRefBlock = ''
   if (hasRefs) {
-    const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
-    visualRefBlock = refLabels.length > 0
-      ? `【用户上传了视觉参考图，请仔细查看。用户标注的标签：${refLabels.join('、')}。\n请在框架设计时充分考虑这些参考图，角色形象、场景氛围、美术风格应与参考素材一致。】\n`
-      : '【用户上传了视觉参考图，请仔细查看。请在框架设计时充分考虑这些参考图，角色形象、场景氛围、美术风格应与参考素材一致。】\n'
+    const manifest = effectiveReferences.map((reference, index) =>
+      `参考图${index + 1}：用途=${reference.role}${reference.targetCharacterId ? `，目标角色=${reference.targetCharacterId}` : ''}${reference.labels.length ? `，标签=${reference.labels.join('、')}` : ''}`
+    ).join('\n')
+    visualRefBlock = `【参考图职责清单】\n${manifest}\n身份参考只能定义对应角色；风格、环境和构图参考不得贡献人物身份。若身份参考尚未明确目标角色，只能结合用户原始文字中的名称/别名建立候选关系并写入 referenceNeedsConfirmation，不得擅自套给其他角色。】\n`
   }
 
   const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, hasRefs ? visualRefBlock : '', combinedInstructions)
@@ -210,8 +235,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
     let fullText: string
     if (hasRefs) {
-      const refUrls = references.filter(r => r.url).map(r => r.url)
-      const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
+      const refUrls = effectiveReferences.map(r => r.url)
+      const refLabels = effectiveReferences.map((reference) => `${reference.role}:${reference.labels.join('、') || reference.title || '未命名'}`)
       console.log(`[FRAMEWORK-VISION] Using multimodal with ${refUrls.length} reference images`)
       fullText = await textClient.generateVision({
         prompt,
@@ -240,7 +265,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       keyScenes: Array.isArray(a.keyScenes) ? a.keyScenes : (Array.isArray(a.scenes) ? a.scenes : []),
     }))
 
-    const framework = {
+    const framework = normalizeFrameworkEntities({
       inspiration: fw.inspiration || '',
       inspirationSource: creativeSource,
       styleGuide: fw.styleGuide || '',
@@ -253,6 +278,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       environments: Array.isArray(fw.environments) ? fw.environments : [],
       overallPacing: fw.overallPacing || '',
       visualStyle: fw.styleGuide || '',
+      visualStyleLayers: fw.visualStyleLayers || undefined,
+      productionElements: Array.isArray(fw.productionElements) ? fw.productionElements : [],
+      referenceNeedsConfirmation: Array.isArray(fw.referenceNeedsConfirmation) ? fw.referenceNeedsConfirmation : [],
       assetConstraints: assetConstraints.snapshots,
       // 基础框架返回后还会自动完成角色、梗概、幕结构与环境深化。
       // 先写入 queued，副工作台便能把两段工作展示为同一条连续任务。
@@ -261,7 +289,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         progress: { current: 0, total: 1, phase: '基础框架已保存，等待自动深化' },
         updatedAt: new Date().toISOString(),
       },
-    }
+    })
 
     // 更新项目表：保存框架数据和选定的方向标题
     await prisma.project.update({

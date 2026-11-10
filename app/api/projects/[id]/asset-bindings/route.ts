@@ -76,11 +76,26 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     if (!source) return NextResponse.json({ error: 'ASSET_404' }, { status: 404 })
   }
 
+  // 一张身份参考只能属于一个角色；重新分配等同于移动，不能同时污染多个角色。
+  if (assetId && targetType === 'CHARACTER' && referenceRole === 'IDENTITY') {
+    await prisma.assetBinding.deleteMany({
+      where: { projectId: params.id, assetId, targetType: 'CHARACTER', referenceRole: 'IDENTITY', targetKey: { not: targetKey } },
+    })
+  }
+
   const existing = await prisma.assetBinding.findFirst({
     where: { projectId: params.id, targetType, targetKey, userAssetId, assetId },
     include: { userAsset: true, asset: true },
   })
   if (existing) {
+    if (assetId && targetType === 'CHARACTER' && referenceRole === 'IDENTITY') {
+      const source = await prisma.asset.findUnique({ where: { id: assetId } })
+      await prisma.asset.update({ where: { id: assetId }, data: { metadata: {
+        ...((source?.metadata as any) || {}),
+        referenceRole: 'IDENTITY',
+        targetCharacterId: targetKey,
+      } } })
+    }
     const hydrated = await prisma.assetBinding.findUnique({ where: { id: existing.id }, include: { userAsset: true, asset: true } })
     return NextResponse.json({ binding: await serialize(hydrated || existing), duplicate: true })
   }
@@ -102,6 +117,14 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       createdById: user.id,
     },
   })
+  if (assetId && targetType === 'CHARACTER' && referenceRole === 'IDENTITY') {
+    const source = await prisma.asset.findUnique({ where: { id: assetId } })
+    await prisma.asset.update({ where: { id: assetId }, data: { metadata: {
+      ...((source?.metadata as any) || {}),
+      referenceRole: 'IDENTITY',
+      targetCharacterId: targetKey,
+    } } })
+  }
   const binding = await prisma.assetBinding.findUnique({ where: { id: created.id }, include: { userAsset: true, asset: true } })
   return NextResponse.json({ binding: await serialize(binding) }, { status: 201 })
 }

@@ -4,6 +4,7 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 
 const RETENTION_MS = 72 * 60 * 60 * 1000
+const REFERENCE_ROLES = new Set(['IDENTITY', 'STYLE', 'ENVIRONMENT', 'COMPOSITION', 'ACTION', 'PRODUCT', 'UNASSIGNED'])
 
 export async function PATCH(
   req: NextRequest,
@@ -33,10 +34,41 @@ export async function PATCH(
     if (body.labels !== undefined) {
       existingMeta.labels = Array.isArray(body.labels) ? body.labels.slice(0, 10) : []
     }
+    if (body.referenceRole !== undefined) {
+      const referenceRole = String(body.referenceRole || '').toUpperCase()
+      if (!REFERENCE_ROLES.has(referenceRole)) {
+        return NextResponse.json({ error: 'VALIDATION_001', message: '参考图用途无效' }, { status: 400 })
+      }
+      existingMeta.referenceRole = referenceRole
+      existingMeta.targetCharacterId = referenceRole === 'IDENTITY' && typeof body.targetCharacterId === 'string'
+        ? body.targetCharacterId.trim() || null
+        : null
+      if (referenceRole === 'IDENTITY' && existingMeta.targetCharacterId) {
+        const project = await prisma.project.findUnique({ where: { id: params.id }, select: { framework: true } })
+        const characters = Array.isArray((project?.framework as any)?.characters) ? (project!.framework as any).characters : []
+        if (!characters.some((character: any) => character?.id === existingMeta.targetCharacterId)) {
+          return NextResponse.json({ error: 'VALIDATION_001', message: '目标角色不存在于当前框架' }, { status: 400 })
+        }
+      }
+    }
 
-    const updated = await prisma.asset.update({
-      where: { id: params.assetId },
-      data: { metadata: existingMeta },
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.asset.update({ where: { id: params.assetId }, data: { metadata: existingMeta } })
+      if (body.referenceRole !== undefined) {
+        await tx.assetBinding.deleteMany({ where: { projectId: params.id, assetId: params.assetId, targetType: 'CHARACTER' } })
+        if (existingMeta.referenceRole === 'IDENTITY' && existingMeta.targetCharacterId) {
+          await tx.assetBinding.create({ data: {
+            projectId: params.id,
+            assetId: params.assetId,
+            targetType: 'CHARACTER',
+            targetKey: existingMeta.targetCharacterId,
+            referenceRole: 'IDENTITY',
+            priority: 0,
+            createdById: userId,
+          } })
+        }
+      }
+      return result
     })
 
     return NextResponse.json({ reference: updated })

@@ -6,7 +6,7 @@ import { getCurrentUserId } from '@/lib/auth-helpers'
 import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { getImageClient } from '@/lib/api-clients'
-import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
+import { getStyleRefUrl } from '@/lib/style-ref'
 import { IMAGE_MODELS } from '@/lib/models-config'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
@@ -87,9 +87,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   }
 
   try {
-    const refs = await getProjectReferences(params.id).catch(() => [])
-    const userRefUrls = refs.filter(r => r.url).map(r => r.url)
-    const priorityReferences = await getBoundReferences(params.id, 'CHARACTER', character?.id || '').catch(() => [])
+    const priorityReferences = (await getBoundReferences(params.id, 'CHARACTER', character?.id || '').catch(() => []))
+      .filter((reference: any) => reference.referenceRole === 'IDENTITY')
     const priorityReferenceUrls = priorityReferences.map((reference) => reference.url).filter(Boolean)
 
     const imageClient = await getImageClient()
@@ -100,7 +99,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       stylePrompt,
       newRatio,
       newModel,
-      userRefUrls,
+      [],
       priorityReferenceUrls
     )
 

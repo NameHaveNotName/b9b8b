@@ -11,17 +11,18 @@ import { IMAGE_MODELS, getPromptLanguageInstruction, getModelPromptLanguage } fr
 import { loadPromptTemplate, extractJsonFromMarkdown } from '@/lib/prompts'
 import { claimStepForGeneration, completeStep, failStep, canExecuteStep } from '@/lib/workflow-executor'
 import { getProjectDefaultAspectRatio } from '@/lib/server/workflow-state'
-import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
+import { getStyleRefUrl } from '@/lib/style-ref'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { getBoundReferences } from '@/lib/asset-bindings'
+import { buildVisualStyleLayers, getGeneratableCharacters } from '@/lib/character-generation-policy'
 
 /**
  * 把 LLM 返回的角色 imagePrompt 组装为 prompts 条目。
  * 语言校验按目标模型：中文优化模型要求中文字符，英文偏好模型要求拉丁字母；
  * 校验不过时回退到对应语言的中性描述（不再硬编码胶片型号词）。
  */
-function buildCharacterPromptEntries(parsedChars: any[], characters: any[], imageModel?: string) {
+function buildCharacterPromptEntries(parsedChars: any[], characters: any[], imageModel?: string, referenceAssignments: Record<string, any[]> = {}) {
   const isZh = getModelPromptLanguage(imageModel || IMAGE_MODELS.primary) === 'zh'
   return characters.map((character, i) => {
     const charData = parsedChars.find((c: any) => c.characterId === character.id || c.name === character.name)
@@ -42,6 +43,13 @@ function buildCharacterPromptEntries(parsedChars: any[], characters: any[], imag
       characterName: character.name,
       characterId: character.id,
       role: character.role,
+      entityType: character.entityType,
+      visualIdentity: character.visualIdentity || '',
+      referenceAssignments: (referenceAssignments[character.id] || []).map((reference: any) => ({
+        id: reference.assetId || reference.id,
+        title: reference.title || '角色身份参考',
+        role: reference.referenceRole || 'IDENTITY',
+      })),
     }
   })
 }
@@ -58,20 +66,24 @@ async function generateCharacterPrompts(
   textModel?: string,
 ): Promise<{ prompts: any[]; characterCount: number }> {
   const framework = (project.framework || frameworkStep.outputData) as any
-  const allCharacters: Array<{ id: string; name: string; role: string; description: string }> =
-    framework?.characters || []
-  const characters = allCharacters.slice(0, 5)
+  const characters = getGeneratableCharacters(framework, 5)
 
-  const refs = await getProjectReferences(project.id).catch(() => [])
-  const refLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
-  const refInstructions = refs.length > 0
-    ? `【用户上传了 ${refs.length} 张人物参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}】\n` +
-      `1. 你必须仔细分析参考图中每个人物的：整体造型、头部装饰/发型、面部特征、服装颜色与款式、标志性配件、身材比例、材质质感。\n` +
-      `2. 为每个角色生成 imagePrompt 时，必须用文字准确复现参考图中的核心视觉特征（例如：蓝色球形身体、白色面部、头顶三叉皇冠、红色领结；或黑色齐耳短发、蓝色针织开衫、白色百褶裙）。\n` +
-      `3. 禁止在 imagePrompt 中写"参考图1""参考图2""类似参考图"等占位描述；必须用具体、可视觉化的英文形容词和名词。\n` +
-      `4. 如果某个角色明显对应某张带标签的参考图（如角色名"海宝"对应标签"海宝"），必须优先保证该角色的颜色、体型、服装、头饰/发型与参考图一致，不能擅自改动。\n` +
-      `5. 风格上需要在参考图形象的基础上，融合 framework.styleGuide/visualStyle 的全局视觉风格关键词，但不能为了风格化而丢失角色的核心识别特征。`
-    : '【无人物参考图】请根据 framework.characters 中的 description 生成 imagePrompt，确保描述具体可视觉化。'
+  const assignmentEntries = await Promise.all(characters.map(async (character: any) => [
+    character.id,
+    (await getBoundReferences(project.id, 'CHARACTER', character.id).catch(() => []))
+      .filter((reference: any) => reference.referenceRole === 'IDENTITY'),
+  ] as const))
+  const referenceAssignments = Object.fromEntries(assignmentEntries)
+  const referenceLines = characters.map((character: any) => {
+    const assigned = referenceAssignments[character.id] || []
+    return assigned.length > 0
+      ? `- ${character.name}（${character.id}）：已绑定 ${assigned.length} 张身份参考，只能用于这个角色；${assigned.map((item: any) => item.title).join('、')}`
+      : `- ${character.name}（${character.id}）：没有身份参考，必须只按文字新设计，不得复制其他参考图中的人物、吉祥物或物种。`
+  })
+  const styleLayers = buildVisualStyleLayers(framework)
+  const refInstructions = `【参考图职责边界】\n${referenceLines.join('\n')}\n` +
+    `身份参考只能约束绑定角色；画风参考只能约束媒介、线条、色彩与光影，绝不能把其中人物的脸、服装或物种复制给其他角色。\n` +
+    `【风格三层】环境：${styleLayers.environment || '未指定'}；角色渲染：${styleLayers.characterRendering || '未指定'}；合成：${styleLayers.compositing || '未指定'}。`
 
   const prompt = loadPromptTemplate('character', {
     USER_INPUT: JSON.stringify(framework),
@@ -83,7 +95,7 @@ async function generateCharacterPrompts(
   const parsed = extractJsonFromMarkdown(resultText)
   const parsedChars = parsed.characters || []
 
-  const prompts = buildCharacterPromptEntries(parsedChars, characters, imageModel)
+  const prompts = buildCharacterPromptEntries(parsedChars, characters, imageModel, referenceAssignments)
 
   const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
   await prisma.workflowStep.update({
@@ -170,12 +182,14 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const defaultAspectRatio = await getProjectDefaultAspectRatio(params.id)
     const aspectRatio = body?.aspectRatio || defaultAspectRatio
     const imageModel = body?.imageModel
-    const requestedRefImages = Array.isArray(body?.refImages) ? body.refImages.filter((url: unknown): url is string => typeof url === 'string' && url.trim().length > 0).slice(0, 30) : undefined
     console.log(`[ASPECT-RATIO] [CHARACTER-IMAGE] 用户选择比例: ${aspectRatio}`)
     console.log(`[MODEL-SELECT] [CHARACTER-IMAGE] 用户选择模型: ${imageModel || '默认'}`)
 
     const existingOutput = (step.outputData as any) || {}
-    const prompts = existingOutput.prompts || []
+    const storedPrompts = existingOutput.prompts || []
+    const currentFramework = (project.framework || frameworkStep.outputData) as any
+    const allowedCharacterIds = new Set(getGeneratableCharacters(currentFramework, 5).map((character: any) => character.id))
+    const prompts = storedPrompts.filter((prompt: any) => allowedCharacterIds.has(prompt.characterId))
     console.log('[CHARACTER-IMAGE] existingOutput keys:', Object.keys(existingOutput))
     console.log('[CHARACTER-IMAGE] prompts count:', prompts.length)
 
@@ -250,7 +264,6 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
             userId,
             pointsCheck.billingSource,
             pointsCheck.billingGroupId,
-            requestedRefImages,
           )
         } catch (e: any) {
           console.error('[CHARACTER-IMAGE] 后台生成异常:', e?.message)
@@ -289,7 +302,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
   }
 
   const frameworkForBilling = (project.framework || frameworkStep.outputData) as any
-  const characterCountForBilling = Math.min(5, Array.isArray(frameworkForBilling?.characters) ? frameworkForBilling.characters.length : 0)
+  const characterCountForBilling = getGeneratableCharacters(frameworkForBilling, 5).length
   const totalCost = GENERATION_COSTS.DEFAULT + calculateBatchCost(GENERATION_COSTS.CHARACTER_DESIGN, characterCountForBilling)
   const pointsCheck = await checkPoints(totalCost, params.id, 'generation.character_design', 'IMAGE')
   if (!pointsCheck.ok) {
@@ -314,9 +327,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     (async () => {
       try {
         const framework = (project.framework || frameworkStep.outputData) as any
-        const allCharacters: Array<{ id: string; name: string; role: string; description: string }> =
-          framework?.characters || []
-        const characters = allCharacters.slice(0, 5)
+        const characters = getGeneratableCharacters(framework, 5)
 
         const promptImageModel = body?.imageModel || (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
         const prompt = loadPromptTemplate('character', {
@@ -388,7 +399,6 @@ async function generateCharacterImagesBackground(
   userId: string,
   billingSource: 'USER' | 'GROUP',
   billingGroupId: string | null,
-  requestedRefImages?: string[],
 ) {
   try {
     const styleStep = await prisma.workflowStep.findFirst({
@@ -408,9 +418,6 @@ async function generateCharacterImagesBackground(
       }
     }
 
-    const refs = await getProjectReferences(projectId).catch(() => [])
-    const userRefUrls = requestedRefImages || refs.filter((r: any) => r.url).map((r: any) => r.url)
-
     const imageClient = await getImageClient()
     const portraits: any[] = []
     const failedCharacters: string[] = []
@@ -418,12 +425,14 @@ async function generateCharacterImagesBackground(
 
     for (const promptItem of resolvedPrompts) {
       try {
-        const priorityReferences = await getBoundReferences(projectId, 'CHARACTER', promptItem.characterId).catch(() => [])
+        const priorityReferences = (await getBoundReferences(projectId, 'CHARACTER', promptItem.characterId).catch(() => []))
+          .filter((reference: any) => reference.referenceRole === 'IDENTITY')
         const priorityReferenceUrls = priorityReferences.map((reference) => reference.url).filter(Boolean)
         const enrichedCharacter = {
           id: promptItem.characterId,
           name: promptItem.characterName,
           role: promptItem.role || '',
+          entityType: promptItem.entityType || 'HUMAN',
           description: promptItem.englishPrompt || promptItem.chineseDesc,
         }
 
@@ -434,7 +443,7 @@ async function generateCharacterImagesBackground(
           stylePrompt,
           aspectRatio,
           imageModel,
-          userRefUrls,
+          [],
           priorityReferenceUrls
         )
         if (!result?.url || !result?.storageKey) {

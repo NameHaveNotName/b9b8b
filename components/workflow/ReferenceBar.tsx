@@ -2,25 +2,36 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import useSWR from 'swr'
-import { ChevronDown, ChevronUp, ImagePlus, Trash2, Link, Upload, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, ImagePlus, Link, Upload, X } from 'lucide-react'
 
 interface ReferenceAsset {
   id: string
   url: string
   mimeType: string
   storageKey: string
-  metadata?: { labels?: string[]; sourceUrl?: string | null }
+  metadata?: { labels?: string[]; sourceUrl?: string | null; referenceRole?: string; targetCharacterId?: string | null }
   createdAt: string
 }
 
 interface ReferenceBarProps {
   projectId: string
   defaultExpanded?: boolean
+  characters?: Array<{ id: string; name: string }>
 }
 
 const fetcher = (url: string) => fetch(url).then(r => r.json().then(d => d.references || []))
 
-export default function ReferenceBar({ projectId, defaultExpanded = false }: ReferenceBarProps) {
+const REFERENCE_ROLE_OPTIONS = [
+  { value: 'UNASSIGNED', label: '待指定用途' },
+  { value: 'IDENTITY', label: '角色身份' },
+  { value: 'STYLE', label: '全局画风' },
+  { value: 'ENVIRONMENT', label: '环境/场景' },
+  { value: 'COMPOSITION', label: '构图/镜头' },
+  { value: 'ACTION', label: '动作指导' },
+  { value: 'PRODUCT', label: '产品/道具' },
+]
+
+export default function ReferenceBar({ projectId, defaultExpanded = false, characters = [] }: ReferenceBarProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [uploading, setUploading] = useState(false)
   const [urlInput, setUrlInput] = useState('')
@@ -85,6 +96,21 @@ export default function ReferenceBar({ projectId, defaultExpanded = false }: Ref
       })
       mutate()
     } catch {}
+  }, [projectId, mutate])
+
+  const updatePurpose = useCallback(async (assetId: string, referenceRole: string, targetCharacterId?: string | null) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/references/${assetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referenceRole, targetCharacterId: targetCharacterId || null }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result.message || result.error || '保存用途失败')
+      await mutate()
+    } catch (error: any) {
+      alert(error?.message || '保存参考图用途失败')
+    }
   }, [projectId, mutate])
 
   const deleteRef = useCallback(async (assetId: string) => {
@@ -226,6 +252,23 @@ export default function ReferenceBar({ projectId, defaultExpanded = false }: Ref
                     </button>
                   </div>
                   <div className="mt-2">
+                    <select
+                      value={ref.metadata?.referenceRole || 'UNASSIGNED'}
+                      onChange={(event) => updatePurpose(ref.id, event.target.value, event.target.value === 'IDENTITY' ? ref.metadata?.targetCharacterId : null)}
+                      className="mb-1 w-full rounded border border-stone-200 bg-white px-1.5 py-1 text-[10px] text-stone-700 outline-none focus:border-blue-400"
+                    >
+                      {REFERENCE_ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                    {(ref.metadata?.referenceRole || 'UNASSIGNED') === 'IDENTITY' && (
+                      <select
+                        value={ref.metadata?.targetCharacterId || ''}
+                        onChange={(event) => updatePurpose(ref.id, 'IDENTITY', event.target.value || null)}
+                        className="mb-1 w-full rounded border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] text-emerald-800 outline-none focus:border-emerald-400"
+                      >
+                        <option value="">待指定角色</option>
+                        {characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
+                      </select>
+                    )}
                     <LabelsEditor
                       labels={ref.metadata?.labels || []}
                       onSave={labels => updateLabels(ref.id, labels)}
@@ -238,13 +281,13 @@ export default function ReferenceBar({ projectId, defaultExpanded = false }: Ref
 
           {count === 0 && (
             <div className="mt-4 py-4 text-center text-xs text-stone-400">
-              尚未上传参考素材，上传后 AI 会根据参考图调整创意方向和视觉风格
+              尚未上传参考素材。上传后请先指定用途，未分类图片不会自动影响任何角色或画风。
             </div>
           )}
 
           {/* Footer note */}
           <div className="mt-3 flex items-center justify-between text-xs text-stone-400">
-            <span>上传的参考图将影响创意扩散、框架搭建和后续所有的图像生成</span>
+            <span>参考图只影响指定职责；未分类图片不会自动串入角色或画风</span>
             <button onClick={() => setExpanded(false)} className="text-stone-500 hover:text-stone-700">收起</button>
           </div>
         </div>

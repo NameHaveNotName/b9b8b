@@ -38,7 +38,11 @@ export async function processStyleGeneration(
   console.log(`[ASPECT-RATIO] [StyleProcessor] Starting for step ${stepId}, ratio: ${aspectRatio}`)
 
   const userRefs = await getProjectReferences(projectId).catch(() => [])
-  const userRefUrls = referenceOverrides || userRefs.filter(r => r.url).map(r => r.url)
+  const eligibleStyleRefs = userRefs.filter(r => ['STYLE', 'ENVIRONMENT', 'COMPOSITION'].includes(r.role) && r.url)
+  const eligibleUrls = eligibleStyleRefs.map(r => r.url)
+  const userRefUrls = referenceOverrides
+    ? referenceOverrides.filter((url) => eligibleUrls.includes(url))
+    : eligibleUrls
   console.log(`[StyleProcessor] 用户参考图: ${userRefUrls.length} 张`)
 
   // 幂等检查：若 step 已 COMPLETED/FAILED，直接跳过（防止 BullMQ + setImmediate 双触发）

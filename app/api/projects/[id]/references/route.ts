@@ -9,6 +9,7 @@ import { assertSsrfSafe, safeFetch } from '@/lib/ssrf-guard'
 const MAX_REFERENCES = 10
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+const REFERENCE_ROLES = new Set(['IDENTITY', 'STYLE', 'ENVIRONMENT', 'COMPOSITION', 'ACTION', 'PRODUCT', 'UNASSIGNED'])
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -51,6 +52,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     let contentType: string
     let filename: string
     let labels: string[] = []
+    let referenceRole = 'UNASSIGNED'
+    let targetCharacterId: string | null = null
     let sourceUrl: string | null = null
 
     const formData = await req.formData().catch(() => null)
@@ -66,6 +69,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       if (labelsRaw && typeof labelsRaw === 'string') {
         labels = labelsRaw.split(',').map((l: string) => l.trim()).filter(Boolean).slice(0, 10)
       }
+      const roleRaw = String(formData.get('referenceRole') || '').toUpperCase()
+      referenceRole = REFERENCE_ROLES.has(roleRaw) ? roleRaw : 'UNASSIGNED'
+      targetCharacterId = typeof formData.get('targetCharacterId') === 'string' ? String(formData.get('targetCharacterId')).trim() || null : null
     } else {
       const body = await req.json().catch(() => null)
       if (body?.url) {
@@ -97,6 +103,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         if (body.labels && Array.isArray(body.labels)) {
           labels = body.labels.slice(0, 10)
         }
+        const roleRaw = String(body.referenceRole || '').toUpperCase()
+        referenceRole = REFERENCE_ROLES.has(roleRaw) ? roleRaw : 'UNASSIGNED'
+        targetCharacterId = typeof body.targetCharacterId === 'string' ? body.targetCharacterId.trim() || null : null
       } else {
         return NextResponse.json({ error: 'No file or URL provided' }, { status: 400 })
       }
@@ -118,7 +127,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         mimeType: contentType,
         storageKey,
         url,
-        metadata: { labels, sourceUrl },
+        metadata: { labels, sourceUrl, referenceRole, targetCharacterId },
       },
     })
 

@@ -11,16 +11,17 @@
 {{REFERENCE_INSTRUCTIONS}}
 
 【角色母版硬性规范（对齐生产 SOP）】
-1. 角色数量：严格对应 framework.characters 数组，每个角色生成 1 条母版提示词（若全片仅 1 名角色，则生成 2 条：正面全身/七分身标准母版 + 半侧面关键神态母版）。
-2. Clean 单人母版构图（严禁污染）：
+1. 角色数量：严格对应输入中 requiresCharacterAsset=true 的角色，每个角色只生成 1 条母版提示词。SCREEN_CONTENT、POST_PRODUCTION、PROP 以及 requiresCharacterAsset=false 的实体绝不能生成角色母版。
+2. Clean 单主体母版构图（严禁污染）：
    - 必须采用无遮挡的正面或微侧 3/4 视角（front or 3/4 view, medium-full shot / knee-up portrait），完整展示面部五官、发型轮廓、身体比例及核心服装结构。
    - 严禁使用过肩镜头、树叶/前景遮挡、极端俯仰角、剪影或背影！
-   - 画面中只能出现当前单个角色（solo character, single subject），严禁出现其他路人、多格拼贴或同图分身。
+   - 画面中只能出现当前单个主体（人、动物、吉祥物、产品均可），严禁出现其他路人、其他角色、多格拼贴或同图分身。
 3. 背景极简中性：使用与影片色调协调的干净简洁背景或柔和虚化的浅景深纯环境基底（clean neutral studio-like or softly defocused minimal backdrop），禁止在角色母版中堆砌复杂叙事杂物，防止后续多图参考时把背景杂物带入其他场景。
 4. 锁定不可变特征（Immutable Identity Features）：
    - 必须明确写出：年龄段、体型体态、脸型与五官气质、发型与发色、上衣/下装/外套的具体款式、颜色分区、材质肌理、标志性配饰或随身道具。
    - 对易被 AI 误读的特殊特征，使用正向具体名词描述（如 "wearing a matte dark-green canvas trench coat over a charcoal turtleneck"），避免含糊形容词。
 5. 姿态自然稳定：采用自然、可辨识角色性格的静态或微动态稳定站姿（natural grounded posture, clear silhouette），便于下游所有镜头提取身份特征。
+6. 角色昵称不得被按字面改造成另一物种。visualIdentity、identityReferenceHint 和角色专属身份参考的权威高于昵称；没有身份参考时才按文字新设计，且不得借用其他角色或风格图中的形象。
 
 【imagePrompt 结构顺序（80-180 words）】
 1. 单人主体与构图（Solo character master reference, knee-up / medium-full shot, front-to-3/4 angle, unobstructed full face and outfit clearly visible）

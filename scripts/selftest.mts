@@ -112,6 +112,13 @@ import {
   PRODUCTION_DELIVERY_STAGES,
 } from '../lib/production-delivery.ts'
 import {
+  buildCharacterImagePrompt,
+  getGeneratableCharacters,
+  normalizeFrameworkEntities,
+  normalizeReferenceDuty,
+  referenceMayAffectCharacterIdentity,
+} from '../lib/character-generation-policy.ts'
+import {
   BUSINESS_GOAL_OPTIONS,
   getBusinessGoalPrompt,
   isBusinessGoalKey,
@@ -1798,6 +1805,51 @@ check('剪辑、母版与平台交付必须提供对应人工证据', () => {
   assert.deepEqual(normalizeManualDeliveryEvidence('PLATFORM_DELIVERED', {
     platform: 'B站', evidenceReference: 'BV-test', note: '发布完成',
   }), { platform: 'B站', evidenceReference: 'BV-test', note: '发布完成' })
+})
+
+console.log('\n== 角色实体与参考图职责隔离 ==')
+
+check('PPT、屏幕内容与明确非人物实体不会进入角色母版生成', () => {
+  const framework = normalizeFrameworkEntities({ characters: [
+    { id: 'student', name: '男大学生', role: '主角', description: '二十岁大学生' },
+    { id: 'mascot', name: '大肥鱼', role: '吉祥物', entityType: 'MASCOT', description: '使用指定品牌形象参考' },
+    { id: 'ppt', name: '屏幕中的汇报PPT', role: '叙事载体', description: '不是独立人物，由后期剪入' },
+  ] })
+  assert.deepEqual(framework.characters.map((item: any) => item.id), ['student', 'mascot'])
+  assert.equal(framework.productionElements[0].id, 'ppt')
+  assert.deepEqual(getGeneratableCharacters(framework).map((item: any) => item.id), ['student', 'mascot'])
+})
+
+check('角色身份参考必须同时具备 IDENTITY 职责和精确角色绑定', () => {
+  assert.equal(referenceMayAffectCharacterIdentity({ role: 'IDENTITY', targetCharacterId: 'mascot' }, 'mascot'), true)
+  assert.equal(referenceMayAffectCharacterIdentity({ role: 'IDENTITY', targetCharacterId: 'mascot' }, 'student'), false)
+  assert.equal(referenceMayAffectCharacterIdentity({ role: 'STYLE', targetCharacterId: 'student' }, 'student'), false)
+  assert.equal(normalizeReferenceDuty('unknown'), 'UNASSIGNED')
+})
+
+check('无身份参考时提示词明确禁止从风格图复制人物或物种', () => {
+  const prompt = buildCharacterImagePrompt({
+    description: 'a male university student in a green hoodie',
+    stylePrompt: 'photographic room with a cel-shaded chibi subject',
+    entityType: 'HUMAN',
+    hasIdentityReferences: false,
+    hasStyleReference: false,
+  })
+  assert.match(prompt, /No identity reference is assigned/)
+  assert.match(prompt, /do not copy any person or mascot/)
+})
+
+check('吉祥物使用单主体约束而不是强制 single person', () => {
+  const prompt = buildCharacterImagePrompt({
+    description: 'the supplied blue mascot identity',
+    entityType: 'MASCOT',
+    hasIdentityReferences: true,
+    hasStyleReference: true,
+  })
+  assert.match(prompt, /single subject/)
+  assert.match(prompt, /authoritative over its nickname/)
+  assert.match(prompt, /do not literalize it/)
+  assert.doesNotMatch(prompt, /single person/)
 })
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败\n`)

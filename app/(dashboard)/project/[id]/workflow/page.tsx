@@ -644,6 +644,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         <ReferenceBar
           projectId={params.id}
           defaultExpanded={currentActive === 'IDEATION'}
+          characters={(project.framework?.characters || []).map((character: any) => ({ id: character.id, name: character.name }))}
         />
       )}
 
@@ -4506,6 +4507,13 @@ function PromptPreview({
         </span>
       </div>
 
+      {stepLabel === 'CHARACTER' && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900">
+          <p className="font-semibold">生成前角色与参考图审计</p>
+          <p className="mt-1 text-emerald-700">这里只列出需要跨镜保持身份一致的角色；PPT、字幕、屏幕内容和后期素材不会生成角色母版。身份参考只发送给绑定角色，未绑定角色将按文字新设计。</p>
+        </div>
+      )}
+
       {/* 比例 + 模型 下拉选择栏（风格统一步骤隐藏全局模型选择） */}
       {(onAspectRatioChange || onImageModelChange) && stepLabel !== 'STYLE' && (
         <div className="flex items-center gap-6 border-b border-stone-200 py-4">
@@ -4610,6 +4618,15 @@ function PromptPreview({
                 </span>
                 <span className="text-xs text-stone-400">{p.target || ''}</span>
               </div>
+
+              {stepLabel === 'CHARACTER' && (
+                <div className={`mb-3 rounded-md border px-2.5 py-2 text-[11px] ${Array.isArray((p as any).referenceAssignments) && (p as any).referenceAssignments.length > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-stone-200 bg-stone-50 text-stone-600'}`}>
+                  <div className="font-medium">{(p as any).characterName || p.target}</div>
+                  {Array.isArray((p as any).referenceAssignments) && (p as any).referenceAssignments.length > 0
+                    ? <div className="mt-1">身份参考：{(p as any).referenceAssignments.map((reference: any) => reference.title).join('、')}</div>
+                    : <div className="mt-1">没有身份参考：将按文字创建新形象，不会借用其他图片中的人物或吉祥物。</div>}
+                </div>
+              )}
 
               {/* 中文描述 — 可编辑 */}
               {editable ? (

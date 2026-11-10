@@ -40,12 +40,13 @@ async function generateStylePrompts(
     ? `【角色设定】\n${characters.map((c: any) => `- ${c.name}（${c.role}）：${c.description || ''}`).join('\n')}`
     : '【角色设定】无具体角色'
 
-  const refs = await getProjectReferences(project.id).catch(() => [])
+  const refs = (await getProjectReferences(project.id).catch(() => []))
+    .filter((reference) => ['STYLE', 'ENVIRONMENT', 'COMPOSITION'].includes(reference.role))
   const refLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
   const hasRefs = refs.length > 0
   const visualRefBlock = hasRefs
     ? `【用户上传了 ${refs.length} 张视觉参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}】\n` +
-      `请仔细分析这些参考图：如果图中包含角色/吉祥物/产品形象，在生成三种风格方案时，必须保留其核心视觉识别特征（颜色、体型、服装、头饰/发型、标志性配件），仅改变艺术媒介和渲染风格。三种风格方案应围绕同一组主体展开，方便用户对比不同风格下的同一角色/场景。`
+      `这些图片只负责画风、环境或构图。请提取艺术媒介、角色渲染方式、环境质感、色彩、光影与合成关系；严禁复制图中人物、吉祥物或产品的身份、脸、服装和物种。三种方案必须分别说明环境层、角色渲染层和合成层。`
     : '【无视觉参考图】请基于故事梗概、视觉关键词和角色设定生成三种风格方案。'
 
   const prompt = loadPromptTemplate('style-generation', {
@@ -83,6 +84,7 @@ async function generateStylePrompts(
       id: s.id || String(i + 1),
       styleName: s.styleName || s.label || `风格 ${i + 1}`,
       styleDescription: s.styleDescription || s.description || '',
+      styleLayers: s.styleLayers || undefined,
       prompt: s.prompt || s.stylePrompt || '',
       modelNo: s.modelNo,
     }))
@@ -420,12 +422,13 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const visualKeywords = framework?.visualStyle || framework?.styleGuide || framework?.visualKeywords || ''
     const mood = framework?.mood || framework?.atmosphere || ''
 
-    const refsCompat = await getProjectReferences(params.id).catch(() => [])
+    const refsCompat = (await getProjectReferences(params.id).catch(() => []))
+      .filter((reference) => ['STYLE', 'ENVIRONMENT', 'COMPOSITION'].includes(reference.role))
     const refLabelsCompat = refsCompat.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
     const hasRefsCompat = refsCompat.length > 0
     const visualRefBlockCompat = hasRefsCompat
       ? `【用户上传了 ${refsCompat.length} 张视觉参考图${refLabelsCompat.length > 0 ? `，标签：${refLabelsCompat.join('、')}` : ''}】\n` +
-        `请仔细分析这些参考图：如果图中包含角色/吉祥物/产品形象，在生成三种风格方案时，必须保留其核心视觉识别特征（颜色、体型、服装、头饰/发型、标志性配件），仅改变艺术媒介和渲染风格。`
+        `这些图片只负责画风、环境或构图。只提取艺术媒介、角色渲染方式、环境质感、色彩、光影与合成关系；严禁复制图中人物、吉祥物或产品身份。`
       : '【无视觉参考图】请基于故事梗概、视觉关键词和角色设定生成三种风格方案。'
 
     const charactersCompat = framework?.characters || []
@@ -469,6 +472,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         id: s.id || String(i + 1),
         styleName: s.styleName || s.label || `风格 ${i + 1}`,
         styleDescription: s.styleDescription || s.description || '',
+        styleLayers: s.styleLayers || undefined,
         prompt: s.prompt || s.stylePrompt || '',
       }))
     } else if (Array.isArray(parsed.styleOptions)) {

@@ -4,6 +4,7 @@ import { loadPromptTemplate, extractJsonFromMarkdown } from './prompts'
 import { PROJECT_TAG_PROMPTS } from './project-tags'
 import { getBusinessGoalPrompt } from './business-goals'
 import { finalizeCurrentSupplierOperation, withSupplierCallContext } from './supplier-observability'
+import { normalizeFrameworkEntities } from './character-generation-policy'
 
 function isPresentationTag(projectTag?: string): boolean {
   return projectTag === 'trailer' || projectTag === 'product'
@@ -96,6 +97,7 @@ export async function updateDeepeningStatus(stepId: string, framework: any, stat
 }
 
 export async function deepenCharacters(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
+  framework = normalizeFrameworkEntities(framework)
   const characters = framework.characters || []
   if (characters.length === 0) return framework
 

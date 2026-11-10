@@ -88,8 +88,11 @@ export async function getStyleRefUrl(projectId: string): Promise<StyleRef> {
     || outputData?.styleOptions?.[0]
   const styleName = selectedOption?.styleName || ''
   const styleDesc = selectedOption?.styleDescription || selectedOption?.chineseDesc || ''
+  const layers = selectedOption?.styleLayers && typeof selectedOption.styleLayers === 'object'
+    ? ` Environment: ${selectedOption.styleLayers.environment || ''}. Character rendering: ${selectedOption.styleLayers.characterRendering || ''}. Compositing: ${selectedOption.styleLayers.compositing || ''}.`
+    : ''
   const stylePrompt: string = styleName
-    ? `${styleName}: ${styleDesc.slice(0, 80)}`
+    ? `${styleName}: ${styleDesc.slice(0, 180)}.${layers}`
     : 'cinematic film still, 35mm Kodak Portra 400, 8k'
 
   console.log('[STYLE-REF] 最终 styleRefUrl:', styleRefUrl.slice(0, 80))
@@ -99,13 +102,17 @@ export async function getStyleRefUrl(projectId: string): Promise<StyleRef> {
 }
 
 export interface ProjectReference {
+  id: string
   url: string
   labels: string[]
+  role: 'IDENTITY' | 'STYLE' | 'ENVIRONMENT' | 'COMPOSITION' | 'ACTION' | 'PRODUCT' | 'UNASSIGNED'
+  targetCharacterId?: string
+  title?: string
 }
 
 export async function getProjectReferences(projectId: string): Promise<ProjectReference[]> {
   const refs = await prisma.asset.findMany({
-    where: { projectId, type: 'REFERENCE', stepId: null },
+    where: { projectId, type: 'REFERENCE', stepId: null, deletedAt: null },
     orderBy: { createdAt: 'desc' },
   })
   const results: ProjectReference[] = []
@@ -117,8 +124,14 @@ export async function getProjectReferences(projectId: string): Promise<ProjectRe
       if (dataUrl) url = dataUrl
     }
     results.push({
+      id: a.id,
       url,
       labels: Array.isArray((a.metadata as any)?.labels) ? (a.metadata as any).labels : [],
+      role: (['IDENTITY', 'STYLE', 'ENVIRONMENT', 'COMPOSITION', 'ACTION', 'PRODUCT'].includes(String((a.metadata as any)?.referenceRole || '').toUpperCase())
+        ? String((a.metadata as any)?.referenceRole).toUpperCase()
+        : 'UNASSIGNED') as ProjectReference['role'],
+      targetCharacterId: typeof (a.metadata as any)?.targetCharacterId === 'string' ? (a.metadata as any).targetCharacterId : undefined,
+      title: typeof (a.metadata as any)?.title === 'string' ? (a.metadata as any).title : undefined,
     })
   }
   console.log(`[GET-PROJECT-REFS] projectId=${projectId}, count=${results.length}, urls=${results.map(r => r.url?.slice(0, 40)).join('|')}`)
