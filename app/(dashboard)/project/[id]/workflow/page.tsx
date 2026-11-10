@@ -4937,7 +4937,10 @@ function CharacterPanel({
   setToast: (t: { kind: 'success' | 'error'; message: string } | null) => void
   readOnly?: boolean
 }) {
-  const assets = step.resultAssets || []
+  const promptCharacterIds = new Set((step.outputData?.prompts || []).map((prompt: any) => prompt.characterId).filter(Boolean))
+  const assets = (step.resultAssets || []).filter((asset: any) =>
+    promptCharacterIds.size === 0 || !asset.metadata?.characterId || promptCharacterIds.has(asset.metadata.characterId)
+  )
   const isExecuting = executing === step.stepType
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
