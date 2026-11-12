@@ -13,6 +13,7 @@ import { getStyleRefUrl, getProjectReferences } from '@/lib/style-ref'
 import { IMAGE_MODELS, getPromptLanguageInstruction, getModelPromptLanguage } from '@/lib/models-config'
 import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
+import { resolveVisualTextRoute, type ResolvedVisualTextRoute } from '@/lib/visual-text-routing-server'
 
 /**
  * 按目标模型语言校验 LLM 返回的概念图 imagePrompt；
@@ -39,6 +40,7 @@ async function generateConceptPrompts(
   stepId: string,
   imageModel?: string,
   textModel?: string,
+  routing?: ResolvedVisualTextRoute,
 ): Promise<{ prompts: any[]; totalScenes: number }> {
   const framework = (project.framework || frameworkStep.outputData) as any
   const acts = Array.isArray(framework?.acts) ? framework.acts : []
@@ -54,7 +56,7 @@ async function generateConceptPrompts(
     LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(imageModel || IMAGE_MODELS.primary),
   })
   const textClient = await getTextClient()
-  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: textModel })
+  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: routing?.model || textModel })
   const parsed = extractJsonFromMarkdown(resultText)
   const parsedScenes = parsed.scenes || []
 
@@ -89,6 +91,9 @@ async function generateConceptPrompts(
         ...(step?.outputData as any || {}),
         prompts,
         totalScenes: prompts.length,
+        textRoutingMode: routing?.mode,
+        textRoutingSnapshot: routing?.snapshot || undefined,
+        textModel: routing?.legacyModel || textModel,
       },
     },
   })
@@ -148,7 +153,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     try {
       console.log('[CONCEPT-PROMPT] 收到 generate-prompts 请求')
       const promptImageModel = body?.imageModel || (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
-      const { prompts } = await generateConceptPrompts(project, frameworkStep, step.id, promptImageModel, body.textModel)
+      const routing = await resolveVisualTextRoute(project, body, 'concept-prompt')
+      const { prompts } = await generateConceptPrompts(project, frameworkStep, step.id, promptImageModel, body.textModel, routing)
       await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
@@ -187,7 +193,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
       try {
-        const generated = await generateConceptPrompts(project, frameworkStep, step.id, imageModel, body.textModel)
+        const routing = await resolveVisualTextRoute(project, body, 'concept-prompt')
+        const generated = await generateConceptPrompts(project, frameworkStep, step.id, imageModel, body.textModel, routing)
         resolvedPrompts = generated.prompts
         console.log(`[CONCEPT-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
         await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
@@ -445,9 +452,19 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(IMAGE_MODELS.primary),
     })
     const textClient = await getTextClient()
-    const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+    const routingCompat = await resolveVisualTextRoute(project, body, 'concept-prompt')
+    const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: routingCompat.model })
     const parsed = extractJsonFromMarkdown(resultText)
     const parsedScenes = parsed.scenes || []
+    await prisma.workflowStep.update({
+      where: { id: step.id },
+      data: { outputData: {
+        ...((step.outputData as any) || {}),
+        textRoutingMode: routingCompat.mode,
+        textRoutingSnapshot: routingCompat.snapshot || undefined,
+        textModel: routingCompat.legacyModel,
+      } },
+    })
 
     // 2. 用图像 API 生成概念图
     const imageClient = await getImageClient()

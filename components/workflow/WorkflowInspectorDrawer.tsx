@@ -139,6 +139,15 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
       estimatedCostUsd: { min: number; max: number }
       priceSnapshotDate: string
     }>
+    visualRoutingProfiles?: Array<{
+      mode: Exclude<TextRoutingMode, 'custom'>
+      label: string
+      description: string
+      stages: Array<{ id: string; label: string; model: string }>
+      workloadLabel: string
+      estimatedCostUsd: { min: number; max: number }
+      priceSnapshotDate: string
+    }>
     catalogAvailable: boolean
     message?: string
   }>(
@@ -152,11 +161,13 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
     ? VIDEO_MODELS.direct.available
     : IMAGE_MODELS.available.filter((model) => !('disabled' in model && model.disabled))
   const selectedModel = draft.kind === 'text' ? normalizeTextModelId(draft.model) : draft.model
-  const usesRoleRouting = draft.kind === 'text' && ['IDEATION', 'FRAMEWORK'].includes(draft.stepType)
+  const usesRoleRouting = draft.kind === 'text' && ['IDEATION', 'FRAMEWORK', 'STYLE', 'CHARACTER', 'CONCEPT'].includes(draft.stepType)
   const selectedRoutingMode = draft.textRoutingMode || 'balanced'
   const routingProfiles = draft.stepType === 'FRAMEWORK'
     ? textModelCatalog?.frameworkRoutingProfiles
-    : textModelCatalog?.creativeRoutingProfiles
+    : ['STYLE', 'CHARACTER', 'CONCEPT'].includes(draft.stepType)
+      ? textModelCatalog?.visualRoutingProfiles
+      : textModelCatalog?.creativeRoutingProfiles
   const routingPreview = routingProfiles?.find((profile) => profile.mode === selectedRoutingMode)
 
   useEffect(() => setEditInstruction(draft.editInstruction || ''), [draft.editInstruction, draft.targetId])

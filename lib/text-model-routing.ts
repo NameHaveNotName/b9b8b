@@ -77,6 +77,23 @@ export interface FrameworkTextRoutingProfilePreview {
   priceSnapshotDate: string
 }
 
+export const VISUAL_TEXT_STAGE_IDS = ['style-prompt', 'character-prompt', 'concept-prompt'] as const
+export type VisualTextStageId = typeof VISUAL_TEXT_STAGE_IDS[number]
+
+export interface VisualTextRoutingSnapshot {
+  mode: Exclude<TextRoutingMode, 'custom'>
+  label: string
+  description: string
+  catalogCheckedAt: string
+  priceSnapshotDate: string
+  stages: Array<{ id: VisualTextStageId; label: string; model: string }>
+  estimatedCostUsd: { min: number; max: number }
+}
+
+export interface VisualTextRoutingProfilePreview extends Omit<VisualTextRoutingSnapshot, 'catalogCheckedAt'> {
+  workloadLabel: string
+}
+
 const LABELS: Record<CreativeTextStageId, string> = {
   'goal-contract': '理解目标',
   'strategy-map': '形成策略',
@@ -106,6 +123,18 @@ const FRAMEWORK_PROFILE_META: Record<Exclude<TextRoutingMode, 'custom'>, { label
   economy: { label: '省钱', description: '主力模型完成结构与深化，低成本模型只负责环境识别。' },
   balanced: { label: '平衡（推荐）', description: '主力模型维护故事结构，角色由更擅长文字表达的模型深化。' },
   quality: { label: '高质量', description: '关键结构、梗概和逐幕深化使用更强模型，规则提取仍控制成本。' },
+}
+
+const VISUAL_LABELS: Record<VisualTextStageId, string> = {
+  'style-prompt': '画风方案与提示词',
+  'character-prompt': '角色母版提示词',
+  'concept-prompt': '概念场景提示词',
+}
+
+const VISUAL_PROFILE_META: Record<Exclude<TextRoutingMode, 'custom'>, { label: string; description: string }> = {
+  economy: { label: '省钱', description: '主力模型完成三类专业提示词，避免为规则明确的转换任务使用旗舰模型。' },
+  balanced: { label: '平衡（推荐）', description: '画风与角色提示词使用专业主力模型，概念场景由导演型主力模型完成。' },
+  quality: { label: '高质量', description: '关键画风与概念场景使用更强模型，角色提示词仍由专业主力模型执行。' },
 }
 
 type CandidateTable = Record<CreativeTextStageId, readonly string[]>
@@ -168,6 +197,25 @@ const FRAMEWORK_ROUTES: Record<Exclude<TextRoutingMode, 'custom'>, FrameworkCand
   },
 }
 
+type VisualCandidateTable = Record<VisualTextStageId, readonly string[]>
+const VISUAL_ROUTES: Record<Exclude<TextRoutingMode, 'custom'>, VisualCandidateTable> = {
+  economy: {
+    'style-prompt': ['gpt-6.1-sol', 'gpt-4o', 'claude-sonnet-5-5'],
+    'character-prompt': ['gpt-6.1-sol', 'deepseek-v4.1-flash', 'deepseek-v3-1'],
+    'concept-prompt': ['gpt-6.1-sol', 'deepseek-v4-pro', 'gpt-4o'],
+  },
+  balanced: {
+    'style-prompt': ['claude-sonnet-5-5', 'gpt-6.1-sol', 'gpt-4o'],
+    'character-prompt': ['claude-sonnet-5-5', 'gpt-6.1-sol', 'deepseek-v4-pro'],
+    'concept-prompt': ['gpt-6.1-sol', 'claude-sonnet-5-5', 'gpt-4o'],
+  },
+  quality: {
+    'style-prompt': ['gpt-6-astra', 'claude-opus-5-5', 'claude-sonnet-5-5'],
+    'character-prompt': ['claude-sonnet-5-5', 'gpt-6.1-sol', 'claude-opus-5-5'],
+    'concept-prompt': ['gpt-6-astra', 'claude-opus-5-5', 'gpt-6.1-sol'],
+  },
+}
+
 // OpenLux public pricing snapshot, USD per one million input/output tokens.
 // It is deliberately dated and shown as an estimate; billing reconciliation must use provider usage.
 export const TEXT_PRICE_SNAPSHOT_DATE = '2026-10-30'
@@ -209,6 +257,12 @@ const FRAMEWORK_TOKEN_RANGES: Record<FrameworkTextStageId, { input: [number, num
   'framework-act': { input: [7000, 14000], output: [2000, 5000], multiplier: 3 },
   'framework-environment-extract': { input: [5000, 10000], output: [1000, 2500], multiplier: 1 },
   'framework-environment-deepen': { input: [5000, 10000], output: [1000, 3000], multiplier: 2 },
+}
+
+const VISUAL_TOKEN_RANGES: Record<VisualTextStageId, { input: [number, number]; output: [number, number] }> = {
+  'style-prompt': { input: [5000, 12000], output: [1200, 3500] },
+  'character-prompt': { input: [5000, 12000], output: [1200, 3500] },
+  'concept-prompt': { input: [6000, 14000], output: [1500, 4000] },
 }
 
 function chooseAvailable(candidates: readonly string[], available: Set<string>): string | null {
@@ -348,6 +402,62 @@ export function buildFrameworkTextRoutingPreviews(availableModelIds: string[]): 
 export function modelForFrameworkStage(
   snapshot: FrameworkTextRoutingSnapshot | null | undefined,
   stageId: FrameworkTextStageId,
+  legacyModel: string,
+): string {
+  return snapshot?.stages.find((stage) => stage.id === stageId)?.model || legacyModel
+}
+
+export function buildVisualTextRoutingSnapshot(
+  mode: Exclude<TextRoutingMode, 'custom'>,
+  availableModelIds: string[],
+  now = new Date(),
+): VisualTextRoutingSnapshot {
+  const available = new Set(availableModelIds)
+  const stages = VISUAL_TEXT_STAGE_IDS.map((id) => {
+    const model = chooseAvailable(VISUAL_ROUTES[mode][id], available)
+    if (!model) throw new Error(`VISUAL_TEXT_ROUTING_MODEL_UNAVAILABLE:${mode}:${id}`)
+    return { id, label: VISUAL_LABELS[id], model }
+  })
+  let min = 0
+  let max = 0
+  for (const stage of stages) {
+    const cost = estimateCall(stage.model, VISUAL_TOKEN_RANGES[stage.id])
+    if (!cost) throw new Error(`TEXT_ROUTING_PRICE_UNAVAILABLE:${stage.model}`)
+    min += cost.min
+    max += cost.max
+  }
+  return {
+    mode,
+    ...VISUAL_PROFILE_META[mode],
+    catalogCheckedAt: now.toISOString(),
+    priceSnapshotDate: TEXT_PRICE_SNAPSHOT_DATE,
+    stages,
+    estimatedCostUsd: { min: roundUsd(min), max: roundUsd(max) },
+  }
+}
+
+export function buildVisualTextRoutingPreviews(availableModelIds: string[]): VisualTextRoutingProfilePreview[] {
+  return (['economy', 'balanced', 'quality'] as const).flatMap((mode) => {
+    try {
+      const snapshot = buildVisualTextRoutingSnapshot(mode, availableModelIds)
+      return [{
+        mode: snapshot.mode,
+        label: snapshot.label,
+        description: snapshot.description,
+        stages: snapshot.stages,
+        estimatedCostUsd: snapshot.estimatedCostUsd,
+        priceSnapshotDate: snapshot.priceSnapshotDate,
+        workloadLabel: '画风、角色、概念场景各 1 次文字调用，共 3 次',
+      }]
+    } catch {
+      return []
+    }
+  })
+}
+
+export function modelForVisualStage(
+  snapshot: VisualTextRoutingSnapshot | null | undefined,
+  stageId: VisualTextStageId,
   legacyModel: string,
 ): string {
   return snapshot?.stages.find((stage) => stage.id === stageId)?.model || legacyModel

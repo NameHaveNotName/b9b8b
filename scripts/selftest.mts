@@ -36,8 +36,11 @@ import {
   buildCreativeTextRoutingPreviews,
   buildFrameworkTextRoutingSnapshot,
   buildFrameworkTextRoutingPreviews,
+  buildVisualTextRoutingSnapshot,
+  buildVisualTextRoutingPreviews,
   modelForCreativeStage,
   modelForFrameworkStage,
+  modelForVisualStage,
   normalizeTextRoutingMode,
 } from '../lib/text-model-routing.ts'
 import { extractAssistantOutput } from '../lib/supplier-output.ts'
@@ -1658,6 +1661,27 @@ check('框架三档费用按固定工作量口径可比较且旧任务保持单�
   assert.ok(previews.every(item => item.workloadLabel.includes('2 个角色')))
   assert.ok(previews[2].estimatedCostUsd.max >= previews[0].estimatedCostUsd.max)
   assert.equal(modelForFrameworkStage(null, 'framework-synopsis', 'deepseek-v3-1'), 'deepseek-v3-1')
+})
+
+check('视觉开发提示词按画风、角色和概念场景岗位分工', () => {
+  const snapshot = buildVisualTextRoutingSnapshot('balanced', [
+    'gpt-6.1-sol', 'claude-sonnet-5-5', 'gpt-6-astra',
+  ], new Date('2026-11-13T00:00:00.000Z'))
+  assert.equal(snapshot.stages.length, 3)
+  assert.equal(modelForVisualStage(snapshot, 'style-prompt', 'auto'), 'claude-sonnet-5-5')
+  assert.equal(modelForVisualStage(snapshot, 'character-prompt', 'auto'), 'claude-sonnet-5-5')
+  assert.equal(modelForVisualStage(snapshot, 'concept-prompt', 'auto'), 'gpt-6.1-sol')
+  assert.equal(snapshot.catalogCheckedAt, '2026-11-13T00:00:00.000Z')
+})
+
+check('视觉开发三档费用可比较且旧步骤保持单模型', () => {
+  const previews = buildVisualTextRoutingPreviews([
+    'gpt-6.1-sol', 'gpt-6-astra', 'claude-sonnet-5-5', 'claude-opus-5-5',
+  ])
+  assert.deepEqual(previews.map(item => item.mode), ['economy', 'balanced', 'quality'])
+  assert.ok(previews.every(item => item.workloadLabel.includes('3 次')))
+  assert.ok(previews[2].estimatedCostUsd.max >= previews[0].estimatedCostUsd.max)
+  assert.equal(modelForVisualStage(null, 'style-prompt', 'deepseek-v3-1'), 'deepseek-v3-1')
 })
 
 check('供应商文字输出只提取助手正文并限制记录长度', () => {

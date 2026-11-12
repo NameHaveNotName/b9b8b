@@ -17,6 +17,7 @@ import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { logOperation } from '@/lib/operations'
 import { getCurrentOperationId } from '@/lib/supplier-observability'
 import { getStylePoolPromptLanguageInstruction } from '@/lib/models-config'
+import { resolveVisualTextRoute, type ResolvedVisualTextRoute } from '@/lib/visual-text-routing-server'
 
 const styleQueue = createQueue('style-generation')
 
@@ -30,6 +31,7 @@ async function generateStylePrompts(
   stepId: string,
   aspectRatio: string = '16:9',
   textModel?: string,
+  routing?: ResolvedVisualTextRoute,
 ): Promise<{ prompts: any[]; styleOptions: any[] }> {
   const framework = project.framework || (frameworkStep.outputData as any)
   const storyBrief = framework?.synopsis || framework?.storyBrief || ''
@@ -66,13 +68,14 @@ async function generateStylePrompts(
     console.log(`[STYLE-PROMPT-VISION] 使用多模态生成风格提示词，参考图 ${refUrls.length} 张，比例 ${aspectRatio}`)
     resultText = await textClient.generateVision({
       prompt,
+      model: routing?.model || textModel,
       imageUrls: refUrls,
       imageLabels: refLabels,
       temperature: 0.7,
       maxTokens: 4096,
     })
   } else {
-    resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: textModel })
+    resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: routing?.model || textModel })
   }
   const parsed = extractJsonFromMarkdown(resultText)
 
@@ -124,6 +127,9 @@ async function generateStylePrompts(
         styleRefUrl: null,
         generatedCount: 0,
         aspectRatio,
+        textRoutingMode: routing?.mode,
+        textRoutingSnapshot: routing?.snapshot || undefined,
+        textModel: routing?.legacyModel || textModel,
       },
     },
   })
@@ -180,7 +186,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     try {
       console.log('[STYLE-PROMPT] 收到 generate-prompts 请求')
       const aspectRatio = body?.aspectRatio || '16:9'
-      const { prompts } = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio, body.textModel)
+      const routing = await resolveVisualTextRoute(project, body, 'style-prompt')
+      const { prompts } = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio, body.textModel, routing)
       await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       return NextResponse.json({
         success: true,
@@ -224,7 +231,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
       try {
-        const generated = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio, body.textModel)
+        const routing = await resolveVisualTextRoute(project, body, 'style-prompt')
+        const generated = await generateStylePrompts(project, frameworkStep, step.id, aspectRatio, body.textModel, routing)
         resolvedPrompts = generated.prompts
         resolvedStyleOptions = generated.styleOptions
         console.log(`[STYLE-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
@@ -447,19 +455,21 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       LANGUAGE_INSTRUCTION: getStylePoolPromptLanguageInstruction(),
     })
     const textClient = await getTextClient()
+    const routingCompat = await resolveVisualTextRoute(project, body, 'style-prompt')
     let resultText: string
     if (hasRefsCompat) {
       const refUrlsCompat = refsCompat.filter(r => r.url).map(r => r.url)
       console.log(`[STYLE-PROMPT-VISION] 使用多模态生成风格提示词，参考图 ${refUrlsCompat.length} 张，比例 ${aspectRatioCompat}`)
       resultText = await textClient.generateVision({
         prompt,
+        model: routingCompat.model,
         imageUrls: refUrlsCompat,
         imageLabels: refLabelsCompat,
         temperature: 0.7,
         maxTokens: 4096,
       })
     } else {
-      resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+      resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: routingCompat.model })
     }
     const parsed = extractJsonFromMarkdown(resultText)
 
@@ -495,10 +505,13 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       selectedStyleId: null,
       styleRefUrl: null,
       generatedCount: 0,
+      textRoutingMode: routingCompat.mode,
+      textRoutingSnapshot: routingCompat.snapshot || undefined,
+      textModel: routingCompat.legacyModel,
     }
     await prisma.workflowStep.update({
       where: { id: step.id },
-      data: { outputData },
+      data: { outputData: outputData as any },
     })
 
     // 3. 任务派发：默认走 after() 后台处理（保证无 Redis/无独立 Worker 也能完成）。

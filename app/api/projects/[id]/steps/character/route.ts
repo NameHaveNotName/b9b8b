@@ -16,6 +16,7 @@ import { checkPoints, deductPointsAndLog, refundPointsAndLog } from '@/lib/point
 import { GENERATION_COSTS, calculateBatchCost } from '@/lib/points-config'
 import { getBoundReferences } from '@/lib/asset-bindings'
 import { buildVisualStyleLayers, getGeneratableCharacters } from '@/lib/character-generation-policy'
+import { resolveVisualTextRoute, type ResolvedVisualTextRoute } from '@/lib/visual-text-routing-server'
 
 /**
  * 把 LLM 返回的角色 imagePrompt 组装为 prompts 条目。
@@ -64,6 +65,7 @@ async function generateCharacterPrompts(
   stepId: string,
   imageModel?: string,
   textModel?: string,
+  routing?: ResolvedVisualTextRoute,
 ): Promise<{ prompts: any[]; characterCount: number }> {
   const framework = (project.framework || frameworkStep.outputData) as any
   const characters = getGeneratableCharacters(framework, 5)
@@ -91,7 +93,7 @@ async function generateCharacterPrompts(
     LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(imageModel || IMAGE_MODELS.primary),
   })
   const textClient = await getTextClient()
-  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: textModel })
+  const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: routing?.model || textModel })
   const parsed = extractJsonFromMarkdown(resultText)
   const parsedChars = parsed.characters || []
 
@@ -106,6 +108,9 @@ async function generateCharacterPrompts(
         ...(step?.outputData as any || {}),
         prompts,
         characterCount: characters.length,
+        textRoutingMode: routing?.mode,
+        textRoutingSnapshot: routing?.snapshot || undefined,
+        textModel: routing?.legacyModel || textModel,
       },
     },
   })
@@ -162,7 +167,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     try {
       console.log('[CHARACTER-PROMPT] 收到 generate-prompts 请求')
       const promptImageModel = body?.imageModel || (step.outputData as any)?.imageModel || IMAGE_MODELS.primary
-      const { prompts } = await generateCharacterPrompts(project, frameworkStep, step.id, promptImageModel, body.textModel)
+      const routing = await resolveVisualTextRoute(project, body, 'character-prompt')
+      const { prompts } = await generateCharacterPrompts(project, frameworkStep, step.id, promptImageModel, body.textModel, routing)
       await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       return NextResponse.json({ success: true, status: 'PROMPT_READY', prompts })
     } catch (e: any) {
@@ -202,7 +208,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
         return NextResponse.json({ error: 'POINTS_001', message: '点数不足，请联系管理员充值' }, { status: 403 })
       }
       try {
-        const generated = await generateCharacterPrompts(project, frameworkStep, step.id, imageModel, body.textModel)
+        const routing = await resolveVisualTextRoute(project, body, 'character-prompt')
+        const generated = await generateCharacterPrompts(project, frameworkStep, step.id, imageModel, body.textModel, routing)
         resolvedPrompts = generated.prompts
         console.log(`[CHARACTER-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
         await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
@@ -336,7 +343,8 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
           LANGUAGE_INSTRUCTION: getPromptLanguageInstruction(promptImageModel),
         })
         const textClient = await getTextClient()
-        const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096 })
+        const routingCompat = await resolveVisualTextRoute(project, body, 'character-prompt')
+        const resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: routingCompat.model })
         const parsed = extractJsonFromMarkdown(resultText)
         const parsedChars = parsed.characters || []
 
@@ -349,6 +357,9 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
               ...(step.outputData as any || {}),
               prompts,
               characterCount: characters.length,
+              textRoutingMode: routingCompat.mode,
+              textRoutingSnapshot: routingCompat.snapshot || undefined,
+              textModel: routingCompat.legacyModel,
             },
           },
         })
