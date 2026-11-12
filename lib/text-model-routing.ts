@@ -40,6 +40,43 @@ export interface CreativeTextRoutingProfilePreview {
   priceSnapshotDate: string
 }
 
+export const FRAMEWORK_TEXT_STAGE_IDS = [
+  'framework-base',
+  'framework-character',
+  'framework-synopsis',
+  'framework-act',
+  'framework-environment-extract',
+  'framework-environment-deepen',
+] as const
+export type FrameworkTextStageId = typeof FRAMEWORK_TEXT_STAGE_IDS[number]
+
+export interface FrameworkTextRouteStage {
+  id: FrameworkTextStageId
+  label: string
+  model: string
+}
+
+export interface FrameworkTextRoutingSnapshot {
+  mode: Exclude<TextRoutingMode, 'custom'>
+  label: string
+  description: string
+  catalogCheckedAt: string
+  priceSnapshotDate: string
+  stages: FrameworkTextRouteStage[]
+  workloadAssumption: { characters: 2; acts: 3; environments: 2; totalCalls: 10 }
+  estimatedCostUsd: { min: number; max: number }
+}
+
+export interface FrameworkTextRoutingProfilePreview {
+  mode: Exclude<TextRoutingMode, 'custom'>
+  label: string
+  description: string
+  stages: FrameworkTextRouteStage[]
+  workloadLabel: string
+  estimatedCostUsd: { min: number; max: number }
+  priceSnapshotDate: string
+}
+
 const LABELS: Record<CreativeTextStageId, string> = {
   'goal-contract': '理解目标',
   'strategy-map': '形成策略',
@@ -54,6 +91,21 @@ const PROFILE_META: Record<Exclude<TextRoutingMode, 'custom'>, { label: string; 
   economy: { label: '省钱', description: '保留十个固定 Agent 调用，使用低成本模型完成规则化任务和日常创作。' },
   balanced: { label: '平衡（推荐）', description: '三路创意使用不同模型，强模型只承担一次关键评审。' },
   quality: { label: '高质量', description: '策略、三路创意、评审与归纳均优先使用高能力异构模型。' },
+}
+
+const FRAMEWORK_LABELS: Record<FrameworkTextStageId, string> = {
+  'framework-base': '基础故事框架',
+  'framework-character': '角色深化',
+  'framework-synopsis': '故事梗概深化',
+  'framework-act': '逐幕深化',
+  'framework-environment-extract': '识别主要环境',
+  'framework-environment-deepen': '环境深化',
+}
+
+const FRAMEWORK_PROFILE_META: Record<Exclude<TextRoutingMode, 'custom'>, { label: string; description: string }> = {
+  economy: { label: '省钱', description: '主力模型完成结构与深化，低成本模型只负责环境识别。' },
+  balanced: { label: '平衡（推荐）', description: '主力模型维护故事结构，角色由更擅长文字表达的模型深化。' },
+  quality: { label: '高质量', description: '关键结构、梗概和逐幕深化使用更强模型，规则提取仍控制成本。' },
 }
 
 type CandidateTable = Record<CreativeTextStageId, readonly string[]>
@@ -88,6 +140,34 @@ const ROUTES: Record<Exclude<TextRoutingMode, 'custom'>, CandidateTable> = {
   },
 }
 
+type FrameworkCandidateTable = Record<FrameworkTextStageId, readonly string[]>
+const FRAMEWORK_ROUTES: Record<Exclude<TextRoutingMode, 'custom'>, FrameworkCandidateTable> = {
+  economy: {
+    'framework-base': ['gpt-6.1-sol', 'gpt-4o', 'claude-sonnet-5-5'],
+    'framework-character': ['gpt-6.1-sol', 'deepseek-v4.1-flash', 'deepseek-v3-1'],
+    'framework-synopsis': ['gpt-6.1-sol', 'deepseek-v4.1-flash', 'deepseek-v3-1'],
+    'framework-act': ['gpt-6.1-sol', 'deepseek-v4-pro', 'deepseek-v3-1'],
+    'framework-environment-extract': ['gpt-6-luna', 'claude-haiku-5-5', 'deepseek-v4.1-flash'],
+    'framework-environment-deepen': ['gpt-6.1-sol', 'deepseek-v4.1-flash', 'deepseek-v3-1'],
+  },
+  balanced: {
+    'framework-base': ['gpt-6.1-sol', 'gpt-6-astra', 'claude-sonnet-5-5'],
+    'framework-character': ['claude-sonnet-5-5', 'gpt-6.1-sol', 'deepseek-v4-pro'],
+    'framework-synopsis': ['gpt-6.1-sol', 'claude-sonnet-5-5', 'deepseek-v4-pro'],
+    'framework-act': ['gpt-6.1-sol', 'gpt-6-astra', 'claude-opus-5-5'],
+    'framework-environment-extract': ['gpt-6-luna', 'claude-haiku-5-5', 'deepseek-v4.1-flash'],
+    'framework-environment-deepen': ['gpt-6.1-sol', 'claude-sonnet-5-5', 'deepseek-v4-pro'],
+  },
+  quality: {
+    'framework-base': ['gpt-6-astra', 'claude-opus-5-5', 'gpt-6.1-sol'],
+    'framework-character': ['claude-sonnet-5-5', 'claude-opus-5-5', 'gpt-6.1-sol'],
+    'framework-synopsis': ['claude-opus-5-5', 'gpt-6-astra', 'gpt-6.1-sol'],
+    'framework-act': ['gpt-6-astra', 'claude-opus-5-5', 'gpt-6.1-sol'],
+    'framework-environment-extract': ['gpt-6.1-sol', 'gpt-6-luna', 'claude-haiku-5-5'],
+    'framework-environment-deepen': ['claude-sonnet-5-5', 'gpt-6.1-sol', 'deepseek-v4-pro'],
+  },
+}
+
 // OpenLux public pricing snapshot, USD per one million input/output tokens.
 // It is deliberately dated and shown as an estimate; billing reconciliation must use provider usage.
 export const TEXT_PRICE_SNAPSHOT_DATE = '2026-10-30'
@@ -95,6 +175,7 @@ const PRICE_PER_MILLION_USD: Record<string, { input: number; output: number }> =
   'gpt-6-luna': { input: 0.0059, output: 0.0294 },
   'gpt-6.1-sol': { input: 0.0735, output: 0.3677 },
   'gpt-6-astra': { input: 0.3677, output: 1.838 },
+  'gpt-4o': { input: 0.11, output: 0.44 },
   'claude-haiku-5-5': { input: 0.0088, output: 0.0441 },
   'claude-sonnet-5-5': { input: 0.1765, output: 0.8824 },
   'claude-opus-5-5': { input: 0.353, output: 1.765 },
@@ -119,6 +200,15 @@ const TOKEN_RANGES: Record<CreativeTextStageId | 'research', { input: [number, n
   'concept-audiovisual-production': { input: [7000, 13000], output: [1000, 2500] },
   critique: { input: [8000, 14000], output: [1000, 3000] },
   'creative-plan': { input: [10000, 16000], output: [1500, 4000] },
+}
+
+const FRAMEWORK_TOKEN_RANGES: Record<FrameworkTextStageId, { input: [number, number]; output: [number, number]; multiplier: number }> = {
+  'framework-base': { input: [12000, 25000], output: [3000, 8000], multiplier: 1 },
+  'framework-character': { input: [3000, 8000], output: [1000, 3000], multiplier: 2 },
+  'framework-synopsis': { input: [6000, 12000], output: [2000, 5000], multiplier: 1 },
+  'framework-act': { input: [7000, 14000], output: [2000, 5000], multiplier: 3 },
+  'framework-environment-extract': { input: [5000, 10000], output: [1000, 2500], multiplier: 1 },
+  'framework-environment-deepen': { input: [5000, 10000], output: [1000, 3000], multiplier: 2 },
 }
 
 function chooseAvailable(candidates: readonly string[], available: Set<string>): string | null {
@@ -203,4 +293,62 @@ export function modelForCreativeStage(
 ): string {
   if (!snapshot || !stageId) return legacyModel
   return snapshot.stages.find((stage) => stage.id === stageId)?.model || legacyModel
+}
+
+export function buildFrameworkTextRoutingSnapshot(
+  mode: Exclude<TextRoutingMode, 'custom'>,
+  availableModelIds: string[],
+  now = new Date(),
+): FrameworkTextRoutingSnapshot {
+  const available = new Set(availableModelIds)
+  const stages = FRAMEWORK_TEXT_STAGE_IDS.map((id) => {
+    const model = chooseAvailable(FRAMEWORK_ROUTES[mode][id], available)
+    if (!model) throw new Error(`FRAMEWORK_TEXT_ROUTING_MODEL_UNAVAILABLE:${mode}:${id}`)
+    return { id, label: FRAMEWORK_LABELS[id], model }
+  })
+  let min = 0
+  let max = 0
+  for (const stage of stages) {
+    const range = FRAMEWORK_TOKEN_RANGES[stage.id]
+    const cost = estimateCall(stage.model, range)
+    if (!cost) throw new Error(`TEXT_ROUTING_PRICE_UNAVAILABLE:${stage.model}`)
+    min += cost.min * range.multiplier
+    max += cost.max * range.multiplier
+  }
+  return {
+    mode,
+    ...FRAMEWORK_PROFILE_META[mode],
+    catalogCheckedAt: now.toISOString(),
+    priceSnapshotDate: TEXT_PRICE_SNAPSHOT_DATE,
+    stages,
+    workloadAssumption: { characters: 2, acts: 3, environments: 2, totalCalls: 10 },
+    estimatedCostUsd: { min: roundUsd(min), max: roundUsd(max) },
+  }
+}
+
+export function buildFrameworkTextRoutingPreviews(availableModelIds: string[]): FrameworkTextRoutingProfilePreview[] {
+  return (['economy', 'balanced', 'quality'] as const).flatMap((mode) => {
+    try {
+      const snapshot = buildFrameworkTextRoutingSnapshot(mode, availableModelIds)
+      return [{
+        mode,
+        label: snapshot.label,
+        description: snapshot.description,
+        stages: snapshot.stages,
+        workloadLabel: '按 2 个角色、3 幕、2 个主要环境估算，共约 10 次文字调用',
+        estimatedCostUsd: snapshot.estimatedCostUsd,
+        priceSnapshotDate: snapshot.priceSnapshotDate,
+      }]
+    } catch {
+      return []
+    }
+  })
+}
+
+export function modelForFrameworkStage(
+  snapshot: FrameworkTextRoutingSnapshot | null | undefined,
+  stageId: FrameworkTextStageId,
+  legacyModel: string,
+): string {
+  return snapshot?.stages.find((stage) => stage.id === stageId)?.model || legacyModel
 }

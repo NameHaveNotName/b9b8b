@@ -16,6 +16,13 @@ import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 import { getStepAssetConstraints } from '@/lib/asset-constraints'
 import { normalizeFrameworkEntities } from '@/lib/character-generation-policy'
+import { getAvailableOpenLuxModelIds } from '@/lib/api-clients/openlux'
+import { withSupplierCallContext } from '@/lib/supplier-observability'
+import {
+  buildFrameworkTextRoutingSnapshot,
+  modelForFrameworkStage,
+  normalizeTextRoutingMode,
+} from '@/lib/text-model-routing'
 
 const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: string; shots: string; desc: string }> = {
   sketch: { label: '速写', range: '1-3分钟', acts: '1-2幕', shots: '10-20镜', desc: '极快节奏，单一场景/单一冲突' },
@@ -195,6 +202,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
       )
     }
+    const textRoutingMode = normalizeTextRoutingMode(
+      body.textRoutingMode || ideationOutput.textRoutingMode || ideationOutput.agentPipeline?.textRoutingMode,
+    )
+    const legacyTextModel = body.textModel || ideationOutput.agentPipeline?.textModel || 'auto'
+    const textRoutingSnapshot = textRoutingMode === 'custom'
+      ? null
+      : buildFrameworkTextRoutingSnapshot(textRoutingMode, await getAvailableOpenLuxModelIds())
+    const baseFrameworkModel = modelForFrameworkStage(textRoutingSnapshot, 'framework-base', legacyTextModel)
     // 优先使用 CreativeIteration 中当前版本的创意内容
   const currentIteration = await prisma.creativeIteration.findFirst({
     where: { projectId: params.id, isCurrent: true },
@@ -238,15 +253,22 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       const refUrls = effectiveReferences.map(r => r.url)
       const refLabels = effectiveReferences.map((reference) => `${reference.role}:${reference.labels.join('、') || reference.title || '未命名'}`)
       console.log(`[FRAMEWORK-VISION] Using multimodal with ${refUrls.length} reference images`)
-      fullText = await textClient.generateVision({
-        prompt,
-        imageUrls: refUrls,
-        imageLabels: refLabels,
-        temperature: 0.8,
-        maxTokens: 16000,
-      })
+      fullText = await withSupplierCallContext(
+        { stageId: 'framework-base', stageLabel: '基础故事框架' },
+        () => textClient.generateVision({
+          prompt,
+          model: baseFrameworkModel,
+          imageUrls: refUrls,
+          imageLabels: refLabels,
+          temperature: 0.8,
+          maxTokens: 16000,
+        }),
+      )
     } else {
-      fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000, model: body.textModel })
+      fullText = await withSupplierCallContext(
+        { stageId: 'framework-base', stageLabel: '基础故事框架' },
+        () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000, model: baseFrameworkModel }),
+      )
     }
 
     const parsed = extractJsonFromMarkdown(fullText)
@@ -282,6 +304,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       productionElements: Array.isArray(fw.productionElements) ? fw.productionElements : [],
       referenceNeedsConfirmation: Array.isArray(fw.referenceNeedsConfirmation) ? fw.referenceNeedsConfirmation : [],
       assetConstraints: assetConstraints.snapshots,
+      textRoutingMode,
+      textRoutingSnapshot: textRoutingSnapshot || undefined,
+      textModel: legacyTextModel,
       // 基础框架返回后还会自动完成角色、梗概、幕结构与环境深化。
       // 先写入 queued，副工作台便能把两段工作展示为同一条连续任务。
       deepening: {
@@ -307,7 +332,10 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     waitUntil(
       (async () => {
         try {
-          await runDeepening(params.id, step.id, framework, projectTag, businessGoal)
+          await runDeepening(params.id, step.id, framework, projectTag, businessGoal, {
+            snapshot: textRoutingSnapshot,
+            legacyModel: legacyTextModel,
+          })
         } catch (e: any) {
           console.error('[FRAMEWORK] 后台深化失败:', e.message)
         }

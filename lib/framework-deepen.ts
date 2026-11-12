@@ -5,6 +5,20 @@ import { PROJECT_TAG_PROMPTS } from './project-tags'
 import { getBusinessGoalPrompt } from './business-goals'
 import { finalizeCurrentSupplierOperation, withSupplierCallContext } from './supplier-observability'
 import { normalizeFrameworkEntities } from './character-generation-policy'
+import {
+  modelForFrameworkStage,
+  type FrameworkTextRoutingSnapshot,
+  type FrameworkTextStageId,
+} from './text-model-routing'
+
+export interface FrameworkDeepeningRouting {
+  snapshot?: FrameworkTextRoutingSnapshot | null
+  legacyModel?: string
+}
+
+function deepeningModel(routing: FrameworkDeepeningRouting | undefined, stage: FrameworkTextStageId): string {
+  return modelForFrameworkStage(routing?.snapshot, stage, routing?.legacyModel || 'auto')
+}
 
 function isPresentationTag(projectTag?: string): boolean {
   return projectTag === 'trailer' || projectTag === 'product'
@@ -96,7 +110,7 @@ export async function updateDeepeningStatus(stepId: string, framework: any, stat
   return nextFramework
 }
 
-export async function deepenCharacters(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
+export async function deepenCharacters(framework: any, stepId: string, projectTag?: string, businessGoal?: string, routing?: FrameworkDeepeningRouting) {
   framework = normalizeFrameworkEntities(framework)
   const characters = framework.characters || []
   if (characters.length === 0) return framework
@@ -126,7 +140,7 @@ export async function deepenCharacters(framework: any, stepId: string, projectTa
 
       const resultText = await withSupplierCallContext(
         { stageId: `framework-character-${i + 1}`, stageLabel: `深化角色 · ${char.name || `角色 ${i + 1}`}` },
-        () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 4096 }),
+        () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 4096, model: deepeningModel(routing, 'framework-character') }),
       )
       const parsed = extractJsonFromMarkdown(resultText)
 
@@ -177,7 +191,7 @@ export async function deepenCharacters(framework: any, stepId: string, projectTa
   return framework
 }
 
-export async function deepenSynopsis(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
+export async function deepenSynopsis(framework: any, stepId: string, projectTag?: string, businessGoal?: string, routing?: FrameworkDeepeningRouting) {
   framework = await updateDeepeningStatus(stepId, framework, 'deepening_synopsis', {
     current: 1,
     total: 1,
@@ -197,7 +211,7 @@ export async function deepenSynopsis(framework: any, stepId: string, projectTag?
 
     const resultText = await withSupplierCallContext(
       { stageId: 'framework-synopsis', stageLabel: '深化故事梗概' },
-      () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 }),
+      () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000, model: deepeningModel(routing, 'framework-synopsis') }),
     )
     const deepenedSynopsis = resultText.trim()
 
@@ -214,7 +228,7 @@ export async function deepenSynopsis(framework: any, stepId: string, projectTag?
   return framework
 }
 
-export async function deepenActs(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
+export async function deepenActs(framework: any, stepId: string, projectTag?: string, businessGoal?: string, routing?: FrameworkDeepeningRouting) {
   const acts = framework.acts || []
   if (acts.length === 0) return framework
 
@@ -246,7 +260,7 @@ export async function deepenActs(framework: any, stepId: string, projectTag?: st
 
       const resultText = await withSupplierCallContext(
         { stageId: `framework-act-${i + 1}`, stageLabel: `深化幕结构 · 第 ${act.actNo || i + 1} 幕${act.title ? `《${act.title}》` : ''}` },
-        () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000 }),
+        () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 6000, model: deepeningModel(routing, 'framework-act') }),
       )
       const deepenedContent = resultText.trim()
 
@@ -273,7 +287,7 @@ export async function deepenActs(framework: any, stepId: string, projectTag?: st
   return framework
 }
 
-export async function extractAndDeepenEnvironments(framework: any, stepId: string, projectTag?: string, businessGoal?: string) {
+export async function extractAndDeepenEnvironments(framework: any, stepId: string, projectTag?: string, businessGoal?: string, routing?: FrameworkDeepeningRouting) {
   framework = await updateDeepeningStatus(stepId, framework, 'extracting_environments', {
     current: 1,
     total: 1,
@@ -297,7 +311,7 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
 
     const extractResult = await withSupplierCallContext(
       { stageId: 'framework-environment-extract', stageLabel: '识别主要环境' },
-      () => textClient.generate(extractPrompt, { temperature: 0.7, maxTokens: 4096 }),
+      () => textClient.generate(extractPrompt, { temperature: 0.7, maxTokens: 4096, model: deepeningModel(routing, 'framework-environment-extract') }),
     )
     const parsed = extractJsonFromMarkdown(extractResult)
     const envList = parsed.environments || []
@@ -338,7 +352,7 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
 
         const deepenResult = await withSupplierCallContext(
           { stageId: `framework-environment-${i + 1}`, stageLabel: `深化环境 · ${env.name || `环境 ${i + 1}`}` },
-          () => textClient.generate(deepenPrompt, { temperature: 0.8, maxTokens: 4096 }),
+          () => textClient.generate(deepenPrompt, { temperature: 0.8, maxTokens: 4096, model: deepeningModel(routing, 'framework-environment-deepen') }),
         )
         const envParsed = extractJsonFromMarkdown(deepenResult)
 
@@ -374,15 +388,15 @@ export async function extractAndDeepenEnvironments(framework: any, stepId: strin
   return framework
 }
 
-export async function runDeepening(projectId: string, stepId: string, initialFramework: any, projectTag?: string, businessGoal?: string) {
+export async function runDeepening(projectId: string, stepId: string, initialFramework: any, projectTag?: string, businessGoal?: string, routing?: FrameworkDeepeningRouting) {
   console.log('[DEEPEN] 开始自动深化流程', projectTag ? `tag=${projectTag}` : '')
   let framework = initialFramework
 
   try {
-    framework = await deepenCharacters(framework, stepId, projectTag, businessGoal)
-    framework = await deepenSynopsis(framework, stepId, projectTag, businessGoal)
-    framework = await deepenActs(framework, stepId, projectTag, businessGoal)
-    framework = await extractAndDeepenEnvironments(framework, stepId, projectTag, businessGoal)
+    framework = await deepenCharacters(framework, stepId, projectTag, businessGoal, routing)
+    framework = await deepenSynopsis(framework, stepId, projectTag, businessGoal, routing)
+    framework = await deepenActs(framework, stepId, projectTag, businessGoal, routing)
+    framework = await extractAndDeepenEnvironments(framework, stepId, projectTag, businessGoal, routing)
 
     framework = await updateDeepeningStatus(stepId, framework, 'completed', {
       current: 1,

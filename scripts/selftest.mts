@@ -34,7 +34,10 @@ import {
 import {
   buildCreativeTextRoutingSnapshot,
   buildCreativeTextRoutingPreviews,
+  buildFrameworkTextRoutingSnapshot,
+  buildFrameworkTextRoutingPreviews,
   modelForCreativeStage,
+  modelForFrameworkStage,
   normalizeTextRoutingMode,
 } from '../lib/text-model-routing.ts'
 import { extractAssistantOutput } from '../lib/supplier-output.ts'
@@ -1631,6 +1634,30 @@ check('三档文字方案均提供费用区间且高质量不低于省钱方案'
   assert.deepEqual(previews.map(item => item.mode), ['economy', 'balanced', 'quality'])
   assert.ok(previews.every(item => item.estimatedCostUsd.max > item.estimatedCostUsd.min))
   assert.ok(previews[2].estimatedCostUsd.max >= previews[0].estimatedCostUsd.max)
+})
+
+check('框架平衡模式分别路由基础结构、角色和规则提取', () => {
+  const snapshot = buildFrameworkTextRoutingSnapshot('balanced', [
+    'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra', 'claude-sonnet-5-5',
+  ], new Date('2026-11-13T00:00:00.000Z'))
+  assert.equal(snapshot.workloadAssumption.totalCalls, 10)
+  assert.equal(modelForFrameworkStage(snapshot, 'framework-base', 'auto'), 'gpt-6.1-sol')
+  assert.equal(modelForFrameworkStage(snapshot, 'framework-character', 'auto'), 'claude-sonnet-5-5')
+  assert.equal(modelForFrameworkStage(snapshot, 'framework-environment-extract', 'auto'), 'gpt-6-luna')
+  assert.equal(modelForFrameworkStage(snapshot, 'framework-act', 'auto'), 'gpt-6.1-sol')
+  assert.ok(snapshot.estimatedCostUsd.max > snapshot.estimatedCostUsd.min)
+})
+
+check('框架三档费用按固定工作量口径可比较且旧任务保持单模型', () => {
+  const ids = [
+    'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra', 'claude-haiku-5-5',
+    'claude-sonnet-5-5', 'claude-opus-5-5',
+  ]
+  const previews = buildFrameworkTextRoutingPreviews(ids)
+  assert.deepEqual(previews.map(item => item.mode), ['economy', 'balanced', 'quality'])
+  assert.ok(previews.every(item => item.workloadLabel.includes('2 个角色')))
+  assert.ok(previews[2].estimatedCostUsd.max >= previews[0].estimatedCostUsd.max)
+  assert.equal(modelForFrameworkStage(null, 'framework-synopsis', 'deepseek-v3-1'), 'deepseek-v3-1')
 })
 
 check('供应商文字输出只提取助手正文并限制记录长度', () => {

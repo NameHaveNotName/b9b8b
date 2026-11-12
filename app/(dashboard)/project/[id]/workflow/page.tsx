@@ -1005,8 +1005,10 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       || out.modelId
       || out.agentPipeline?.textModel
       || (kind === 'text' ? TEXT_MODELS.IDEATION : kind === 'video' ? VIDEO_MODELS.direct.primary : 'gpt-image-1')
-    const resolvedTextRoutingMode = targetStepType === 'IDEATION'
-      ? (body?.textRoutingMode || out.textRoutingMode || out.agentPipeline?.textRoutingMode || 'balanced')
+    const inheritedIdeationRoutingMode = steps.find((item: any) => item.stepType === 'IDEATION')?.outputData?.textRoutingMode
+      || steps.find((item: any) => item.stepType === 'IDEATION')?.outputData?.agentPipeline?.textRoutingMode
+    const resolvedTextRoutingMode = ['IDEATION', 'FRAMEWORK'].includes(targetStepType)
+      ? (body?.textRoutingMode || out.textRoutingMode || out.agentPipeline?.textRoutingMode || inheritedIdeationRoutingMode || 'balanced')
       : undefined
     const promptsCanBeSaved = editablePrompts?.length > 0
       && ['STYLE', 'CHARACTER', 'CONCEPT', 'KEYFRAMES'].includes(targetStepType)
@@ -1223,7 +1225,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       ...(nextDraft.kind === 'image' ? { imageModel: nextDraft.model } : {}),
       ...(nextDraft.kind === 'video' ? { videoModel: nextDraft.model } : {}),
       ...(nextDraft.kind === 'text' ? { textModel: nextDraft.model } : {}),
-      ...(nextDraft.kind === 'text' && nextDraft.stepType === 'IDEATION' ? { textRoutingMode: nextDraft.textRoutingMode || 'balanced' } : {}),
+      ...(nextDraft.kind === 'text' && ['IDEATION', 'FRAMEWORK'].includes(nextDraft.stepType) ? { textRoutingMode: nextDraft.textRoutingMode || 'balanced' } : {}),
       aspectRatio: nextDraft.aspectRatio,
       ...(nextDraft.promptEditable && nextDraft.prompt ? { promptOverride: nextDraft.prompt } : {}),
       ...(nextDraft.referencesResolved ? { refImages: nextDraft.references.filter((ref) => ref.type !== 'original' && ref.removable).map((ref) => ref.url) } : {}),

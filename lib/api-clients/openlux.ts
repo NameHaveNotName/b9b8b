@@ -447,13 +447,8 @@ export async function generateVisionText(params: GenerateVisionTextParams): Prom
       textOnlyPrompt = textOnlyPrompt.replace(/请仔细查看图片内容[。.]?/g, '请根据下方文字描述来构建角色外观')
       textOnlyPrompt = textOnlyPrompt.replace(/【强制规则：角色外观匹配】[\s\S]*?禁止只用角色定位[。.]?/g, labelInfo)
 
-      const fallbackData = await openLuxFetch('/v1/chat/completions', {
-        model: 'deepseek-chat',
-        messages: [{ role: 'user', content: textOnlyPrompt }],
-        temperature: params.temperature ?? 0.7,
-        max_tokens: params.maxTokens ?? 12000,
-      })
-      return fallbackData.choices[0].message.content
+      // 继续使用本次被冻结的岗位模型，避免回退到供应商当前可能不存在的旧模型名。
+      return generateText(textOnlyPrompt, model, params.maxTokens ?? 12000)
     }
     throw err
   }

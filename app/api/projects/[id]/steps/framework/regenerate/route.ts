@@ -14,6 +14,13 @@ import { checkPoints, deductPointsAndLog } from '@/lib/points'
 import { GENERATION_COSTS } from '@/lib/points-config'
 import { runDeepening } from '@/lib/framework-deepen'
 import { getStepAssetConstraints } from '@/lib/asset-constraints'
+import { getAvailableOpenLuxModelIds } from '@/lib/api-clients/openlux'
+import { withSupplierCallContext } from '@/lib/supplier-observability'
+import {
+  buildFrameworkTextRoutingSnapshot,
+  modelForFrameworkStage,
+  normalizeTextRoutingMode,
+} from '@/lib/text-model-routing'
 
 const STORY_LENGTH_MAP: Record<string, { label: string; range: string; acts: string; shots: string; desc: string }> = {
   sketch: { label: '速写', range: '1-3分钟', acts: '1-2幕', shots: '10-20镜', desc: '极快节奏，单一场景/单一冲突' },
@@ -166,6 +173,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         { success: true, status: 'PROCESSING', alreadyRunning: true, message: '该步骤的生成任务已在进行中，请等待当前任务完成' },
       )
     }
+    const textRoutingMode = normalizeTextRoutingMode(
+      body.textRoutingMode || (step.outputData as any)?.textRoutingMode || ideationOutput.textRoutingMode || ideationOutput.agentPipeline?.textRoutingMode,
+    )
+    const legacyTextModel = body.textModel || (step.outputData as any)?.textModel || ideationOutput.agentPipeline?.textModel || 'auto'
+    const textRoutingSnapshot = textRoutingMode === 'custom'
+      ? null
+      : buildFrameworkTextRoutingSnapshot(textRoutingMode, await getAvailableOpenLuxModelIds())
+    const baseFrameworkModel = modelForFrameworkStage(textRoutingSnapshot, 'framework-base', legacyTextModel)
 
     // 清空旧的 outputData 中的深化结果，但保留结构便于前端过渡
     const oldOutput = (step.outputData as any) || {}
@@ -189,7 +204,10 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     const creativeSource = currentIteration?.creativeContent || project.rawIdea
     const prompt = buildFrameworkPrompt(creativeSource, selectedDirection, storyLength, combinedInstructions)
     const textClient = await getTextClient()
-    const fullText = await textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000, model: body.textModel })
+    const fullText = await withSupplierCallContext(
+      { stageId: 'framework-base', stageLabel: '基础故事框架 · 重新生成' },
+      () => textClient.generate(prompt, { temperature: 0.8, maxTokens: 16000, model: baseFrameworkModel }),
+    )
 
     const parsed = extractJsonFromMarkdown(fullText)
     const fw = parsed.framework || parsed
@@ -219,6 +237,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       overallPacing: fw.overallPacing || '',
       visualStyle: fw.styleGuide || '',
       assetConstraints: assetConstraints.snapshots,
+      textRoutingMode,
+      textRoutingSnapshot: textRoutingSnapshot || undefined,
+      textModel: legacyTextModel,
     }
 
     await prisma.project.update({
@@ -236,7 +257,10 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     waitUntil(
       (async () => {
         try {
-          await runDeepening(params.id, step.id, framework, projectTag, businessGoal)
+          await runDeepening(params.id, step.id, framework, projectTag, businessGoal, {
+            snapshot: textRoutingSnapshot,
+            legacyModel: legacyTextModel,
+          })
         } catch (e: any) {
           console.error('[FRAMEWORK-REGENERATE] 后台深化失败:', e.message)
         }
@@ -250,7 +274,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     if (existingAsset) {
       await prisma.asset.update({
         where: { id: existingAsset.id },
-        data: { metadata: { content: framework, stepType: 'FRAMEWORK' } },
+        data: { metadata: { content: framework, stepType: 'FRAMEWORK' } as any },
       })
     } else {
       await prisma.asset.create({
@@ -262,7 +286,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
           mimeType: 'application/json',
           storageKey: `projects/${params.id}/texts/framework.json`,
           url: '',
-          metadata: { content: framework, stepType: 'FRAMEWORK' },
+          metadata: { content: framework, stepType: 'FRAMEWORK' } as any,
         },
       })
     }
