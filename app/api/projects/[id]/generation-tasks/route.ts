@@ -36,6 +36,7 @@ function sanitizeSnapshot(raw: any) {
       payload: item?.payload && typeof item.payload === 'object' ? item.payload : {},
     })) : [],
     model: cleanText(raw.model, 200),
+    textRoutingMode: cleanText(raw.textRoutingMode, 20) || undefined,
     aspectRatio: cleanText(raw.aspectRatio, 40),
     mode: cleanText(raw.mode, 40),
     submittedAt: cleanText(raw.submittedAt, 60),

@@ -51,6 +51,7 @@ export interface GenerationDraft {
   editInstruction?: string
   model: string
   modelEditable?: boolean
+  textRoutingMode?: 'economy' | 'balanced' | 'quality' | 'custom'
   aspectRatio: string
   aspectRatioEditable?: boolean
   pointCost: number

@@ -1005,6 +1005,9 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       || out.modelId
       || out.agentPipeline?.textModel
       || (kind === 'text' ? TEXT_MODELS.IDEATION : kind === 'video' ? VIDEO_MODELS.direct.primary : 'gpt-image-1')
+    const resolvedTextRoutingMode = targetStepType === 'IDEATION'
+      ? (body?.textRoutingMode || out.textRoutingMode || out.agentPipeline?.textRoutingMode || 'balanced')
+      : undefined
     const promptsCanBeSaved = editablePrompts?.length > 0
       && ['STYLE', 'CHARACTER', 'CONCEPT', 'KEYFRAMES'].includes(targetStepType)
     const estimatedPointCost = kind === 'image' && action === 'generate-images' && editablePrompts?.length
@@ -1017,6 +1020,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       inputDeps: getInputDeps(targetStepType),
       model: resolvedModel,
       modelEditable: kind === 'text' || kind === 'image' || kind === 'video',
+      textRoutingMode: resolvedTextRoutingMode,
       aspectRatio: body?.aspectRatio || out.aspectRatio || project.selectedAspectRatio || '16:9',
       aspectRatioEditable: kind === 'image' || kind === 'video',
       prompt,
@@ -1219,6 +1223,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       ...(nextDraft.kind === 'image' ? { imageModel: nextDraft.model } : {}),
       ...(nextDraft.kind === 'video' ? { videoModel: nextDraft.model } : {}),
       ...(nextDraft.kind === 'text' ? { textModel: nextDraft.model } : {}),
+      ...(nextDraft.kind === 'text' && nextDraft.stepType === 'IDEATION' ? { textRoutingMode: nextDraft.textRoutingMode || 'balanced' } : {}),
       aspectRatio: nextDraft.aspectRatio,
       ...(nextDraft.promptEditable && nextDraft.prompt ? { promptOverride: nextDraft.prompt } : {}),
       ...(nextDraft.referencesResolved ? { refImages: nextDraft.references.filter((ref) => ref.type !== 'original' && ref.removable).map((ref) => ref.url) } : {}),

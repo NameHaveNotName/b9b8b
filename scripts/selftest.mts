@@ -31,6 +31,12 @@ import {
   normalizeTextModelId,
   shouldUseMinimax,
 } from '../lib/text-models.ts'
+import {
+  buildCreativeTextRoutingSnapshot,
+  buildCreativeTextRoutingPreviews,
+  modelForCreativeStage,
+  normalizeTextRoutingMode,
+} from '../lib/text-model-routing.ts'
 import { extractAssistantOutput } from '../lib/supplier-output.ts'
 import { buildFrameworkDeepeningView } from '../lib/framework-deepening-view.ts'
 import {
@@ -1581,6 +1587,50 @@ check('自动文字路由不再经过 MiniMax，只有明确选择才使用', ()
   assert.equal(shouldUseMinimax('auto'), false)
   assert.equal(shouldUseMinimax('deepseek-v3-1'), false)
   assert.equal(shouldUseMinimax('MiniMax-Text-01'), true)
+})
+
+check('创意扩散平衡模式按岗位使用异构模型并固定三次搜索', () => {
+  const snapshot = buildCreativeTextRoutingSnapshot('balanced', [
+    'gpt-6-luna', 'gpt-6.1-sol', 'claude-fable-5-1', 'kimi-k3.1-pro', 'gpt-6-astra',
+  ], new Date('2026-11-13T00:00:00.000Z'))
+  assert.equal(snapshot.searchCalls, 3)
+  assert.equal(snapshot.stages.length, 7)
+  assert.equal(modelForCreativeStage(snapshot, 'goal-contract', 'auto'), 'gpt-6-luna')
+  assert.equal(modelForCreativeStage(snapshot, 'concept-narrative-emotion', 'auto'), 'claude-fable-5-1')
+  assert.equal(modelForCreativeStage(snapshot, 'concept-audience-experience', 'auto'), 'kimi-k3.1-pro')
+  assert.equal(modelForCreativeStage(snapshot, 'critique', 'auto'), 'gpt-6-astra')
+  assert.ok(snapshot.estimatedCostUsd.min > 0)
+  assert.ok(snapshot.estimatedCostUsd.max > snapshot.estimatedCostUsd.min)
+  assert.equal(JSON.parse(JSON.stringify(snapshot)).catalogCheckedAt, '2026-11-13T00:00:00.000Z')
+})
+
+check('岗位首选缺失时只在同岗位候选中降级', () => {
+  const snapshot = buildCreativeTextRoutingSnapshot('balanced', [
+    'deepseek-v4.1-flash', 'deepseek-v4-pro', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5', 'kimi-k3',
+  ])
+  assert.equal(modelForCreativeStage(snapshot, 'goal-contract', 'auto'), 'deepseek-v4.1-flash')
+  assert.equal(modelForCreativeStage(snapshot, 'concept-narrative-emotion', 'auto'), 'claude-fable-5')
+  assert.equal(modelForCreativeStage(snapshot, 'concept-audience-experience', 'auto'), 'kimi-k3')
+  assert.equal(modelForCreativeStage(snapshot, 'critique', 'auto'), 'claude-opus-5-5')
+  assert.throws(() => buildCreativeTextRoutingSnapshot('balanced', ['gpt-6-luna']), /TEXT_ROUTING_MODEL_UNAVAILABLE/)
+})
+
+check('自定义和旧断点继续沿用原单一模型', () => {
+  assert.equal(normalizeTextRoutingMode('custom'), 'custom')
+  assert.equal(normalizeTextRoutingMode('invalid'), 'balanced')
+  assert.equal(modelForCreativeStage(null, 'critique', 'deepseek-v3-1'), 'deepseek-v3-1')
+  assert.equal(modelForCreativeStage(undefined, undefined, 'MiniMax-Text-01'), 'MiniMax-Text-01')
+})
+
+check('三档文字方案均提供费用区间且高质量不低于省钱方案', () => {
+  const ids = [
+    'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra', 'claude-haiku-5-5', 'claude-sonnet-5-5',
+    'claude-opus-5-5', 'claude-fable-5-1', 'kimi-k3.1-pro', 'glm-5.3-flash',
+  ]
+  const previews = buildCreativeTextRoutingPreviews(ids)
+  assert.deepEqual(previews.map(item => item.mode), ['economy', 'balanced', 'quality'])
+  assert.ok(previews.every(item => item.estimatedCostUsd.max > item.estimatedCostUsd.min))
+  assert.ok(previews[2].estimatedCostUsd.max >= previews[0].estimatedCostUsd.max)
 })
 
 check('供应商文字输出只提取助手正文并限制记录长度', () => {

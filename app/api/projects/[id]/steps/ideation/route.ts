@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { getTextClient } from '@/lib/api-clients'
 import { getProjectReferences } from '@/lib/style-ref'
 import { PROJECT_TAG_PROMPTS } from '@/lib/project-tags'
-import { generateSearchText } from '@/lib/api-clients/openlux'
+import { generateSearchText, getAvailableOpenLuxModelIds } from '@/lib/api-clients/openlux'
 import {
   createCreativeAgentCheckpoint,
   finalizeCreativeAgentRun,
@@ -21,6 +21,12 @@ import { GENERATION_COSTS } from '@/lib/points-config'
 import { getStepAssetConstraints } from '@/lib/asset-constraints'
 import { getCurrentOperationId, markCurrentOperationInterrupted, withSupplierCallContext } from '@/lib/supplier-observability'
 import { releaseSeriesGenerationAuthorization } from '@/lib/series-generation-authorization'
+import {
+  buildCreativeTextRoutingSnapshot,
+  modelForCreativeStage,
+  normalizeTextRoutingMode,
+  type CreativeTextRoutingSnapshot,
+} from '@/lib/text-model-routing'
 
 const PHASE_LABELS: Record<string, string> = {
   'goal-contract': '理解目标',
@@ -192,10 +198,16 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
       const assetConstraints = await getStepAssetConstraints(params.id, 'IDEATION')
       const refLabels = references.filter(r => r.labels?.length).flatMap(r => r.labels)
       const creativeBrief = [project.rawIdea, tagInstructions, assetConstraints.promptBlock, hasRefs ? `已有参考资产标签：${refLabels.join('、') || '未标注'}` : ''].filter(Boolean).join('\n\n')
+      const textRoutingMode = normalizeTextRoutingMode(body.textRoutingMode)
+      const textRoutingSnapshot = textRoutingMode === 'custom'
+        ? null
+        : buildCreativeTextRoutingSnapshot(textRoutingMode, await getAvailableOpenLuxModelIds())
       pipelineState = {
         runId: pipelineRunId,
         checkpoint: createCreativeAgentCheckpoint({ goal: businessGoalText, creativeBrief, referenceLabels: refLabels }),
         textModel: body.textModel || 'auto',
+        textRoutingMode,
+        textRoutingSnapshot,
         projectTag,
         assetConstraints: assetConstraints.snapshots,
         phaseStatus: 'READY',
@@ -236,7 +248,14 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const nextCheckpoint = await runCreativeAgentPhase(checkpoint, {
       text: (prompt, stage) => withSupplierCallContext(
         { stageId: stage?.id, stageLabel: stage?.label },
-        () => textClient.generate(prompt, { maxTokens: 8192, model: pipelineState.textModel }),
+        () => textClient.generate(prompt, {
+          maxTokens: 8192,
+          model: modelForCreativeStage(
+            pipelineState.textRoutingSnapshot as CreativeTextRoutingSnapshot | null | undefined,
+            stage?.id,
+            pipelineState.textModel || 'auto',
+          ),
+        }),
       ),
       search: (prompt, stage) => withSupplierCallContext(
         { stageId: stage?.id, stageLabel: stage?.label },
@@ -282,7 +301,7 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     const resultText = JSON.stringify(agentRun.artifacts.creativePlan)
     const projectTag = pipelineState.projectTag || ''
     const assetConstraints = pipelineState.assetConstraints || []
-    const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, businessGoal: businessGoalText, businessGoalText, creativePlanConfirmed: false, agentRun, projectTag: projectTag || undefined, assetConstraints, rawText: resultText.slice(0, 3000) }
+    const result = { directions, framework, storyLength, storyLengthLabel, storyLengthDesc, businessGoal: businessGoalText, businessGoalText, creativePlanConfirmed: false, agentRun, projectTag: projectTag || undefined, assetConstraints, textRoutingMode: pipelineState.textRoutingMode || 'custom', textRoutingSnapshot: pipelineState.textRoutingSnapshot || undefined, rawText: resultText.slice(0, 3000) }
     await completeStep(step.id, result)
     await deductPointsAndLog(userId, pointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
 

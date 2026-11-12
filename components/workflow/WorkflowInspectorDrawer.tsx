@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { ASPECT_RATIO_OPTIONS, IMAGE_MODELS, VIDEO_MODELS } from '@/lib/models-config'
 import { AUTO_TEXT_MODEL, normalizeTextModelId, type TextModelOption } from '@/lib/text-models'
+import type { TextRoutingMode } from '@/lib/text-model-routing'
 import type { GenerationDraft, GenerationRun } from './types'
 
 export type { GenerationDraft, GenerationRun } from './types'
@@ -118,7 +119,20 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
   const [editInstruction, setEditInstruction] = useState(draft.editInstruction || '')
   const submitting = run?.status === 'running'
   const canEditOriginal = Boolean(draft.originalImageUrl)
-  const { data: textModelCatalog, isLoading: textModelsLoading } = useSWR<{ models: TextModelOption[]; catalogAvailable: boolean; message?: string }>(
+  const { data: textModelCatalog, isLoading: textModelsLoading } = useSWR<{
+    models: TextModelOption[]
+    creativeRoutingProfiles?: Array<{
+      mode: Exclude<TextRoutingMode, 'custom'>
+      label: string
+      description: string
+      searchCalls: number
+      stages: Array<{ id: string; label: string; model: string }>
+      estimatedCostUsd: { min: number; max: number }
+      priceSnapshotDate: string
+    }>
+    catalogAvailable: boolean
+    message?: string
+  }>(
     draft.kind === 'text' ? '/api/models/text' : null,
     assetFetcher,
     { revalidateOnFocus: false },
@@ -129,6 +143,9 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
     ? VIDEO_MODELS.direct.available
     : IMAGE_MODELS.available.filter((model) => !('disabled' in model && model.disabled))
   const selectedModel = draft.kind === 'text' ? normalizeTextModelId(draft.model) : draft.model
+  const usesCreativeRouting = draft.kind === 'text' && draft.stepType === 'IDEATION'
+  const selectedRoutingMode = draft.textRoutingMode || 'balanced'
+  const routingPreview = textModelCatalog?.creativeRoutingProfiles?.find((profile) => profile.mode === selectedRoutingMode)
 
   useEffect(() => setEditInstruction(draft.editInstruction || ''), [draft.editInstruction, draft.targetId])
 
@@ -184,19 +201,39 @@ function ConfigurationView({ draft, run, onChange, onSubmit }: {
       </section>
 
       <section className="grid grid-cols-2 gap-3">
-        <label className="text-[10px] font-medium text-stone-500">模型
+        {usesCreativeRouting && <label className="col-span-2 text-[10px] font-medium text-stone-500">文字方案
+          <select disabled={textModelsLoading} value={selectedRoutingMode} onChange={(event) => onChange({ ...draft, textRoutingMode: event.target.value as TextRoutingMode })} className="mt-1.5 w-full rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-xs text-stone-700 outline-none focus:border-amber-400 disabled:bg-stone-50 disabled:text-stone-500">
+            <option value="economy">省钱</option>
+            <option value="balanced">平衡（推荐）</option>
+            <option value="quality">高质量</option>
+            <option value="custom">高级自定义 · 全流程使用一个模型</option>
+          </select>
+          {routingPreview && <span className="mt-1 block text-[9px] leading-relaxed text-stone-500">{routingPreview.description}</span>}
+        </label>}
+        {(!usesCreativeRouting || selectedRoutingMode === 'custom') && <label className="text-[10px] font-medium text-stone-500">{usesCreativeRouting ? '自定义单一模型' : '模型'}
           <select disabled={!draft.modelEditable || (draft.kind === 'text' && textModelsLoading)} value={selectedModel} onChange={(event) => onChange({ ...draft, model: event.target.value })} className="mt-1.5 w-full rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-xs text-stone-700 outline-none focus:border-amber-400 disabled:bg-stone-50 disabled:text-stone-500">
             {!modelOptions.some((model) => model.id === selectedModel) && <option value={selectedModel}>{selectedModel || '步骤默认模型'}</option>}
             {modelOptions.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
           </select>
           {draft.kind === 'text' && <span className="mt-1 block text-[9px] leading-relaxed text-stone-500">{textModelsLoading ? '正在读取当前账号可用模型…' : textModelCatalog?.catalogAvailable === false ? textModelCatalog.message : '列表来自当前 OpenLux 账号的实时模型目录；明确选择后不会被其他供应商覆盖。'}</span>}
-        </label>
+        </label>}
         <label className="text-[10px] font-medium text-stone-500">画幅
           <select disabled={!draft.aspectRatioEditable} value={draft.aspectRatio} onChange={(event) => onChange({ ...draft, aspectRatio: event.target.value })} className="mt-1.5 w-full rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-xs text-stone-700 outline-none focus:border-amber-400 disabled:bg-stone-50 disabled:text-stone-500">
             {ASPECT_RATIO_OPTIONS.map((ratio) => <option key={ratio.value} value={ratio.value}>{ratio.label}</option>)}
           </select>
         </label>
       </section>
+
+      {usesCreativeRouting && routingPreview && <section className="rounded-xl border border-sky-200 bg-sky-50/70 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div><p className="text-xs font-semibold text-sky-900">本次岗位分工</p><p className="mt-1 text-[10px] text-sky-700">固定 {routingPreview.searchCalls} 次联网研究，另有 {routingPreview.stages.length} 次普通文字调用；创建任务后冻结，断点续跑不会换模型。</p></div>
+          <div className="shrink-0 text-right"><p className="text-sm font-bold text-sky-900">${routingPreview.estimatedCostUsd.min.toFixed(3)}～${routingPreview.estimatedCostUsd.max.toFixed(3)}</p><p className="text-[9px] text-sky-600">供应商费用估算</p></div>
+        </div>
+        <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+          {routingPreview.stages.map((stage) => <div key={stage.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg bg-white/80 px-2.5 py-1.5 text-[10px]"><span className="truncate text-stone-600">{stage.label}</span><span className="truncate font-medium text-stone-800">{stage.model}</span></div>)}
+        </div>
+        <p className="mt-2 text-[9px] leading-relaxed text-sky-700">按 OpenLux {routingPreview.priceSnapshotDate} 公开单价和预估 Token 区间计算；实际扣费以供应商返回用量为准，不含图片和视频。</p>
+      </section>}
 
       {canEditOriginal && <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-3"><label className="text-xs font-semibold text-amber-900">修改原图意见</label><textarea value={editInstruction} onChange={(event) => setEditInstruction(event.target.value)} rows={3} placeholder="例如：保留人物和构图，只把天空改成黄昏" className="mt-2 w-full rounded-lg border border-amber-200 bg-white p-2.5 text-xs text-stone-700 outline-none focus:border-amber-400" /></section>}
 
