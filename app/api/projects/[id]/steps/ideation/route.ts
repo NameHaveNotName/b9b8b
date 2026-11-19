@@ -27,6 +27,7 @@ import {
   normalizeTextRoutingMode,
   type CreativeTextRoutingSnapshot,
 } from '@/lib/text-model-routing'
+import { normalizeCreativeDirection } from '@/lib/creative-directions'
 
 const PHASE_LABELS: Record<string, string> = {
   'goal-contract': '理解目标',
@@ -289,11 +290,14 @@ export async function POST(_req: Request, props: { params: Promise<{ id: string 
     }
 
     const agentRun = finalizeCreativeAgentRun(nextCheckpoint)
-    const directions = agentRun.artifacts.conceptCandidates.map((candidate: any) => ({
-      title: candidate.title || candidate.label || '创意方向',
-      description: candidate.summary || candidate.coreIdea || '',
-      keywords: [candidate.label, candidate.audienceValue].filter(Boolean).slice(0, 4),
-    }))
+    const directions = agentRun.artifacts.conceptCandidates.map((candidate: any, index: number) =>
+      normalizeCreativeDirection({
+        ...candidate,
+        title: candidate.title || candidate.label,
+        description: candidate.summary || candidate.coreIdea,
+        keywords: [candidate.label, candidate.audienceValue],
+      }, index),
+    )
     const framework = {}
     const storyLength = 'short'
     const storyLengthLabel = '短篇 · 3-5分钟'

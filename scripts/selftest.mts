@@ -45,6 +45,7 @@ import {
 } from '../lib/text-model-routing.ts'
 import { extractAssistantOutput } from '../lib/supplier-output.ts'
 import { buildFrameworkDeepeningView } from '../lib/framework-deepening-view.ts'
+import { creativeDisplayText, normalizeCreativeDirections, normalizeCreativeKeywords } from '../lib/creative-directions.ts'
 import {
   computeProjectStateFromSteps,
   getStepDisplayState,
@@ -1951,6 +1952,31 @@ check('吉祥物使用单主体约束而不是强制 single person', () => {
   assert.match(prompt, /authoritative over its nickname/)
   assert.match(prompt, /do not literalize it/)
   assert.doesNotMatch(prompt, /single person/)
+})
+
+console.log('\n== 创意方向显示数据归一化 ==')
+
+check('结构化受众价值不会作为 React 子节点进入关键词', () => {
+  const audienceValue = {
+    value: ['理解具体问题', '看懂前后对比'],
+    primary: ['大学生', '年轻职场用户'],
+    conversionLogic: '先共鸣，再证明价值',
+  }
+  const [direction] = normalizeCreativeDirections([{
+    label: '桌面救援',
+    summary: '在汇报前夜解决 PPT 问题',
+    keywords: ['桌面救援', audienceValue],
+  }])
+
+  assert.equal(direction.title, '桌面救援')
+  assert.equal(direction.description, '在汇报前夜解决 PPT 问题')
+  assert.deepEqual(direction.keywords, ['桌面救援', '大学生', '年轻职场用户', '理解具体问题'])
+  assert.equal(direction.keywords.every(item => typeof item === 'string'), true)
+})
+
+check('创意文本兼容数组和带 value 的结构化旧数据', () => {
+  assert.equal(creativeDisplayText({ value: ['第一点', '第二点'] }), '第一点、第二点')
+  assert.deepEqual(normalizeCreativeKeywords({ primary: ['学生'], value: ['收藏价值'] }), ['学生', '收藏价值'])
 })
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败\n`)

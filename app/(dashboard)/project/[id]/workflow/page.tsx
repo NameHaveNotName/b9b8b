@@ -54,6 +54,7 @@ import { proxiedMediaUrl } from '@/lib/media-url'
 import { ApiError } from '@/lib/api-client'
 import AgentOutputViewer from '@/components/workflow/AgentOutputViewer'
 import { buildFrameworkDeepeningView } from '@/lib/framework-deepening-view'
+import { creativeDisplayText, normalizeCreativeDirections } from '@/lib/creative-directions'
 
 const fetcher = async (url: string) => {
   const response = await fetch(url)
@@ -1917,12 +1918,12 @@ function IdeationPanel({
   selectedIdx: number | null
   setSelectedIdx: (idx: number | null) => void
 }) {
-  const [localDirections, setLocalDirections] = useState<any[]>(step.outputData?.directions || [])
+  const [localDirections, setLocalDirections] = useState<any[]>(() => normalizeCreativeDirections(step.outputData?.directions))
   const [localStoryLength, setLocalStoryLength] = useState<string>(
     step.outputData?.storyLength || 'short'
   )
   const [projectTag, setProjectTag] = useState<string>(step.outputData?.projectTag || '')
-  const [businessGoal, setBusinessGoal] = useState<string>(step.outputData?.businessGoalText || step.outputData?.businessGoal || '')
+  const [businessGoal, setBusinessGoal] = useState<string>(() => creativeDisplayText(step.outputData?.businessGoalText || step.outputData?.businessGoal))
   const [confirmingPlan, setConfirmingPlan] = useState(false)
   const [planFeedback, setPlanFeedback] = useState('')
   const [revisingPlan, setRevisingPlan] = useState(false)
@@ -1949,13 +1950,13 @@ function IdeationPanel({
   const [xlsxImageCount, setXlsxImageCount] = useState(0)
   const [xlsxMatchedImageCount, setXlsxMatchedImageCount] = useState(0)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const lastSavedRef = useRef<any[]>(step.outputData?.directions || [])
+  const lastSavedRef = useRef<any[]>(normalizeCreativeDirections(step.outputData?.directions))
   const storyLengthSaveRef = useRef<NodeJS.Timeout | null>(null)
   const tagSaveRef = useRef<NodeJS.Timeout | null>(null)
   const businessGoalSaveRef = useRef<NodeJS.Timeout | null>(null)
   const inputSaveRef = useRef<NodeJS.Timeout | null>(null)
   const isExecuting = executing === step.stepType
-  const directions = step.outputData?.directions || []
+  const directions = useMemo(() => normalizeCreativeDirections(step.outputData?.directions), [step.outputData?.directions])
   const errorMessage = step.errorMessage || ''
 
   // 获取创意迭代历史（用于 review 模式展示）
@@ -1994,9 +1995,9 @@ function IdeationPanel({
   }, [step.outputData?.projectTag])
 
   useEffect(() => {
-    const savedGoal = step.outputData?.businessGoalText || step.outputData?.businessGoal
-    if (savedGoal !== undefined && savedGoal !== businessGoal) {
-      setBusinessGoal(savedGoal || '')
+    const savedGoal = creativeDisplayText(step.outputData?.businessGoalText || step.outputData?.businessGoal)
+    if (savedGoal !== businessGoal) {
+      setBusinessGoal(savedGoal)
     }
   }, [step.outputData?.businessGoalText, step.outputData?.businessGoal])
 
@@ -2551,7 +2552,7 @@ function IdeationPanel({
       await mutate()
     } catch (e: any) {
       console.error('[TEXT-EDIT-IDEATION] 保存 businessGoal 失败:', e.message)
-      setBusinessGoal(step.outputData?.businessGoal || '')
+      setBusinessGoal(creativeDisplayText(step.outputData?.businessGoalText || step.outputData?.businessGoal))
     }
   }
 
