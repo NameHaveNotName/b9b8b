@@ -16,6 +16,15 @@ const AUTO_PREFERENCE = [
   'gpt-4o-mini',
 ]
 
+const AUTO_VISION_PREFERENCE = [
+  'gpt-4o-mini',
+  'gpt-4o',
+  'qwen3-vl-plus',
+  'doubao-seed-1-6-vision-250815',
+  'llama-3.2-90b-vision-instruct',
+  'llama-3.2-11b-vision-instruct',
+]
+
 export interface TextModelOption {
   id: string
   label: string
@@ -44,6 +53,18 @@ export function chooseAutomaticOpenLuxModel(ids: string[]): string | null {
     if (available.includes(preferred)) return preferred
   }
   return available.find((id) => /deepseek/i.test(id)) || available[0] || null
+}
+
+export function chooseAutomaticOpenLuxVisionModel(ids: string[]): string | null {
+  const available = new Set(filterTextModelIds(ids))
+  return AUTO_VISION_PREFERENCE.find(model => available.has(model)) || null
+}
+
+export function resolveOpenLuxTextModel(requestedModel: string | null | undefined, catalogIds: string[]): string | null {
+  const requested = normalizeTextModelId(requestedModel)
+  const available = filterTextModelIds(catalogIds)
+  if (requested === AUTO_TEXT_MODEL) return chooseAutomaticOpenLuxModel(available)
+  return available.includes(requested) ? requested : null
 }
 
 function modelLabel(id: string): string {

@@ -11,9 +11,9 @@ import { buildSeedanceVideoRequest } from '@/lib/video-request-formats'
 import {
   AUTO_TEXT_MODEL,
   MINIMAX_TEXT_MODEL,
-  chooseAutomaticOpenLuxModel,
-  filterTextModelIds,
+  chooseAutomaticOpenLuxVisionModel,
   normalizeTextModelId,
+  resolveOpenLuxTextModel,
   shouldUseMinimax,
 } from '@/lib/text-models'
 import fs from 'fs'
@@ -284,7 +284,6 @@ export async function generateText(
   maxTokens: number = 12000
 ): Promise<string> {
   const requestedModel = normalizeTextModelId(model)
-  const automatic = requestedModel === AUTO_TEXT_MODEL
   const useMinimax = shouldUseMinimax(requestedModel)
 
   if (useMinimax && MINIMAX_API_KEY) {
@@ -309,9 +308,8 @@ export async function generateText(
   }
 
   const catalogIds = await getAvailableOpenLuxModelIds()
-  const availableTextIds = filterTextModelIds(catalogIds)
-  const resolvedModel = automatic ? chooseAutomaticOpenLuxModel(availableTextIds) : requestedModel
-  if (!resolvedModel || !availableTextIds.includes(resolvedModel)) {
+  const resolvedModel = resolveOpenLuxTextModel(requestedModel, catalogIds)
+  if (!resolvedModel) {
     throw new Error(`TEXT_MODEL_UNAVAILABLE: ${requestedModel}`)
   }
   const data = await openLuxFetch('/v1/chat/completions', {
@@ -396,8 +394,33 @@ export interface GenerateVisionTextParams {
   imageLabels?: string[]
 }
 
+function buildVisionTextOnlyPrompt(params: GenerateVisionTextParams): string {
+  const labelInfo = params.imageLabels && params.imageLabels.length > 0
+    ? `\n【用户上传了 ${params.imageUrls.length} 张视觉参考图（当前文字模型无法直接查看），标签：${params.imageLabels.join('、')}。只能依据这些标签描述参考图职责，不得猜测图中未提供的身份或外观细节。】\n`
+    : ''
+  return params.prompt
+    .replace(/请仔细查看图片内容[。.]?/g, '请根据下方已提供的文字标签处理参考图职责')
+    .replace(/【强制规则：角色外观匹配】[\s\S]*?禁止只用角色定位[。.]?/g, '')
+    + labelInfo
+}
+
 export async function generateVisionText(params: GenerateVisionTextParams): Promise<string> {
-  const model = params.model || 'gpt-4o'
+  const requestedModel = normalizeTextModelId(params.model)
+  if (shouldUseMinimax(requestedModel)) {
+    console.warn('[VISION-TEXT] selected model is text-only MiniMax; using labeled text fallback')
+    return generateText(buildVisionTextOnlyPrompt(params), requestedModel, params.maxTokens ?? 12000)
+  }
+
+  const catalogIds = await getAvailableOpenLuxModelIds()
+  const automaticVisionModel = requestedModel === AUTO_TEXT_MODEL
+    ? chooseAutomaticOpenLuxVisionModel(catalogIds)
+    : null
+  if (requestedModel === AUTO_TEXT_MODEL && !automaticVisionModel) {
+    console.warn('[VISION-TEXT] no visual text model is available; using labeled text fallback')
+    return generateText(buildVisionTextOnlyPrompt(params), requestedModel, params.maxTokens ?? 12000)
+  }
+  const model = automaticVisionModel || resolveOpenLuxTextModel(requestedModel, catalogIds)
+  if (!model) throw new Error(`TEXT_MODEL_UNAVAILABLE: ${requestedModel}`)
   const content: VisionMessageContent[] = []
 
   const textParts: string[] = [params.prompt]
@@ -433,22 +456,15 @@ export async function generateVisionText(params: GenerateVisionTextParams): Prom
 
   try {
     const data = await openLuxFetch('/v1/chat/completions', body)
-    return data.choices[0].message.content
+    const result = data?.choices?.[0]?.message?.content
+    if (typeof result !== 'string' || !result.trim()) throw new Error('OPENLUX_VISION_TEXT_EMPTY_RESPONSE')
+    return result
   } catch (err: any) {
     if (err?.message?.includes('does not support image input') || err?.status === 400) {
       console.warn('[VISION-TEXT] multimodal failed, falling back to text-only:', err?.message?.slice(0, 100))
 
-      // 构建纯文本 prompt：替换视觉参考指令为文字描述
-      let textOnlyPrompt = params.prompt
-      const labelInfo = params.imageLabels && params.imageLabels.length > 0
-        ? `\n【用户上传了 ${params.imageUrls.length} 张视觉参考图（你无法直接查看），标签：${params.imageLabels.join('、')}。请在生成角色 description 时，根据标签推断角色的外观特征，使用具体的颜色、体型、视觉元素来描述，而不仅仅是角色定位或性格。】\n`
-        : ''
-      // 移除"请仔细查看图片内容"等只能多模态模型执行的指令，替换为纯文本说明
-      textOnlyPrompt = textOnlyPrompt.replace(/请仔细查看图片内容[。.]?/g, '请根据下方文字描述来构建角色外观')
-      textOnlyPrompt = textOnlyPrompt.replace(/【强制规则：角色外观匹配】[\s\S]*?禁止只用角色定位[。.]?/g, labelInfo)
-
       // 继续使用本次被冻结的岗位模型，避免回退到供应商当前可能不存在的旧模型名。
-      return generateText(textOnlyPrompt, model, params.maxTokens ?? 12000)
+      return generateText(buildVisionTextOnlyPrompt(params), model, params.maxTokens ?? 12000)
     }
     throw err
   }

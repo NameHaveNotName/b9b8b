@@ -27,8 +27,10 @@ import {
   AUTO_TEXT_MODEL,
   buildTextModelOptions,
   chooseAutomaticOpenLuxModel,
+  chooseAutomaticOpenLuxVisionModel,
   filterTextModelIds,
   normalizeTextModelId,
+  resolveOpenLuxTextModel,
   shouldUseMinimax,
 } from '../lib/text-models.ts'
 import {
@@ -1583,6 +1585,21 @@ check('自动文字模型只从当前可用目录中按优先级选择', () => {
   assert.equal(chooseAutomaticOpenLuxModel(['deepseek-v4-pro', 'deepseek-v3-1']), 'deepseek-v3-1')
   assert.equal(chooseAutomaticOpenLuxModel(['deepseek-v4-pro']), 'deepseek-v4-pro')
   assert.equal(chooseAutomaticOpenLuxModel(['gpt-image-1']), null)
+})
+
+check('自动占位符在供应商请求前解析为真实目录模型', () => {
+  const catalog = ['gpt-image-1', 'deepseek-v4-pro', 'deepseek-v3-1', 'gpt-5-search-api']
+  assert.equal(resolveOpenLuxTextModel('auto', catalog), 'deepseek-v3-1')
+  assert.equal(resolveOpenLuxTextModel('deepseek-v3', catalog), 'deepseek-v3-1')
+  assert.equal(resolveOpenLuxTextModel('missing-model', catalog), null)
+  assert.notEqual(resolveOpenLuxTextModel('auto', catalog), 'auto')
+})
+
+check('带参考图的自动模式优先解析为当前目录中的视觉理解模型', () => {
+  const catalog = ['deepseek-v3-1', 'gpt-4o', 'gpt-4o-mini', 'gpt-image-1']
+  assert.equal(chooseAutomaticOpenLuxVisionModel(catalog), 'gpt-4o-mini')
+  assert.equal(chooseAutomaticOpenLuxVisionModel(['deepseek-v3-1']), null)
+  assert.notEqual(chooseAutomaticOpenLuxVisionModel(catalog), 'auto')
 })
 
 check('文字模型选项只暴露当前目录并保留自动与已配置 MiniMax', () => {
