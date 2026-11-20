@@ -11,6 +11,8 @@ import type { GenerateVisionTextParams } from './openlux'
 import { IMAGE_MODELS, TEXT_MODELS } from '@/lib/models-config'
 import { uploadFile, getSignedFileUrl } from '@/lib/r2'
 import { buildCharacterImagePrompt } from '@/lib/character-generation-policy'
+import { frameworkCharacterOptions } from '@/lib/project-framework'
+import { buildStyleReferencePlan } from '@/lib/style-reference-policy'
 
 /**
  * 工作指令.txt（Round 4 修复 #4）：R2 上传失败兜底。
@@ -177,10 +179,8 @@ export async function getImageClient(): Promise<ImageClient> {
 
         const { getProjectReferences } = await import('@/lib/style-ref')
         const userRefs = await getProjectReferences(projectId).catch(() => [])
-        const userRefUrls = userRefs.filter(r => r.url).map(r => r.url)
-        const refHint = userRefUrls.length > 0
-          ? 'Keep the character appearance, colors, outfit and iconic accessories consistent with the provided reference image(s). '
-          : ''
+        const referencePlan = buildStyleReferencePlan(userRefs, frameworkCharacterOptions(framework))
+        const userRefUrls = referencePlan.references.map(reference => reference.url)
 
         const ar = aspectRatio || '16:9'
         const orientationHint = /^9:16|3:4|2:3|portrait/i.test(ar)
@@ -191,7 +191,7 @@ export async function getImageClient(): Promise<ImageClient> {
 
         const results: StyleSample[] = []
         for (let i = 0; i < count; i++) {
-          const prompt = (basePrompt || variations[i] || styleTag) + (refHint ? `. ${refHint}` : '') + (orientationHint ? ` ${orientationHint}` : '')
+          const prompt = [referencePlan.instruction, basePrompt || variations[i] || styleTag, orientationHint].filter(Boolean).join('\n\n')
           const model = imageModel || IMAGE_MODELS.primary
           console.log(`[MODEL-SELECT] [generateStyleSamples] 模型: ${model}, 比例: ${ar}`)
           const { buffer, isMock, lastError } = await generateImage({
@@ -201,6 +201,7 @@ export async function getImageClient(): Promise<ImageClient> {
             aspectRatio: ar,
             watermark: false,
             referenceImages: userRefUrls.length > 0 ? userRefUrls : undefined,
+            requireReferenceImages: userRefUrls.length > 0,
           })
           const id = `style_${Date.now()}_${i}`
           const storageKey = `projects/${projectId}/styles/${id}.png`

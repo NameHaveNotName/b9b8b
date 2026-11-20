@@ -16,6 +16,7 @@ import {
   resolveOpenLuxTextModel,
   shouldUseMinimax,
 } from '@/lib/text-models'
+import { buildVisionImagePreview } from '@/lib/vision-image-input'
 import fs from 'fs'
 import path from 'path'
 
@@ -434,17 +435,28 @@ export async function generateVisionText(params: GenerateVisionTextParams): Prom
 
   content.push({ type: 'text', text: textParts.join('\n') })
 
-  for (const url of params.imageUrls) {
-    let finalUrl = url
-    if (!url.startsWith('data:')) {
-      try {
-        finalUrl = await resolveImageToBase64(url)
-      } catch {
-        console.warn('[VISION-TEXT] image base64 conversion failed, skipping:', url.slice(0, 80))
-        continue
-      }
+  const preparedImages = await Promise.all(params.imageUrls.slice(0, 6).map(async (url, index) => {
+    try {
+      const sourceDataUrl = url.startsWith('data:') ? url : await resolveImageToBase64(url)
+      const preview = await buildVisionImagePreview(sourceDataUrl)
+      console.log(
+        `[VISION-TEXT] reference ${index + 1}: ${preview.width}x${preview.height}, ` +
+        `${Math.round(preview.sourceBytes / 1024)}KB -> ${Math.round(preview.previewBytes / 1024)}KB`,
+      )
+      return preview.dataUrl
+    } catch (error: any) {
+      console.warn('[VISION-TEXT] image preparation failed, skipping:', error?.message || String(error))
+      return null
     }
-    content.push({ type: 'image_url', image_url: { url: finalUrl, detail: 'low' } })
+  }))
+
+  for (const finalUrl of preparedImages) {
+    if (finalUrl) content.push({ type: 'image_url', image_url: { url: finalUrl, detail: 'low' } })
+  }
+
+  if (!preparedImages.some(Boolean)) {
+    console.warn('[VISION-TEXT] no reference image could be prepared; using labeled text fallback')
+    return generateText(buildVisionTextOnlyPrompt(params), model, params.maxTokens ?? 12000)
   }
 
   const body: Record<string, unknown> = {

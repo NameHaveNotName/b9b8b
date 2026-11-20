@@ -76,7 +76,11 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
 
   try {
     const imageClient = await getImageClient()
-    const framework = project.framework as any
+    const frameworkStep = await prisma.workflowStep.findUnique({
+      where: { projectId_stepType: { projectId: params.id, stepType: 'FRAMEWORK' } },
+      select: { outputData: true },
+    })
+    const framework = (frameworkStep?.outputData as any) || {}
 
     // generateStyleSamples 返回数组，我们只需要生成 1 张来替换
     const results = await imageClient.generateStyleSamples(

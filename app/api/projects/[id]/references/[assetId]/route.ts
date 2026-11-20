@@ -44,8 +44,13 @@ export async function PATCH(
         ? body.targetCharacterId.trim() || null
         : null
       if (referenceRole === 'IDENTITY' && existingMeta.targetCharacterId) {
-        const project = await prisma.project.findUnique({ where: { id: params.id }, select: { framework: true } })
-        const characters = Array.isArray((project?.framework as any)?.characters) ? (project!.framework as any).characters : []
+        const frameworkStep = await prisma.workflowStep.findUnique({
+          where: { projectId_stepType: { projectId: params.id, stepType: 'FRAMEWORK' } },
+          select: { outputData: true },
+        })
+        const characters = Array.isArray((frameworkStep?.outputData as any)?.characters)
+          ? (frameworkStep!.outputData as any).characters
+          : []
         if (!characters.some((character: any) => character?.id === existingMeta.targetCharacterId)) {
           return NextResponse.json({ error: 'VALIDATION_001', message: '目标角色不存在于当前框架' }, { status: 400 })
         }

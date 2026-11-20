@@ -4154,7 +4154,7 @@ function StylePanel({
       <div className="flex flex-col items-center justify-center gap-6 py-12">
         <div className="text-center">
           <Sparkles className="mx-auto h-10 w-10 text-amber-500" />
-          <p className="mt-3 text-sm text-stone-500">框架已就绪，接下来将基于影片设定生成 3 种截然不同的视觉风格</p>
+          <p className="mt-3 text-sm text-stone-500">框架已就绪，接下来将基于影片设定与全局画风参考生成 3 张可比较的视觉基准候选</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative inline-block">
@@ -4314,7 +4314,7 @@ function StylePanel({
                 >取消</button>
                 <div className="relative inline-block">
                   <button
-                    onClick={() => { setShowConfirmAll(false); onExecute('STYLE', { force: true }) }}
+                    onClick={() => { setShowConfirmAll(false); onExecute('STYLE', { action: 'generate-images', force: true }) }}
                     disabled={isExecuting}
                     className="flex items-center gap-1.5 rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
                   >
@@ -4593,7 +4593,7 @@ function PromptPreview({
               className="rounded-lg border border-stone-200 bg-white p-4"
             >
               {/* 模型选择下拉（风格统一步骤专属） */}
-              {'modelNo' in p && (
+              {'modelNo' in p && !(p as any).referenceLocked && (
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-medium text-stone-700">风格 {idx + 1}</span>
                   <select

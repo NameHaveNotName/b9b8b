@@ -5,6 +5,7 @@ import { checkProjectPermission } from '@/lib/project-permission'
 import { prisma } from '@/lib/prisma'
 import { projectDetailSelect, projectCoreSelect } from '@/lib/db/project-select'
 import { computeProjectStateFromSteps } from '@/lib/workflow-state'
+import { frameworkFromSteps } from '@/lib/project-framework'
 
 export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -39,6 +40,7 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
 
     const projectWithDerivedState = {
       ...project,
+      framework: frameworkFromSteps(project.steps),
       stepIdeaDone: project.stepIdeaDone || derivedState.stepIdeaDone,
       stepFrameworkDone: project.stepFrameworkDone || derivedState.stepFrameworkDone,
       stepStyleDone: project.stepStyleDone || derivedState.stepStyleDone || hasSelectedStyle,

@@ -48,6 +48,9 @@ import {
 import { extractAssistantOutput } from '../lib/supplier-output.ts'
 import { buildFrameworkDeepeningView } from '../lib/framework-deepening-view.ts'
 import { creativeDisplayText, normalizeCreativeDirections, normalizeCreativeKeywords } from '../lib/creative-directions.ts'
+import { buildVisionImagePreview, VISION_PREVIEW_MAX_EDGE } from '../lib/vision-image-input.ts'
+import { frameworkCharacterOptions, frameworkFromSteps } from '../lib/project-framework.ts'
+import { buildStyleReferencePlan } from '../lib/style-reference-policy.ts'
 import {
   computeProjectStateFromSteps,
   getStepDisplayState,
@@ -1994,6 +1997,44 @@ check('结构化受众价值不会作为 React 子节点进入关键词', () => 
 check('创意文本兼容数组和带 value 的结构化旧数据', () => {
   assert.equal(creativeDisplayText({ value: ['第一点', '第二点'] }), '第一点、第二点')
   assert.deepEqual(normalizeCreativeKeywords({ primary: ['学生'], value: ['收藏价值'] }), ['学生', '收藏价值'])
+})
+
+console.log('\n== 视觉文字请求预览图 ==')
+
+await checkAsync('2K 参考图只压缩请求副本，不超过视觉分析边长', async () => {
+  const sharp = (await import('sharp')).default
+  const source = await sharp({
+    create: { width: 2512, height: 1212, channels: 3, background: '#48658f' },
+  }).jpeg({ quality: 92 }).toBuffer()
+  const result = await buildVisionImagePreview(`data:image/jpeg;base64,${source.toString('base64')}`)
+  assert.equal(result.width, VISION_PREVIEW_MAX_EDGE)
+  assert.ok((result.height || 0) < VISION_PREVIEW_MAX_EDGE)
+  assert.ok(result.previewBytes < result.sourceBytes)
+  assert.match(result.dataUrl, /^data:image\/jpeg;base64,/)
+})
+
+check('项目详情从框架步骤输出角色，供参考图身份下拉框使用', () => {
+  const framework = frameworkFromSteps([
+    { stepType: 'IDEATION', outputData: { directions: [] } },
+    { stepType: 'FRAMEWORK', outputData: { characters: [{ id: 'char_1', name: '男大学生' }, { id: 'char_2', name: '大肥鱼' }] } },
+  ])
+  assert.deepEqual(frameworkCharacterOptions(framework), [
+    { id: 'char_1', name: '男大学生' },
+    { id: 'char_2', name: '大肥鱼' },
+  ])
+})
+
+check('全局画风是硬约束，身份参考只绑定指定角色', () => {
+  const plan = buildStyleReferencePlan([
+    { url: 'style-a.jpg', role: 'STYLE' },
+    { url: 'identity-b.jpg', role: 'IDENTITY', targetCharacterId: 'char_2', labels: ['大肥鱼'] },
+    { url: 'unbound.jpg', role: 'IDENTITY', labels: ['未知角色'] },
+  ], [{ id: 'char_2', name: '大肥鱼' }])
+  assert.equal(plan.lockedToGlobalStyle, true)
+  assert.deepEqual(plan.references.map((reference) => reference.url), ['style-a.jpg', 'identity-b.jpg'])
+  assert.match(plan.instruction, /SAME reference-defined visual style/)
+  assert.match(plan.instruction, /authoritative IDENTITY reference for “大肥鱼”/)
+  assert.doesNotMatch(plan.instruction, /未知角色/)
 })
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败\n`)

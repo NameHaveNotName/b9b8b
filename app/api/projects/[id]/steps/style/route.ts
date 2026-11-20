@@ -46,9 +46,13 @@ async function generateStylePrompts(
     .filter((reference) => ['STYLE', 'ENVIRONMENT', 'COMPOSITION'].includes(reference.role))
   const refLabels = refs.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
   const hasRefs = refs.length > 0
+  const hasGlobalStyleRefs = refs.some((reference) => reference.role === 'STYLE')
   const visualRefBlock = hasRefs
     ? `【用户上传了 ${refs.length} 张视觉参考图${refLabels.length > 0 ? `，标签：${refLabels.join('、')}` : ''}】\n` +
-      `这些图片只负责画风、环境或构图。请提取艺术媒介、角色渲染方式、环境质感、色彩、光影与合成关系；严禁复制图中人物、吉祥物或产品的身份、脸、服装和物种。三种方案必须分别说明环境层、角色渲染层和合成层。`
+      (hasGlobalStyleRefs
+        ? `【参考锁定模式】其中“全局画风”是必须忠实继承的视觉规范，不是灵感素材。三种候选只能在同一画风内改变构图、景别、姿态或光线强度，禁止改换写实、水墨、另一种动漫、3D 等媒介。`
+        : `这些图片只负责环境或构图，不得据此猜测全局画风。`) +
+      `\n每张图片只影响已指定职责；严禁把画风图中的人物身份、脸、服装或物种复制给项目角色。三种方案必须分别说明环境层、角色渲染层和合成层。`
     : '【无视觉参考图】请基于故事梗概、视觉关键词和角色设定生成三种风格方案。'
 
   const prompt = loadPromptTemplate('style-generation', {
@@ -72,7 +76,7 @@ async function generateStylePrompts(
       imageUrls: refUrls,
       imageLabels: refLabels,
       temperature: 0.7,
-      maxTokens: 4096,
+      maxTokens: 2400,
     })
   } else {
     resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: routing?.model || textModel })
@@ -108,6 +112,7 @@ async function generateStylePrompts(
     styleName: s.styleName || `风格 ${i + 1}`,
     styleId: s.id || String(i + 1),
     modelNo: s.modelNo,
+    referenceLocked: hasGlobalStyleRefs,
   }))
 
   const step = await prisma.workflowStep.findUnique({ where: { id: stepId } })
@@ -130,6 +135,7 @@ async function generateStylePrompts(
         textRoutingMode: routing?.mode,
         textRoutingSnapshot: routing?.snapshot || undefined,
         textModel: routing?.legacyModel || textModel,
+        globalStyleReferenceLocked: hasGlobalStyleRefs,
       },
     },
   })
@@ -196,9 +202,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       })
     } catch (e: any) {
       // 工作指令.txt（2026-06-04）：区分 AbortError（超时）与其他错误，给用户更友好的提示
-      const isAbort = e?.name === 'AbortError' || /aborted|timeout|timed out/i.test(e?.message || '')
+      const isAbort = e?.name === 'AbortError' || /aborted|timeout|timed out|超过\s*\d+\s*秒/i.test(e?.message || '')
       const errorMessage = isAbort
-        ? '提示词生成超时（模型响应较慢），请稍后重试'
+        ? '风格参考图分析超时（尚未开始生成图片），已保留当前步骤，可直接重试'
         : e.message
       console.error(`[STYLE-PROMPT] 失败: ${errorMessage}`, e?.stack?.slice(0, 300))
       await failStep(step.id, errorMessage)
@@ -222,7 +228,8 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
     console.log('[STYLE-IMAGE] prompts count:', prompts.length)
     console.log('[STYLE-IMAGE] step.status:', step.status, 'step.id:', step.id)
     // 工作指令.txt（2026-06-07）：prompts 为空时自动触发提示词生成，不返回 400
-    let resolvedPrompts = prompts
+    // “重新生成全部”必须重新分析当前参考图，不能继续复用旧版已发散的提示词。
+    let resolvedPrompts = force ? [] : prompts
     let resolvedStyleOptions = existingOutput.styleOptions || []
     if (resolvedPrompts.length === 0) {
       console.warn('[STYLE-IMAGE] No prompts found, auto-triggering prompt generation')
@@ -238,9 +245,9 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         console.log(`[STYLE-IMAGE] Auto-generated ${resolvedPrompts.length} prompts, continuing to image generation`)
         await deductPointsAndLog(userId, promptPointsCheck.cost, 'generate', { projectId: params.id, workflowStepId: step.id, success: true })
       } catch (promptErr: any) {
-        const isAbort = promptErr?.name === 'AbortError' || /aborted|timeout|timed out/i.test(promptErr?.message || '')
+        const isAbort = promptErr?.name === 'AbortError' || /aborted|timeout|timed out|超过\s*\d+\s*秒/i.test(promptErr?.message || '')
         const errorMessage = isAbort
-          ? '提示词生成超时（模型响应较慢），请稍后重试'
+          ? '风格参考图分析超时（尚未开始生成图片），已保留当前步骤，可直接重试'
           : promptErr.message
         console.error(`[STYLE-IMAGE] Auto-prompt generation failed: ${errorMessage}`, promptErr?.stack?.slice(0, 300))
         await failStep(step.id, errorMessage)
@@ -434,9 +441,13 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       .filter((reference) => ['STYLE', 'ENVIRONMENT', 'COMPOSITION'].includes(reference.role))
     const refLabelsCompat = refsCompat.filter((r: any) => r.labels?.length).flatMap((r: any) => r.labels)
     const hasRefsCompat = refsCompat.length > 0
+    const hasGlobalStyleRefsCompat = refsCompat.some((reference) => reference.role === 'STYLE')
     const visualRefBlockCompat = hasRefsCompat
       ? `【用户上传了 ${refsCompat.length} 张视觉参考图${refLabelsCompat.length > 0 ? `，标签：${refLabelsCompat.join('、')}` : ''}】\n` +
-        `这些图片只负责画风、环境或构图。只提取艺术媒介、角色渲染方式、环境质感、色彩、光影与合成关系；严禁复制图中人物、吉祥物或产品身份。`
+        (hasGlobalStyleRefsCompat
+          ? `【参考锁定模式】其中“全局画风”是必须忠实继承的视觉规范，不是灵感素材。三种候选只能在同一画风内改变构图、景别、姿态或光线强度，禁止改换写实、水墨、另一种动漫、3D 等媒介。`
+          : `这些图片只负责环境或构图，不得据此猜测全局画风。`) +
+        `\n每张图片只影响已指定职责；严禁把画风图中的人物身份、脸、服装或物种复制给项目角色。`
       : '【无视觉参考图】请基于故事梗概、视觉关键词和角色设定生成三种风格方案。'
 
     const charactersCompat = framework?.characters || []
@@ -466,7 +477,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
         imageUrls: refUrlsCompat,
         imageLabels: refLabelsCompat,
         temperature: 0.7,
-        maxTokens: 4096,
+        maxTokens: 2400,
       })
     } else {
       resultText = await textClient.generate(prompt, { temperature: 0.7, maxTokens: 4096, model: routingCompat.model })
@@ -508,6 +519,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       textRoutingMode: routingCompat.mode,
       textRoutingSnapshot: routingCompat.snapshot || undefined,
       textModel: routingCompat.legacyModel,
+      globalStyleReferenceLocked: hasGlobalStyleRefsCompat,
     }
     await prisma.workflowStep.update({
       where: { id: step.id },

@@ -6,6 +6,8 @@ import { uploadFile, getSignedFileUrl } from './r2'
 import { getProjectReferences } from './style-ref'
 import { refundPointsAndLog } from './points'
 import type { BillingSource } from './billing-policy'
+import { frameworkCharacterOptions } from './project-framework'
+import { buildStyleReferencePlan } from './style-reference-policy'
 
 export interface StyleOption {
   id: string
@@ -40,10 +42,21 @@ export async function processStyleGeneration(
   const userRefs = await getProjectReferences(projectId).catch(() => [])
   const eligibleStyleRefs = userRefs.filter(r => ['STYLE', 'ENVIRONMENT', 'COMPOSITION'].includes(r.role) && r.url)
   const eligibleUrls = eligibleStyleRefs.map(r => r.url)
-  const userRefUrls = referenceOverrides
+  const selectedStyleRefs = referenceOverrides
     ? referenceOverrides.filter((url) => eligibleUrls.includes(url))
     : eligibleUrls
-  console.log(`[StyleProcessor] 用户参考图: ${userRefUrls.length} 张`)
+  const frameworkStep = await prisma.workflowStep.findUnique({
+    where: { projectId_stepType: { projectId, stepType: 'FRAMEWORK' } },
+    select: { outputData: true },
+  })
+  const frameworkCharacters = frameworkCharacterOptions(frameworkStep?.outputData)
+  const selectedRefs = [
+    ...eligibleStyleRefs.filter((reference) => selectedStyleRefs.includes(reference.url)),
+    ...userRefs.filter((reference) => reference.role === 'IDENTITY' && reference.targetCharacterId && reference.url),
+  ]
+  const referencePlan = buildStyleReferencePlan(selectedRefs, frameworkCharacters)
+  const userRefUrls = referencePlan.references.map((reference) => reference.url)
+  console.log(`[StyleProcessor] 用户参考图: ${userRefUrls.length} 张，画风锁定=${referencePlan.lockedToGlobalStyle}`)
 
   // 幂等检查：若 step 已 COMPLETED/FAILED，直接跳过（防止 BullMQ + setImmediate 双触发）
   // 这一步失败必须中断而不是继续：DB 不可用时继续执行，防重就失效了，
@@ -73,7 +86,7 @@ export async function processStyleGeneration(
           const modelConfig = opt.modelNo
             ? STYLE_MODEL_POOL.find(m => m.no === opt.modelNo) || STYLE_MODEL_POOL[0]
             : null
-          const modelId = imageModel || modelConfig?.id || IMAGE_MODELS.primary
+          const modelId = imageModel || (referencePlan.lockedToGlobalStyle ? IMAGE_MODELS.primary : modelConfig?.id) || IMAGE_MODELS.primary
 
           console.log(`[STYLE-GEN] 风格 ${idx + 1}: ${opt.styleName} → 模型 ${modelConfig?.no || '?'} (${modelId})`)
 
@@ -83,7 +96,7 @@ export async function processStyleGeneration(
               : /^16:9|21:9|4:3|landscape/i.test(aspectRatio)
                 ? 'landscape orientation, cinematic widescreen, horizontal frame. '
                 : ''
-            const finalPrompt = opt.prompt + (orientationHint ? ` ${orientationHint}` : '')
+            const finalPrompt = [referencePlan.instruction, opt.prompt, orientationHint].filter(Boolean).join('\n\n')
 
             console.log(`[STYLE-GEN-ENTER] 开始调用 generateImage，风格 ${idx + 1}: ${opt.styleName}, modelId=${modelId}, prompt长度=${finalPrompt?.length || 0}`)
             const { buffer, model: usedModel, revisedPrompt, isMock, lastError } = await generateImage({
@@ -92,6 +105,7 @@ export async function processStyleGeneration(
               quality: 'low',
               aspectRatio,
               referenceImages: userRefUrls.length > 0 ? userRefUrls : undefined,
+              requireReferenceImages: userRefUrls.length > 0,
             })
             console.log(`[STYLE-GEN-EXIT] generateImage 返回，风格 ${idx + 1}: ${opt.styleName}, isMock=${!!isMock}, usedModel=${usedModel}`)
 
@@ -126,8 +140,8 @@ export async function processStyleGeneration(
               isMock: !!isMock,
               mockReason: lastError,
               modelNo: modelConfig?.no || 1,
-              modelId: modelConfig?.id || usedModel,
-              modelLabel: modelConfig?.label || usedModel,
+              modelId: usedModel,
+              modelLabel: usedModel,
             }
           } catch (e: any) {
             console.error(`[StyleProcessor] Image ${idx + 1} failed:`, e.message)
