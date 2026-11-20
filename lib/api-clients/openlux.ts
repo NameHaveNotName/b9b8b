@@ -17,6 +17,7 @@ import {
   shouldUseMinimax,
 } from '@/lib/text-models'
 import { buildVisionImagePreview } from '@/lib/vision-image-input'
+import { buildOpenLuxRequestHeaders } from '@/lib/openlux-request-headers'
 import fs from 'fs'
 import path from 'path'
 
@@ -56,6 +57,16 @@ function pruneBase64Cache(now: number) {
 }
 // OpenLux 聚合网关密钥；不再回退旧供应商密钥，避免把凭据发往错误域名。
 const API_KEY = process.env.OPENLUX_API_KEY
+const APP_CODE = process.env.OPENLUX_APP_CODE
+
+function openLuxHeaders(
+  additional: Record<string, string> = {},
+  apiKey: string | undefined = API_KEY,
+  includeAppCode = apiKey === API_KEY,
+): Record<string, string> {
+  if (!apiKey) throw new Error('OPENLUX_API_KEY not configured')
+  return buildOpenLuxRequestHeaders(apiKey, includeAppCode ? APP_CODE : undefined, additional)
+}
 
 // MiniMax 官方 API（2026-05-18）：当配置了 MINIMAX_API_KEY 时走官方 endpoint
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || ''
@@ -70,7 +81,7 @@ export async function getAvailableOpenLuxModelIds(forceRefresh = false): Promise
     return openLuxModelCatalogCache.ids
   }
   const response = await fetch(`${BASE_URL}/v1/models`, {
-    headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' },
+    headers: openLuxHeaders({ Accept: 'application/json' }),
     cache: 'no-store',
     signal: AbortSignal.timeout(20_000),
   })
@@ -245,10 +256,9 @@ async function openLuxFetch(path: string, body: any, timeoutMs = OPENLUX_REQUEST
   try {
     const res = await trackedSupplierFetch(`${BASE_URL}${path}`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${API_KEY}`,
+      headers: openLuxHeaders({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify(body),
       signal: controller.signal,
     })
@@ -546,11 +556,10 @@ async function callGeminiImage(p: GenerateImageParams): Promise<OpenLuxImageRaw>
 
   const res = await trackedSupplierFetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }),
     body: bodyStr,
     signal: AbortSignal.timeout ? AbortSignal.timeout(180000) : undefined,
   })
@@ -965,11 +974,10 @@ async function callGptImageEdit(p: GenerateImageParams): Promise<OpenLuxImageRaw
   // Keep this below the Vercel function limit so the route can still return a real error.
   const res = await trackedSupplierFetch(`${BASE_URL}/v1/images/edits`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': `multipart/form-data; boundary=${boundary}`,
       ...imageProviderPreferenceHeaders(p),
-    },
+    }),
     body,
     signal: AbortSignal.timeout ? AbortSignal.timeout(240000) : undefined,
   })
@@ -1033,12 +1041,11 @@ async function callOpenLuxImageOnce(p: GenerateImageParams): Promise<OpenLuxImag
 
   const res = await trackedSupplierFetch(`${BASE_URL}/v1/images/generations`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       ...imageProviderPreferenceHeaders(params),
-    },
+    }),
     body: bodyString,
     signal: controller.signal,
   })
@@ -1420,7 +1427,7 @@ export async function generateVideo(
 
 export async function queryVideoTask(taskId: string): Promise<{ status: string; url?: string }> {
   const data = await trackedSupplierFetch(`${BASE_URL}/v1/video/tasks/${taskId}`, {
-    headers: { 'Authorization': `Bearer ${API_KEY}` },
+    headers: openLuxHeaders(),
   }).then((r) => r.json())
 
   return { status: data.status, url: data.video_url || data.url }
@@ -1493,11 +1500,10 @@ async function callOpenLuxVideoOnce(
 
   const res = await trackedSupplierFetch(`${BASE_URL}/v1/videos/generations`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }),
     body: JSON.stringify(body),
     signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
   })
@@ -1548,7 +1554,7 @@ async function pollVideoTask(
     await new Promise((r) => setTimeout(r, pollIntervalMs))
     try {
       const res = await trackedSupplierFetch(`${BASE_URL}/v1/videos/tasks/${taskId}`, {
-        headers: { 'Authorization': `Bearer ${API_KEY}` },
+        headers: openLuxHeaders(),
         signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
       })
       const text = await res.text()
@@ -1722,10 +1728,9 @@ export async function submitJimengVideo(params: {
 
   const res = await trackedSupplierFetch(`${BASE_URL}/jimeng/submit/videos`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
-    },
+    }),
     body,
     signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
   })
@@ -1775,7 +1780,7 @@ export async function pollJimengTask(
       // TODO(round8): 校对真实查询接口
       const url = `${BASE_URL}/jimeng/query/videos?task_id=${encodeURIComponent(taskId)}`
       const res = await trackedSupplierFetch(url, {
-        headers: { 'Authorization': `Bearer ${API_KEY}` },
+        headers: openLuxHeaders(),
         signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
       })
       const text = await res.text()
@@ -1875,11 +1880,10 @@ export async function submitHailuoVideo(params: {
 
   const res = await trackedSupplierFetch(`${BASE_URL}/minimax/v1/video_generation`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }),
     body,
     signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
   })
@@ -1932,7 +1936,7 @@ export async function pollHailuoTask(
     for (const url of queryUrls) {
       try {
         const res = await trackedSupplierFetch(url, {
-          headers: { 'Authorization': `Bearer ${API_KEY}` },
+          headers: openLuxHeaders(),
           signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
         })
         const text = await res.text()
@@ -2028,11 +2032,10 @@ export async function submitWanVideo(params: WanSubmitParams): Promise<SubmitTas
 
   const res = await trackedSupplierFetch(`${BASE_URL}/alibailian/api/v1/services/aigc/video-generation/video-synthesis`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }),
     body,
     signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
   })
@@ -2070,7 +2073,7 @@ export async function pollWanTask(
     try {
       const url = `${BASE_URL}/alibailian/api/v1/tasks/${encodeURIComponent(taskId)}`
       const res = await trackedSupplierFetch(url, {
-        headers: { 'Authorization': `Bearer ${API_KEY}` },
+        headers: openLuxHeaders(),
         signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
       })
       const text = await res.text()
@@ -2169,11 +2172,10 @@ export async function submitViduVideo(params: ViduSubmitParams): Promise<SubmitT
   console.log('[VIDU-SUBMIT] → POST', `${BASE_URL}/ent/v2/img2video`, `model=${params.model || 'viduq2-turbo'} duration=${duration}`)
   const res = await trackedSupplierFetch(`${BASE_URL}/ent/v2/img2video`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       Accept: 'application/json',
-    },
+    }),
     body,
     signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
   })
@@ -2209,7 +2211,7 @@ export async function pollViduTask(
     const url = `${BASE_URL}/ent/v2/tasks/${encodeURIComponent(taskId)}/creations`
     try {
       const res = await trackedSupplierFetch(url, {
-        headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' },
+        headers: openLuxHeaders({ Accept: 'application/json' }),
         signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
       })
       const text = await res.text()
@@ -2315,11 +2317,10 @@ export async function submitVeoVideo(params: VeoSubmitParams): Promise<SubmitTas
 
   const res = await trackedSupplierFetch(`${BASE_URL}/v1/video/create`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }),
     body,
     signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
   })
@@ -2374,10 +2375,9 @@ export async function pollVeoTask(
     for (const url of queryUrls) {
       try {
         const res = await trackedSupplierFetch(url, {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`,
+          headers: openLuxHeaders({
             'Accept': 'application/json',
-          },
+          }),
           signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
         })
         const text = await res.text()
@@ -2468,11 +2468,10 @@ export async function submitSunoMusic(params: {
 
   const res = await trackedSupplierFetch(`${BASE_URL}/suno/submit/music`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }),
     body,
     signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
   })
@@ -2527,10 +2526,9 @@ export async function pollSunoTask(
     for (const url of queryUrls) {
       try {
         const res = await trackedSupplierFetch(url, {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`,
+          headers: openLuxHeaders({
             'Accept': 'application/json',
-          },
+          }),
           signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
         })
         const text = await res.text()
@@ -2605,10 +2603,9 @@ export async function pollSunoTaskFull(
     for (const url of queryUrls) {
       try {
         const res = await trackedSupplierFetch(url, {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`,
+          headers: openLuxHeaders({
             'Accept': 'application/json',
-          },
+          }),
           signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined,
         })
         const text = await res.text()
@@ -2662,10 +2659,9 @@ export async function downloadSunoWav(clipId: string): Promise<string> {
   console.log('[SUNO-WAV] →', url)
 
   const res = await trackedSupplierFetch(url, {
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Accept': 'application/json',
-    },
+    }),
     signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
   })
 
@@ -2828,11 +2824,10 @@ export async function generateMusicMinimax(params: {
 
   const res = await trackedSupplierFetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-    },
+    }, apiKey, !useOfficial),
     body: bodyStr,
     signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
   })
@@ -3009,10 +3004,9 @@ export async function editImage(params: EditImageParams): Promise<EditImageResul
 
   const res = await trackedSupplierFetch(`${BASE_URL}/v1/images/edits`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Accept': 'application/json',
-    },
+    }),
     body: formData,
     signal: AbortSignal.timeout ? AbortSignal.timeout(180000) : undefined,
   })
@@ -3117,11 +3111,10 @@ async function generateSeedanceVideo(params: GenerateDirectVideoParams): Promise
   const endpoint = `${BASE_URL}/api/v3/contents/generations/tasks`
   const response = await trackedSupplierFetch(endpoint, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       'Content-Type': 'application/json',
       Accept: 'application/json',
-    },
+    }),
     body: JSON.stringify(body),
     signal: AbortSignal.timeout ? AbortSignal.timeout(60_000) : undefined,
   })
@@ -3144,7 +3137,7 @@ async function generateSeedanceVideo(params: GenerateDirectVideoParams): Promise
     const poll = await trackedSupplierFetch(
       `${BASE_URL}/api/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`,
       {
-        headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' },
+        headers: openLuxHeaders({ Accept: 'application/json' }),
         signal: AbortSignal.timeout ? AbortSignal.timeout(30_000) : undefined,
       }
     )
@@ -3263,11 +3256,10 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
 
     const res = await trackedSupplierFetch(`${BASE_URL}/minimax/v1/video_generation`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
+      headers: openLuxHeaders({
         'Content-Type': 'application/json',
         Accept: 'application/json',
-      },
+      }),
       body: bodyStr,
       signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
     })
@@ -3322,11 +3314,10 @@ export async function generateDirectVideo(params: GenerateDirectVideoParams): Pr
 
     const res = await trackedSupplierFetch(`${BASE_URL}/v1/video/create`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
+      headers: openLuxHeaders({
         'Content-Type': 'application/json',
         Accept: 'application/json',
-      },
+      }),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
     })
@@ -3435,10 +3426,9 @@ export async function generateConceptSceneWithEdit(params: {
 
   const res = await trackedSupplierFetch(`${BASE_URL}/v1/images/edits`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
+    headers: openLuxHeaders({
       // 注意：不设置 Content-Type，让 fetch 自动生成 multipart boundary
-    },
+    }),
     body: form,
     signal: AbortSignal.timeout ? AbortSignal.timeout(180000) : undefined,
   })

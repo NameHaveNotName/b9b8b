@@ -49,6 +49,7 @@ import { extractAssistantOutput } from '../lib/supplier-output.ts'
 import { buildFrameworkDeepeningView } from '../lib/framework-deepening-view.ts'
 import { creativeDisplayText, normalizeCreativeDirections, normalizeCreativeKeywords } from '../lib/creative-directions.ts'
 import { buildVisionImagePreview, VISION_PREVIEW_MAX_EDGE } from '../lib/vision-image-input.ts'
+import { buildOpenLuxRequestHeaders } from '../lib/openlux-request-headers.ts'
 import { frameworkCharacterOptions, frameworkFromSteps } from '../lib/project-framework.ts'
 import { buildStyleReferencePlan } from '../lib/style-reference-policy.ts'
 import {
@@ -2035,6 +2036,18 @@ check('全局画风是硬约束，身份参考只绑定指定角色', () => {
   assert.match(plan.instruction, /SAME reference-defined visual style/)
   assert.match(plan.instruction, /authoritative IDENTITY reference for “大肥鱼”/)
   assert.doesNotMatch(plan.instruction, /未知角色/)
+})
+
+check('OpenLux 服务端请求携带应用码且不会替代 API Key', () => {
+  const headers = buildOpenLuxRequestHeaders('sk-test', '  APP-test-code  ', {
+    'Content-Type': 'application/json',
+  })
+  assert.equal(headers.Authorization, 'Bearer sk-test')
+  assert.equal(headers['APP-Code'], 'APP-test-code')
+  assert.equal(headers['Content-Type'], 'application/json')
+
+  const withoutCode = buildOpenLuxRequestHeaders('sk-test', '   ')
+  assert.equal('APP-Code' in withoutCode, false)
 })
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败\n`)
