@@ -1,3 +1,5 @@
+import { normalizeCreativeKeyBeats } from '@/lib/creative-plan-view'
+
 type JsonRecord = Record<string, unknown>
 
 const FIELD_LABELS: Record<string, string> = {
@@ -132,6 +134,7 @@ function PlanOverview({ plan }: { plan: JsonRecord }) {
   const story = isRecord(plan.storyApproach) ? plan.storyApproach : {}
   const audience = isRecord(plan.audienceAndPlatform) ? plan.audienceAndPlatform : {}
   const subject = isRecord(plan.narrativeSubject) && isRecord(plan.narrativeSubject.primary) ? plan.narrativeSubject.primary : {}
+  const keyBeats = normalizeCreativeKeyBeats(plan.keyBeats)
   const quickFacts = ([
     ['主创意方向', story.direction],
     ['主要叙事主体', subject.subject],
@@ -151,7 +154,7 @@ function PlanOverview({ plan }: { plan: JsonRecord }) {
 
       {quickFacts.length > 0 && <section><h4 className="mb-2 text-sm font-semibold text-stone-800">审核速览</h4><div className="grid gap-2 sm:grid-cols-2">{quickFacts.map(([label, value]) => <div key={String(label)} className="rounded-xl border border-stone-200 bg-white p-3"><p className="text-[11px] font-semibold text-stone-400">{label}</p><p className="mt-1 text-sm leading-6 text-stone-700">{displayPrimitive(value)}</p></div>)}</div></section>}
 
-      {Array.isArray(plan.keyBeats) && <section><h4 className="mb-3 text-sm font-semibold text-stone-800">故事如何展开</h4><div className="space-y-0">{plan.keyBeats.map((item, index) => { const beat = isRecord(item) ? item : {}; return <div key={index} className="grid grid-cols-[30px_1fr] gap-3"><div className="flex flex-col items-center"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-900 text-xs font-bold text-white">{index + 1}</span>{index < (plan.keyBeats as unknown[]).length - 1 && <span className="min-h-8 w-px flex-1 bg-stone-200" />}</div><div className="pb-4"><p className="text-sm font-semibold text-stone-800">{displayPrimitive(beat.beat)}</p><p className="mt-1 text-sm leading-6 text-stone-700">{displayPrimitive(beat.content)}</p>{beat.evidence != null && <p className="mt-1 text-xs leading-5 text-stone-500"><span className="font-semibold">判断依据：</span>{displayPrimitive(beat.evidence)}</p>}</div></div>})}</div></section>}
+      {keyBeats.length > 0 && <section><h4 className="mb-3 text-sm font-semibold text-stone-800">故事如何展开</h4><div className="space-y-0">{keyBeats.map((beat, index) => <div key={`${index}-${beat.title}`} className="grid grid-cols-[30px_1fr] gap-3"><div className="flex flex-col items-center"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-900 text-xs font-bold text-white">{index + 1}</span>{index < keyBeats.length - 1 && <span className="min-h-8 w-px flex-1 bg-stone-200" />}</div><div className="pb-4"><p className="text-sm font-semibold text-stone-800">{beat.title}</p><p className="mt-1 text-sm leading-6 text-stone-700">{beat.content}</p>{beat.evidence && <p className="mt-1 text-xs leading-5 text-stone-500"><span className="font-semibold">判断依据：</span>{beat.evidence}</p>}</div></div>)}</div></section>}
 
       {Array.isArray(plan.productionRisks) && <FieldValue fieldKey="productionRisks" value={plan.productionRisks} />}
       {Array.isArray(plan.userDecisionPoints) && <FieldValue fieldKey="userDecisionPoints" value={plan.userDecisionPoints} />}

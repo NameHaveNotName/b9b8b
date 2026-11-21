@@ -48,6 +48,7 @@ import {
 import { extractAssistantOutput } from '../lib/supplier-output.ts'
 import { buildFrameworkDeepeningView } from '../lib/framework-deepening-view.ts'
 import { creativeDisplayText, normalizeCreativeDirections, normalizeCreativeKeywords } from '../lib/creative-directions.ts'
+import { normalizeCreativeKeyBeats } from '../lib/creative-plan-view.ts'
 import { buildVisionImagePreview, VISION_PREVIEW_MAX_EDGE } from '../lib/vision-image-input.ts'
 import { buildOpenLuxRequestHeaders } from '../lib/openlux-request-headers.ts'
 import { frameworkCharacterOptions, frameworkFromSteps } from '../lib/project-framework.ts'
@@ -1998,6 +1999,18 @@ check('结构化受众价值不会作为 React 子节点进入关键词', () => 
 check('创意文本兼容数组和带 value 的结构化旧数据', () => {
   assert.equal(creativeDisplayText({ value: ['第一点', '第二点'] }), '第一点、第二点')
   assert.deepEqual(normalizeCreativeKeywords({ primary: ['学生'], value: ['收藏价值'] }), ['学生', '收藏价值'])
+})
+
+check('故事展开兼容 stage/content/evidence，不再把标题显示为暂无', () => {
+  assert.deepEqual(normalizeCreativeKeyBeats([
+    { stage: '汇报前夜', content: '建立限期和冲突。', evidence: '使用用户真实原页。' },
+  ]), [{ title: '汇报前夜', content: '建立限期和冲突。', evidence: '使用用户真实原页。' }])
+})
+
+check('故事展开兼容旧 name/audienceTakeaway/proofMaterial 数据', () => {
+  assert.deepEqual(normalizeCreativeKeyBeats([
+    { name: '重点消失', audienceTakeaway: '重点看不出来。', proofMaterial: '文字密集的 PPT。' },
+  ]), [{ title: '重点消失', content: '重点看不出来。', evidence: '文字密集的 PPT。' }])
 })
 
 console.log('\n== 视觉文字请求预览图 ==')

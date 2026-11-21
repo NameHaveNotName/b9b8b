@@ -228,6 +228,7 @@ ${JSON_RULE}
   const creativePlan = parseObject(await adapters.text(`你是最终方案归纳 Agent。基于目标、研究、策略、三个候选和评审，产出一份等待用户确认的完整创作方案。方案必须能继续指导叙事框架搭建，但此处不要直接生成正式框架。主角可为人、动物、产品、物品或抽象主体。
 ${JSON_RULE}
 字段必须包含：title, summary, centralIdea, narrativeSubject, audienceAndPlatform, storyApproach, audiovisualApproach, keyBeats, requiredAssets, factualGuardrails, productionRisks, userDecisionPoints。
+keyBeats 必须是按故事顺序排列的数组，每项固定包含 stage（节点标题）、content（具体展开）和 evidence（判断依据），不要改用 name、beat、proofMaterial 等别名。
 目标契约：${compact(goalContract)}
 策略地图：${compact(strategyMap)}
 候选：${compact(conceptCandidates, 20000)}
@@ -265,6 +266,7 @@ export async function reviseCreativePlan(
   return parseObject(await text(`你是创作方案修订 Agent。只根据用户意见修改当前完整创作方案，不重新执行目标分析、联网研究、并行创意或评审；没有被意见触及的部分必须保持稳定。不要新增未经研究支持的事实。
 ${JSON_RULE}
 输出仍须包含：title, summary, centralIdea, narrativeSubject, audienceAndPlatform, storyApproach, audiovisualApproach, keyBeats, requiredAssets, factualGuardrails, productionRisks, userDecisionPoints。
+keyBeats 必须继续使用数组项 { stage, content, evidence }，不得改名或丢失节点标题。
 目标契约：${compact(input.goalContract || {})}
 当前方案：${compact(input.currentPlan, 18000)}
 用户修改意见：${feedback}`), 'creative-plan-revision')
