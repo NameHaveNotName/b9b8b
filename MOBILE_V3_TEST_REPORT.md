@@ -27,6 +27,7 @@
 | build | PASS | `npm run build` → exit 0，16 条动态路由全部构建成功 | — |
 | 320/390/430 手机 | PASS | `node scripts/mobile-v3/acceptance.mjs`（AFF_VIEWPORTS=320,390,430,768,1440）：133 项中 **128 PASS / 0 FAIL / 5 BLOCKED**（BLOCKED 全部为 `series-detail`，见下），123 张截图 `artifacts/acc-final3/` | 见缺陷闭环 #1、#4、#5、#7、#8 |
 | 768 边界 / 1440 桌面 | PASS | 同上；768 与 1440 全部用例 `documentElement.scrollWidth == clientWidth`（整页零溢出），内容区零溢出 | 见缺陷闭环 #2、#3、#8 |
+| 桌面基线回归（1440） | PASS | `node scripts/mobile-v3/desktop-regression.mjs`（基线 worktree `b9b8b-baseline` @3001 vs 本分支 @3000，15 条路由各截 1 图）：`pageErrors` 双方均 0、`pageOverflow` 本分支 15/15 为 0、控件数量差异**全为增量无减少**（全局 buttons +1 / links +3，`/assets` buttons 21→25、`/settings/profile` navLinks 6→14），`home` 完全一致；证据 `artifacts/desktop-regression/desktop-regression-1440.json` + 30 张对照截图 | 桌面端零回归，无控件删除 |
 | 项目总览 | PASS | `/project/cmu1d2cmb001w04l16a2xq98s`：原始灵感锚点只读可读、九步进度、近期资产、原两按钮（继续工作流 / 查看资产）、小组权限操作保留；无新增「元构思」「分镜设计」「工作流目录」按钮 | — |
 | 01 创意扩散 | PASS | 真实渲染 + 点击后 `aria-current=step`，零溢出 / 零 pageerror / 零同源写请求 | — |
 | 02 框架搭建 | PASS | 九模块 `.aff-section-toggle` 手机默认 `aria-expanded=false`，点击原地展开为 `true`，URL 不变；`320/390/430 framework-inline-fold` 全部 PASS | 见缺陷闭环 #4 |
@@ -63,6 +64,11 @@
 - 对比方法：干净基线 worktree（commit `6f12694`）与本分支分别加载同一批路由，比对控件数量（button / a / img / select / textarea / input / 侧栏导航链接）、可见文本长度、pageerror 数与整页溢出量，脚本 `scripts/mobile-v3/desktop-regression.mjs`。
 - 差异面：本分支相对基线的改动**全部是新增 `.aff-*` className 与新增 CSS 文件**（`git diff` 逐行核对），桌面侧栏、工作流横排、图文多列、悬停与拖拽入口、原有按钮与权限操作均保留，无控件删除、无 pageerror 增量。
 - 1440 视口在最终巡检中 `scrollWidth == clientWidth`、内容区零溢出、零同源写请求。
+- **实跑量化结果（1440px，15 条路由 × 基线/本分支两台服务，证据 `artifacts/desktop-regression/desktop-regression-1440.json` + 30 张对照截图）**：
+  - `pageErrors`：**本分支 0 条，基线 0 条**（无新增运行时错误）。
+  - `pageOverflow`：**本分支 15/15 路由均为 0**（与基线一致，桌面端无横向溢出）。
+  - 控件数量差异**全部为增量，无一条减少**：全局 `buttons +1`、`links +3`（移动端顶栏新增入口）；`/assets` `buttons 21→25`、`images 0→1`；`/settings/profile` `navLinks 6→14`、`links 7→18`、`textLength 216→303`；其余 10 条路由仅差 1 个 button / 3 个 link 的同源增量，`home` 完全一致（`identical`）。
+  - 结论：桌面端既有控件**一个未少**，只多出移动端入口，且没有 pageerror 增量——满足「保留现有桌面端功能」的硬约束。
 
 ## 每小时推进记录
 
@@ -74,7 +80,7 @@
 | 时间 | 阶段 | 结果 | 积分变化 | 证据 |
 |---|---|---|---|---|
 | 待自动化首轮执行 | — | — | — | `artifacts/advance/advance.jsonl`、`artifacts/advance/workbench-*.png`、`artifacts/advance/after-*.png` |
-| 2026-11-25 14:5x（交付前演练，`AFF_DRY_RUN=1`） | 宣传片 TRAILER（PENDING → 推进器选中的下一个可执行步骤） | **dry-run PASS**：真实登录成功（session 复用，账号 983969 点、isAdmin=true）→ 读取九阶段真实状态（idea/framework/style/character/concept/storyboard = COMPLETED；trailer/ending/direct = PENDING）→ 按 DAG 选中「宣传片」→ 成功打开副工作台 → 按 dry-run 跳过确认，**未触发任何付费生成** | 983969 → 983969（无消耗） | `artifacts/advance-dryrun/advance.jsonl`、`artifacts/advance-dryrun/*.png` |
+| 2026-11-25 14:53（Asia/Shanghai，交付前演练，`AFF_DRY_RUN=1`） | 宣传片 TRAILER（PENDING → 推进器选中的下一个可执行步骤） | **dry-run PASS**：真实登录成功（session 复用，账号 983969 点、isAdmin=true）→ 读取九阶段真实状态（idea/framework/style/character/concept/storyboard = COMPLETED；trailer/ending/direct = PENDING）→ 按 DAG 选中「宣传片」→ 成功打开副工作台 → 按 dry-run 跳过确认，**未触发任何付费生成** | 983969 → 983969（无消耗） | `artifacts/advance-dryrun/advance.jsonl`、`artifacts/advance-dryrun/*.png` |
 
 ## 剩余外部阻塞
 
