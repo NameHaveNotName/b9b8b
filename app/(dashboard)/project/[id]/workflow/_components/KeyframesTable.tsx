@@ -99,12 +99,12 @@ function KeyframeCard({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
-      className={`rounded-lg border bg-white p-4 transition ${
+      className={`aff-keyframe-card rounded-lg border bg-white p-4 transition ${
         isDragging ? 'border-amber-300 shadow-lg' : 'border-stone-200'
       }`}
     >
       {/* 顶部：拖拽手柄 + Shot ID + 首帧/尾帧缩略图 */}
-      <div className="flex items-start gap-3 mb-3">
+      <div className="aff-keyframe-head flex items-start gap-3 mb-3">
         {/* 拖拽手柄 */}
         <button
           {...attributes}
@@ -135,7 +135,7 @@ function KeyframeCard({
         </div>
 
         {/* 首帧 + 尾帧缩略图 */}
-        <div className="ml-auto flex shrink-0 gap-2">
+        <div className="aff-keyframe-pair ml-auto flex shrink-0 gap-2">
           {/* 首帧 */}
           <div className="relative">
             {firstFrameUrl ? (
@@ -191,8 +191,9 @@ function KeyframeCard({
                   }}
                 />
                 <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-white">尾帧</span>
+                <button type="button" className="aff-mobile-only aff-tail-retry" disabled={!!generatingShotId} onClick={e => { e.stopPropagation(); onGenerate(shot.shotId, actNumber) }}>重做</button>
                 {hoveredLastFrame && (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-black/60">
+                  <div className="aff-tail-hover absolute inset-0 z-10 flex items-center justify-center rounded-md bg-black/60">
                     <button
                       onClick={(e) => { e.stopPropagation(); onGenerate(shot.shotId, actNumber) }}
                       disabled={!!generatingShotId}

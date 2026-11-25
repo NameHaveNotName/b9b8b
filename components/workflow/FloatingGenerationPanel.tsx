@@ -184,7 +184,7 @@ export default function FloatingGenerationPanel({
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 sm:w-96">
+    <div className="aff-tasks fixed bottom-4 right-4 z-50 w-80 sm:w-96">
       {/* Collapsed pill */}
       {!expanded && (
         <button

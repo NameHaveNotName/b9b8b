@@ -72,3 +72,13 @@ settings.local.json
 /check-demo.js
 /test-fix.js
 /scripts/compare-keys.js
+
+# Mobile V3 验收与推进脚本的本地产物（截图、日志、凭据、会话态）
+.aff-acceptance/
+.aff-advance/
+.aff-storyboard/
+.aff-desktop-regression/
+.aff-probe/
+.temp/
+*.storage-state.json
+storage-state.json

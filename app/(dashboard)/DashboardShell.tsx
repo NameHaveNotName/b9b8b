@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react'
 import AppSidebar from '@/components/layout/AppSidebar'
 import Header from '@/components/layout/Header'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { Menu } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 
 interface User {
@@ -28,6 +31,15 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   const [user, setUser] = useState<User | null>(null)
   const [recentProjects, setRecentProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const pathname = usePathname()
+  useEffect(() => { setMobileMenuOpen(false) }, [pathname])
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileMenuOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mobileMenuOpen])
 
   useEffect(() => {
     let mounted = true
@@ -61,15 +73,24 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   }, [])
 
   return (
-    <div className="flex min-h-screen bg-stone-50">
+    <div className="aff-shell flex min-h-screen bg-stone-50">
+      {mobileMenuOpen && <button type="button" className="aff-mobile-only aff-sidebar-backdrop" aria-label="关闭导航" onClick={() => setMobileMenuOpen(false)} />}
+      <div className="aff-sidebar-wrap flex" data-open={mobileMenuOpen}>
       <AppSidebar
         user={user || { name: '加载中...', email: '' }}
         recentProjects={recentProjects}
         loading={loading}
       />
-      <main className="flex flex-1 flex-col min-h-screen">
+      </div>
+      <main className="aff-main flex flex-1 flex-col min-h-screen">
+        <div className="aff-mobile-only aff-mobile-nav">
+          <button type="button" onClick={() => setMobileMenuOpen(true)} aria-label="展开全部导航" aria-expanded={mobileMenuOpen}><Menu className="mr-1 h-4 w-4" />菜单</button>
+          <Link href="/dashboard">项目</Link>
+          <Link href="/assets">资产</Link>
+          <Link href="/project/new">新建</Link>
+        </div>
         <Header />
-        <div className="flex-1 overflow-auto p-6">
+        <div className="aff-content flex-1 overflow-auto p-6">
           {loading && (
             <div className="mb-4 flex items-center gap-2 text-xs text-stone-400">
               <div className="h-3 w-3 animate-spin rounded-full border border-stone-300 border-t-amber-600" />

@@ -88,7 +88,7 @@ export default function Header() {
   const userInitial = (userName[0] || '?').toUpperCase()
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-stone-200 bg-white px-6">
+    <header className="aff-header flex h-16 items-center justify-between border-b border-stone-200 bg-white px-6">
       <div>
         <h2 className="text-lg font-semibold tracking-tight text-stone-800">{title}</h2>
       </div>

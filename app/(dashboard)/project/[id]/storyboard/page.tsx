@@ -197,7 +197,7 @@ export default function StoryboardPage() {
   console.log('[STORYBOARD-EXPORT] 渲染诊断: hasShots=', hasShots, 'hasAnyImage=', hasAnyImage, 'shotMode=', shotMode)
 
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="aff-storyboard-page mx-auto max-w-7xl">
       {/* 顶部导航 */}
       <div className="mb-6 flex items-center gap-3">
         <Link
@@ -227,7 +227,7 @@ export default function StoryboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="aff-page-actions flex items-center gap-3">
           {/* [WORKFLOW-FIX] 模式标签（只读）— 切换需回到工作流看板 */}
           <div className="flex items-center rounded-lg border border-stone-200 bg-white px-3 py-1.5 shadow-sm">
             <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${

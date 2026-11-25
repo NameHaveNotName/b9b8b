@@ -88,7 +88,7 @@ export default async function ProjectPage(props: { params: Promise<{ id: string 
     const progressPercent = (completedCount / 12) * 100
 
     return (
-      <div className="mx-auto max-w-7xl">
+      <div className="aff-project-overview mx-auto max-w-7xl">
         {access.isSeriesAccess && (
           <div className="mb-6 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
             你正通过系列职责查看本集。项目总览保持只读；进入工作流后，只能编辑职责允许的步骤。

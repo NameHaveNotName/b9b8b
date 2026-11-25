@@ -32,6 +32,7 @@ export interface HoverImageBadgeProps {
   onLoad?: (width: number, height: number) => void
   /** 自定义包装类名 */
   wrapperClassName?: string
+  mobileDirectRetry?: boolean
 }
 
 export default function HoverImageBadge({
@@ -47,8 +48,10 @@ export default function HoverImageBadge({
   anyRegenerating,
   onLoad,
   wrapperClassName,
+  mobileDirectRetry = false,
 }: HoverImageBadgeProps) {
   const [hovered, setHovered] = useState(false)
+  const [mobileControls, setMobileControls] = useState(false)
   const [selectedRatio, setSelectedRatio] = useState(propRatio || '16:9')
   const [selectedModel, setSelectedModel] = useState(propModel || IMAGE_MODELS.primary)
   const hoverRef = useRef<HTMLDivElement>(null)
@@ -120,10 +123,11 @@ export default function HoverImageBadge({
         </div>
       )}
 
+      {onRegenerate && src && <button type="button" className="aff-mobile-only aff-quick-retry" disabled={!!isRegenerating || !!anyRegenerating} aria-expanded={!mobileDirectRetry && mobileControls} onClick={e => { e.stopPropagation(); if (mobileDirectRetry) void handleRegenerate(); else setMobileControls(v => !v) }}>{isRegenerating ? '重做中' : mobileDirectRetry ? '重做' : mobileControls ? '收起' : '操作'}</button>}
       {/* 悬停覆盖层 */}
-      {hovered && (
+      {(hovered || mobileControls) && (
         <div
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/60 p-3 backdrop-blur-[2px]"
+          data-mobile-open={mobileControls} className="aff-hover-overlay absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/60 p-3 backdrop-blur-[2px]"
           onClick={(e) => e.stopPropagation()}
           onMouseEnter={() => {
             if (leaveTimer.current) clearTimeout(leaveTimer.current)

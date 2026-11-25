@@ -1,0 +1,152 @@
+/* AI Film Flow Mobile — scoped presentation layer, desktop untouched. */
+.aff-mobile-only { display: none !important; }
+
+/* Shell safety: let the flex main column shrink instead of pushing the page wide. */
+.aff-main { min-width: 0; }
+.aff-content { min-width: 0; }
+
+/* Ratio / image-model picker row: must never force the page wider than the viewport. */
+.aff-model-bar { flex-wrap: wrap; }
+.aff-model-field { min-width: 0; }
+.aff-model-field select { max-width: 100%; min-width: 0; }
+
+/* Standalone storyboard table: fixed columns may exceed the available width on
+   tablet-sized desktop layouts, so the table scrolls locally instead of
+   widening the page. */
+.aff-table-scroll { min-width: 0; overflow-x: auto; overflow-y: hidden; }
+
+@media (max-width: 767px) {
+  .aff-mobile-only { display: revert !important; }
+  .aff-shell { --aff-pad: 12px; min-width: 0; }
+  .aff-main { min-width: 0; width: 100%; }
+  .aff-content { min-width: 0; padding: 12px !important; }
+  .aff-header { height: auto; min-height: 56px; gap: 8px; padding: 8px 12px !important; }
+  .aff-header h2 { font-size: 16px; line-height: 1.4; overflow-wrap: anywhere; }
+  .aff-header > div { min-width: 0; }
+  .aff-header button { min-height: 40px; }
+  .aff-sidebar-wrap { display: none; }
+  .aff-sidebar-wrap[data-open='true'] { display: flex; position: fixed; inset: 0 auto 0 0; width: min(300px, 88vw); max-width: 100%; z-index: 72; overflow-y: auto; background: white; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .aff-sidebar-wrap > aside { width: 100%; min-width: 0; }
+  .aff-sidebar-backdrop { position: fixed; inset: 0; z-index: 71; background: #1c191780; border: 0; }
+  .aff-mobile-nav { display: flex !important; justify-content: space-between; align-items: center; min-height: 48px; padding: 6px 12px; background: white; border-bottom: 1px solid #e7e5e4; gap: 8px; }
+  .aff-mobile-nav button, .aff-mobile-nav a { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+  .aff-mobile-nav a:last-child { background: #292524; color: white; }
+  .aff-workflow { min-width: 0; padding: 8px 0 calc(114px + env(safe-area-inset-bottom)) !important; }
+  .aff-workflow h1 { font-size: 22px; line-height: 1.35; overflow-wrap: anywhere; }
+  .aff-step-content { padding: 12px !important; min-width: 0; }
+  .aff-step-content input:not([type=checkbox]):not([type=radio]), .aff-step-content textarea, .aff-step-content select, .aff-inspector textarea, .aff-inspector input:not([type=checkbox]):not([type=radio]), .aff-inspector select { font-size: 16px !important; max-width: 100%; min-width: 0; }
+  .aff-workflow p, .aff-inspector p, .aff-shot-row { overflow-wrap: anywhere; }
+  .aff-stage { margin-bottom: 14px; overflow: visible !important; }
+  .aff-stage-caption { display:block !important; font-size:12px; color:#78716c; margin:4px 0 8px; }
+  .aff-stage-list { display:grid !important; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; min-width:0 !important; padding:0 !important; }
+  .aff-stage-list > div { min-width: 0; }
+  .aff-stage-list > div > button { width: 100%; min-height: 44px; flex-direction:row !important; justify-content:center; gap:5px; padding:4px !important; border: 1px solid #e7e5e4; border-radius: 7px; }
+  .aff-stage-list > div > button > span { font-size: 12px !important; white-space: normal; }
+  .aff-stage-list > div > div { display: none; }
+  .aff-canvas { margin-bottom: 14px !important; }
+  .aff-canvas-head { padding: 12px !important; }
+  .aff-canvas-track { padding: 12px !important; }
+  .aff-canvas-track > div { gap: 8px; }
+  .aff-canvas-unit { width: min(320px, calc(100vw - 76px)) !important; flex: 0 0 auto; min-width: 0; }
+  .aff-canvas-unit > div:first-child > div { min-width: 0; }
+  .aff-canvas-unit > div:nth-child(2) { overflow-x: auto; }
+  .aff-canvas-unit p { font-size: 12px; }
+  .aff-storyboard-tools { display: flex !important; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .aff-storyboard-tools button, .aff-storyboard-tools select { min-height: 42px; border: 1px solid #d6d3d1; border-radius: 8px; padding: 6px 10px; background: white; font-size: 13px; }
+  .aff-storyboard-tools button[aria-pressed=true] { background: #292524; color: white; border-color: #292524; }
+  .aff-storyboard-act[data-mobile-hidden=true] { display: none; }
+  .aff-storyboard-act { min-width: 0; }
+  .aff-storyboard-row { gap: 10px !important; padding: 12px !important; min-width: 0; }
+  .aff-storyboard-row > div { min-width: 0; }
+  .aff-storyboard-row .aff-shot-media { width: 100% !important; }
+  .aff-storyboard[data-density=compact] .aff-storyboard-row { display: grid !important; grid-template-columns: minmax(0,1fr) minmax(100px,36%); align-items: start; }
+  .aff-storyboard[data-density=compact] .aff-storyboard-row .aff-shot-media { width: 100% !important; }
+  .aff-storyboard-row .aff-shot-info > p { font-size: 14px; line-height: 1.6; }
+  .aff-storyboard-row .aff-shot-info > div:first-child { flex-wrap: wrap; }
+  .aff-storyboard-row .aff-shot-media button { min-height: 36px; }
+  .aff-act-controls { flex-wrap: wrap; padding: 10px !important; }
+  .aff-mode-options { flex-direction: column; }
+  .aff-mode-options > button { width: 100% !important; padding: 16px !important; }
+  .aff-quick-retry { display: inline-flex !important; position: absolute; bottom: 6px; right: 6px; z-index: 21; min-height: 40px; min-width: 44px; align-items: center; justify-content: center; padding: 5px 9px; background: #292524e8; color: white; border-radius: 8px; font-size: 12px; }
+  .aff-hover-overlay { display: none !important; }
+  .aff-reference-bar .aff-ref-upload { flex-direction: column; }
+  .aff-reference-bar .aff-ref-url { width: 100% !important; }
+  .aff-reference-bar select, .aff-reference-bar input { max-width: 100%; min-width: 0; font-size: 16px !important; }
+  .aff-reference-bar .group > div:first-child > button { opacity: 1 !important; min-width: 32px; min-height: 32px; }
+  .aff-ref-picker { display: block !important; width: 100%; margin-top: 6px; border: 1px solid #d6d3d1; border-radius: 6px; padding: 8px; font-size: 12px; min-height: 40px; }
+  .aff-bind { display: block !important; width: 100%; margin-bottom: 6px; background: #ecfdf5; color: #166534; border: 1px solid #bbf7d0; border-radius: 6px; padding: 8px; font-size: 12px; min-height: 40px; overflow-wrap: anywhere; }
+  .aff-selected-ref { display: flex !important; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid #bbf7d0; border-radius: 8px; background: #ecfdf5; font-size: 12px; color: #166534; }
+  .aff-selected-ref button { min-height: 40px; }
+  .aff-inspector { max-width: 100vw !important; width: 100% !important; height: 100dvh; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .aff-inspector > header > div { flex-wrap: wrap; gap: 6px; }
+  .aff-inspector > header > div > div:first-child { flex-basis: calc(100% - 64px); }
+  .aff-inspector > header > div > div:first-child p { white-space: normal; }
+  .aff-inspector > header > div > div.w-48 { width: auto; flex: 1; min-width: 90px; }
+  .aff-inspector button { min-height: 40px; }
+  .aff-inspector .aff-inspector-actions { justify-content: stretch; }
+  .aff-inspector .aff-inspector-actions > button { flex: 1 1 140px; min-height: 44px; }
+  .aff-execute-trigger { top: auto !important; right: 12px !important; bottom: calc(70px + env(safe-area-inset-bottom)) !important; transform: none !important; flex-direction: row !important; border-radius: 10px !important; padding: 12px 14px !important; min-height: 44px; }
+  .aff-execute-trigger span { writing-mode: horizontal-tb !important; }
+  .aff-tasks { bottom: calc(8px + env(safe-area-inset-bottom)) !important; right: 8px !important; width: min(384px,calc(100vw - 16px)) !important; }
+  .aff-tasks .group-hover\:opacity-100 { opacity: 1 !important; }
+  .aff-workflow .aff-toast { bottom: calc(120px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); width: max-content; }
+  .aff-table-row { display: grid !important; grid-template-columns: 32px minmax(0,1fr) minmax(0,1fr) 34px; gap: 8px !important; align-items: center; min-width: 0; }
+  .aff-table-row > div { min-width: 0; }
+  .aff-table-row > .aff-table-thumb { grid-column: 1 / -1; grid-row: 2; }
+  .aff-table-row > .aff-table-thumb img, .aff-table-row > .aff-table-thumb .h-16 { width: 100% !important; height: auto !important; aspect-ratio: 16 / 9; object-fit: contain; }
+  .aff-table-row > .aff-table-id { grid-column: 2 / 4; grid-row: 1; width: auto; overflow-wrap: anywhere; }
+  .aff-table-row > .aff-table-desc { grid-column: 1 / -1; grid-row: 3; }
+  .aff-table-row > .aff-table-camera { grid-column: 1 / 3; grid-row: 4; width: 100%; }
+  .aff-table-row > .aff-table-duration { grid-column: 3 / -1; grid-row: 4; width: 100%; }
+  .aff-table-row > .aff-table-characters { grid-column: 1 / -1; grid-row: 5; width: auto; }
+  .aff-table-row > button:last-child { grid-column: 4; grid-row: 1; }
+  .aff-table-row > button:first-child { grid-column: 1; grid-row: 1; touch-action: none; }
+  .aff-table-row select, .aff-table-row textarea { font-size: 16px; min-height: 40px; }
+  .aff-keyframe-card { padding: 12px !important; }
+  .aff-keyframe-head { flex-wrap: wrap; gap: 8px !important; }
+  .aff-keyframe-head > div:nth-child(2) { flex: 1; flex-wrap: wrap; }
+  .aff-keyframe-pair { width: 100%; display: grid !important; grid-template-columns: repeat(2,minmax(0,1fr)); margin-left: 0 !important; }
+  .aff-keyframe-pair > div { min-width: 0; }
+  .aff-keyframe-pair img, .aff-keyframe-pair .h-14 { width: 100% !important; height: auto !important; aspect-ratio: 16/9; object-fit: contain; }
+  .aff-keyframe-card .pl-7 { padding-left: 0 !important; }
+  .aff-keyframe-card .ml-auto { margin-left: 0 !important; }
+  .aff-keyframe-card .cursor-grab { touch-action: none; }
+  .aff-tail-retry { display: inline-flex !important; position: absolute; right: 4px; top: 4px; min-height: 36px; padding: 4px 8px; background: #292524dd; color: white; border-radius: 6px; font-size: 11px; }
+  .aff-tail-hover { display: none !important; }
+  .aff-storyboard-page { min-width: 0; }
+  .aff-storyboard-page .aff-page-actions { flex-wrap: wrap; gap: 6px; }
+  .aff-model-bar { gap: 10px 14px; }
+  .aff-model-field { flex: 1 1 100%; flex-wrap: wrap; gap: 6px; }
+  .aff-model-field select { flex: 1 1 120px; width: auto; }
+}
+@media (max-width:767px) {
+  .aff-hover-overlay[data-mobile-open='true'] { display:flex !important; overflow-y:auto; justify-content:flex-start; padding-bottom:48px; }
+  .aff-hover-overlay[data-mobile-open='true'] button { min-height:32px; }
+}
+@media (max-width:767px) {
+  .aff-step-actions { flex-wrap:wrap; gap:6px !important; }
+  .aff-step-actions button { min-height:44px; padding:8px 12px; }
+  .aff-section { min-width:0; }
+  .aff-section .aff-section-toggle { min-height:48px; padding:10px 12px; gap:6px; }
+  .aff-section .aff-section-toggle > span { min-width:0; overflow-wrap:anywhere; }
+  .aff-section-body { padding:10px !important; min-width:0; }
+  .aff-section-body textarea { max-width:100%; min-width:0; line-height:1.65; }
+  .aff-section-body pre, .aff-inspector pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .aff-storyboard[data-density=compact] .aff-quick-retry { position:absolute; bottom:3px; right:3px; padding:3px 6px; min-height:32px; min-width:38px; }
+}
+
+@media(max-width:767px){
+  .aff-stage-list > div > button > div { width:24px !important; height:24px !important; flex-shrink:0; border-width:1px; }
+  .aff-stage-list > div > button > div svg { width:13px; height:13px; }
+  .aff-stage-list > div > button[aria-current=step] { border:2px solid #a16207; background:#fffbeb; }
+  .aff-stage-list > div > button > span { font-size:12px !important; }
+  .aff-project-overview { min-width:0; }
+  .aff-project-overview .grid { min-width:0; }
+  .aff-project-overview .grid > div { min-width:0; }
+  .aff-project-overview .grid > div .p-5 { padding:12px !important; }
+  .aff-project-overview p { overflow-wrap:anywhere; }
+  .aff-act-chips { display:flex; gap:6px; flex-wrap:wrap; width:100%; }
+  .aff-section-head { flex-wrap:wrap; }
+  .aff-section-action { max-width:100%; }
+  .aff-section-toggle { min-height:44px; }
+}

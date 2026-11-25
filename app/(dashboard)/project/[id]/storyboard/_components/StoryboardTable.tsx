@@ -135,7 +135,7 @@ function SortableRow({
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-3 rounded-lg border bg-white p-3 transition ${
+      className={`aff-table-row flex items-center gap-3 rounded-lg border bg-white p-3 transition ${
         isDragging ? 'border-amber-300 shadow-lg' : 'border-stone-200'
       }`}
     >
@@ -149,7 +149,7 @@ function SortableRow({
       </button>
 
       {/* 缩略图 — 懒加载：初始显示缩略图，点击后加载原图 */}
-      <div className="group relative shrink-0">
+      <div className="aff-table-thumb group relative shrink-0">
         {showImage ? (
           <>
             <div className="relative h-16 w-24 overflow-hidden rounded-md bg-stone-100">
@@ -196,12 +196,12 @@ function SortableRow({
       </div>
 
       {/* Shot ID */}
-      <div className="w-20 shrink-0 font-mono text-xs text-stone-500">
+      <div className="aff-table-id w-20 shrink-0 font-mono text-xs text-stone-500">
         {shot.shotId}
       </div>
 
       {/* 描述（可编辑） */}
-      <div className="min-w-0 flex-1">
+      <div className="aff-table-desc min-w-0 flex-1">
         {editingDesc ? (
           <textarea
             value={descValue}
@@ -238,7 +238,7 @@ function SortableRow({
       <select
         value={shot.cameraMove}
         onChange={(e) => onUpdate({ ...shot, cameraMove: e.target.value })}
-        className="w-20 shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 focus:border-amber-500 focus:outline-none"
+        className="aff-table-camera w-20 shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 focus:border-amber-500 focus:outline-none"
       >
         {CAMERA_MOVES.map((m) => (
           <option key={m} value={m}>
@@ -251,7 +251,7 @@ function SortableRow({
       <select
         value={shot.duration}
         onChange={(e) => onUpdate({ ...shot, duration: Number(e.target.value) })}
-        className="w-14 shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 focus:border-amber-500 focus:outline-none"
+        className="aff-table-duration w-14 shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 focus:border-amber-500 focus:outline-none"
       >
         {DURATIONS.map((d) => (
           <option key={d} value={d}>
@@ -261,7 +261,7 @@ function SortableRow({
       </select>
 
       {/* 角色 Badge */}
-      <div className="flex w-28 shrink-0 flex-wrap gap-1">
+      <div className="aff-table-characters flex w-28 shrink-0 flex-wrap gap-1">
         {shot.characters.map((cid) => (
           <span
             key={cid}
@@ -379,7 +379,7 @@ export default function StoryboardTable({
         items={shots.map((s) => s.shotId)}
         strategy={verticalListSortingStrategy}
       >
-        <div className="flex flex-col gap-2">
+        <div className="aff-table-scroll flex flex-col gap-2">
           {/* 表头（桌面端显示） */}
           <div className="hidden items-center gap-3 px-3 text-xs font-medium text-stone-400 md:flex">
             <div className="w-6 shrink-0" />

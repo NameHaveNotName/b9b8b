@@ -16,6 +16,7 @@ interface ReferenceAsset {
 interface ReferenceBarProps {
   projectId: string
   defaultExpanded?: boolean
+  mobilePickEnabled?: boolean
   characters?: Array<{ id: string; name: string }>
 }
 
@@ -31,7 +32,7 @@ const REFERENCE_ROLE_OPTIONS = [
   { value: 'PRODUCT', label: '产品/道具' },
 ]
 
-export default function ReferenceBar({ projectId, defaultExpanded = false, characters = [] }: ReferenceBarProps) {
+export default function ReferenceBar({ projectId, defaultExpanded = false, characters = [], mobilePickEnabled = false }: ReferenceBarProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [uploading, setUploading] = useState(false)
   const [urlInput, setUrlInput] = useState('')
@@ -136,7 +137,7 @@ export default function ReferenceBar({ projectId, defaultExpanded = false, chara
   const count = references?.length || 0
 
   return (
-    <div className="mb-4 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition-all">
+    <div className="aff-reference-bar mb-4 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition-all">
       {/* Collapsed bar */}
       <button
         onClick={() => setExpanded(!expanded)}
@@ -164,7 +165,7 @@ export default function ReferenceBar({ projectId, defaultExpanded = false, chara
       {expanded && (
         <div className="border-t border-stone-100 p-4">
           {/* Upload zones */}
-          <div className="flex gap-3">
+          <div className="aff-ref-upload flex gap-3">
             <div
               onDragOver={e => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
@@ -193,7 +194,7 @@ export default function ReferenceBar({ projectId, defaultExpanded = false, chara
               />
             </div>
 
-            <div className="flex w-56 flex-col gap-2 rounded-lg border border-stone-200 p-3">
+            <div className="aff-ref-url flex w-56 flex-col gap-2 rounded-lg border border-stone-200 p-3">
               <div className="flex items-center gap-1.5 text-xs text-stone-500">
                 <Link className="h-3.5 w-3.5" />
                 从 URL 导入
@@ -251,6 +252,7 @@ export default function ReferenceBar({ projectId, defaultExpanded = false, chara
                       <X className="h-3 w-3" />
                     </button>
                   </div>
+                  {mobilePickEnabled && <button type="button" className="aff-mobile-only aff-ref-picker" onClick={() => { window.dispatchEvent(new CustomEvent('aff-mobile-reference-picked', { detail: { projectId, item: { id: ref.id, url: ref.url } } })); setExpanded(false) }}>选为镜头参考</button>}
                   <div className="mt-2">
                     <select
                       value={ref.metadata?.referenceRole || 'UNASSIGNED'}

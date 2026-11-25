@@ -597,11 +597,11 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6">
+    <div className="aff-workflow mx-auto max-w-7xl px-4 py-6">
       {/* Toast：风格选中等成功/失败的瞬时反馈 */}
       {toast && (
         <div
-          className={`fixed bottom-8 left-1/2 z-50 -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg transition-all duration-300 ease-out ${
+          className={`aff-toast fixed bottom-8 left-1/2 z-50 -translate-x-1/2 rounded-xl px-5 py-2.5 text-sm font-medium shadow-lg transition-all duration-300 ease-out ${
             toast.kind === 'success'
               ? 'bg-stone-900 text-white translate-y-0 opacity-100'
               : 'bg-red-500 text-white translate-y-0 opacity-100'
@@ -645,6 +645,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
         <ReferenceBar
           projectId={params.id}
           defaultExpanded={currentActive === 'IDEATION'}
+          mobilePickEnabled={currentActive === 'STORYBOARD' && canEditCurrentStep}
           characters={(project.framework?.characters || []).map((character: any) => ({ id: character.id, name: character.name }))}
         />
       )}
@@ -659,7 +660,7 @@ export default function WorkflowPage(props: { params: Promise<{ id: string }> })
 
       {/* 步骤内容区 */}
       {currentStep && (
-        <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+        <div className="aff-step-content rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
           <StepHeader
             step={currentStep}
             project={project}
@@ -1291,7 +1292,7 @@ const WorkflowInspectorDrawerWrapper = forwardRef<WorkbenchHandle, {
       {/* 主入口负责打开右侧副工作台；浮动任务条只显示状态与定位。 */}
       <button
         onClick={openInspector}
-        className="fixed right-0 top-1/2 z-40 inline-flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-xl border border-r-0 border-amber-300 bg-stone-900 px-2.5 py-4 text-xs font-semibold text-white shadow-lg transition hover:bg-stone-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+        className="aff-execute-trigger fixed right-0 top-1/2 z-40 inline-flex -translate-y-1/2 flex-col items-center gap-2 rounded-l-xl border border-r-0 border-amber-300 bg-stone-900 px-2.5 py-4 text-xs font-semibold text-white shadow-lg transition hover:bg-stone-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
         title="打开生成工作台"
       >
         <Sparkles className="h-3.5 w-3.5 text-amber-300" />
@@ -1438,7 +1439,7 @@ function StepHeader({
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="aff-step-actions flex items-center gap-2">
         {/* 未解锁步骤 */}
         {!isHidden && !isAvailable && (
           <span className="rounded-lg border border-stone-200 px-4 py-2 text-xs text-stone-400">
@@ -1451,7 +1452,7 @@ function StepHeader({
         {!readOnly && !isHidden && isAvailable && step.status === 'PENDING' && !(
           step.stepType === 'STORYBOARD' && !(step.outputData?.prompts?.length > 0)
         ) && (
-          <div className="flex items-center gap-2">
+          <div className="aff-step-actions flex items-center gap-2">
             {step.stepType === 'FRAMEWORK' && onImport && (
               <button
                 onClick={onImport}
@@ -4524,9 +4525,9 @@ function PromptPreview({
 
       {/* 比例 + 模型 下拉选择栏（风格统一步骤隐藏全局模型选择） */}
       {(onAspectRatioChange || onImageModelChange) && stepLabel !== 'STYLE' && (
-        <div className="flex items-center gap-6 border-b border-stone-200 py-4">
+        <div className="aff-model-bar flex items-center gap-6 border-b border-stone-200 py-4">
           {onAspectRatioChange && (
-            <div className="flex items-center gap-2">
+            <div className="aff-model-field flex items-center gap-2">
               <span className="text-sm font-medium text-stone-700 whitespace-nowrap">画面比例</span>
               <select
                 value={selectedRatio}
@@ -4542,7 +4543,7 @@ function PromptPreview({
             </div>
           )}
           {onImageModelChange && (
-            <div className="flex items-center gap-2">
+            <div className="aff-model-field flex items-center gap-2">
               <span className="text-sm font-medium text-stone-700 whitespace-nowrap">生图模型</span>
               <select
                 value={imageModel}
@@ -4565,8 +4566,8 @@ function PromptPreview({
       )}
       {/* 风格统一步骤只保留比例选择 */}
       {stepLabel === 'STYLE' && onAspectRatioChange && (
-        <div className="flex items-center gap-6 border-b border-stone-200 py-4">
-          <div className="flex items-center gap-2">
+        <div className="aff-model-bar flex items-center gap-6 border-b border-stone-200 py-4">
+          <div className="aff-model-field flex items-center gap-2">
             <span className="text-sm font-medium text-stone-700 whitespace-nowrap">画面比例</span>
             <select
               value={selectedRatio}
@@ -5800,6 +5801,17 @@ function StoryboardPanel({
     })),
     [step.resultAssets]
   )
+  const [mobileAct, setMobileAct] = useState<string>('all')
+  const [mobileDensity, setMobileDensity] = useState<'compact' | 'large'>('large')
+  const [mobileRef, setMobileRef] = useState<{ url: string; id: string } | null>(null)
+  useEffect(() => {
+    const onPick = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (!readOnly && detail?.projectId === projectId && detail?.item?.url && detail?.item?.id) setMobileRef(detail.item)
+    }
+    window.addEventListener('aff-mobile-reference-picked', onPick)
+    return () => window.removeEventListener('aff-mobile-reference-picked', onPick)
+  }, [projectId, readOnly])
   const isExecuting = executing === step.stepType
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
@@ -5872,7 +5884,10 @@ function StoryboardPanel({
       const x = e.detail?.clientX || 0
       const y = e.detail?.clientY || 0
       const el = document.elementFromPoint(x, y)
-      const data = findShotShotIdAndActFromEl(el)
+      const explicitTarget = e.detail?.affMobileTarget
+      if (explicitTarget && (readOnly || e.detail?.projectId !== projectId)) return
+      const data = explicitTarget || findShotShotIdAndActFromEl(el)
+      if (explicitTarget && !shots.some((shot: any) => shot.shotId === data.shotId && shot.actNumber === data.actNumber)) return
       const shotId = data.shotId
       const actNum = data.actNumber
       const item = e.detail?.item
@@ -5953,7 +5968,7 @@ function StoryboardPanel({
       window.removeEventListener('drop', handleRefDrop as EventListener)
       window.removeEventListener('refdragend', handleRefDragEnd as EventListener)
     }
-  }, [])
+  }, [projectId, readOnly, shots, shotExtraRefs])
 
   // [ACT-QUEUE] 每幕异步生图进度（独立轮询，不占用全局 executing 状态）
   const [actProgress, setActProgress] = useState<Record<number, { current: number; total: number; shotId: string | null }>>({})
@@ -6201,7 +6216,7 @@ function StoryboardPanel({
         <div className="flex justify-center py-8">
           <div className="space-y-6 text-center">
             <p className="text-sm text-stone-500">选择分镜设计模式：</p>
-            <div className="flex gap-4 justify-center">
+            <div className="aff-mode-options flex gap-4 justify-center">
               <button
                 onClick={() => { handleModeSelect('reference'); onExecute('STORYBOARD', { action: 'generate-prompts', mode: 'reference' }) }}
                 disabled={isExecuting}
@@ -6241,7 +6256,13 @@ function StoryboardPanel({
 
   if (showStoryboardTable) {
     return (
-      <div className="space-y-6">
+      <div className="aff-storyboard space-y-6" data-density={mobileDensity}>
+        <div className="aff-mobile-only aff-storyboard-tools" aria-label="分镜浏览方式">
+          <div className="aff-act-chips" aria-label="定位到幕"><button type="button" aria-pressed={mobileAct === 'all'} onClick={() => setMobileAct('all')}>全部幕</button>{shotsByAct.map(([act]) => <button type="button" key={act} aria-pressed={mobileAct === String(act)} onClick={() => setMobileAct(String(act))}>第 {act} 幕</button>)}</div>
+          <button type="button" aria-pressed={mobileDensity === 'large'} onClick={() => setMobileDensity('large')}>大图</button>
+          <button type="button" aria-pressed={mobileDensity === 'compact'} onClick={() => setMobileDensity('compact')}>紧凑</button>
+        </div>
+        {mobileRef && !readOnly && <div className="aff-mobile-only aff-selected-ref"><span>已选参考图 · 点击目标镜头的“绑定参考”</span><button type="button" onClick={() => setMobileRef(null)}>取消</button></div>}
         {shotsByAct.map(([actNumber, actShots]) => {
           const actAssetsMap = new Map<string, any>()
           for (const shot of actShots) {
@@ -6256,7 +6277,7 @@ function StoryboardPanel({
           const actHasServerGenerating = actShots.some((shot: any) => generatingShots[`${actNumber}_${shot.shotId}`]?.status === 'processing')
 
           return (
-            <div key={actNumber} className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+            <div key={actNumber} className="aff-storyboard-act rounded-lg border border-stone-200 bg-white overflow-hidden" data-mobile-hidden={mobileAct !== 'all' && shotsByAct.some(([act]) => String(act) === mobileAct) && mobileAct !== String(actNumber)}>
               {/* 头部 */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 bg-stone-50">
                 <div>
@@ -6303,10 +6324,10 @@ function StoryboardPanel({
                       key={shot.shotId}
                       data-shot-id={shot.shotId}
                       data-shot-act={shot.actNumber ?? ''}
-                      className={`flex flex-col sm:flex-row gap-4 px-4 py-3 transition-colors ${dragOverShotId === shot.shotId ? 'bg-emerald-50/40' : ''}`}
+                      className={`aff-storyboard-row flex flex-col sm:flex-row gap-4 px-4 py-3 transition-colors ${dragOverShotId === shot.shotId ? 'bg-emerald-50/40' : ''}`}
                     >
                       {/* 左侧：镜头信息 */}
-                      <div className="flex-1 min-w-0">
+                      <div className="aff-shot-info flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-mono text-[11px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
                             {shot.shotId}
@@ -6347,7 +6368,11 @@ function StoryboardPanel({
                       </div>
 
                       {/* 右侧：图片区 */}
-                      <div className="w-full sm:w-60 shrink-0">
+                      <div className="aff-shot-media w-full sm:w-60 shrink-0">
+                        {mobileRef && !readOnly && <button type="button" className="aff-mobile-only aff-bind" onClick={() => {
+                          window.dispatchEvent(new CustomEvent('customdrop', { detail: { projectId, item: mobileRef, affMobileTarget: { shotId: shot.shotId, actNumber } } }))
+                          setMobileRef(null)
+                        }}>绑定参考到此镜头</button>}
                         {(() => {
                           const extraRefsKey = actNumber != null ? `${shot.shotId}_${actNumber}` : shot.shotId
                           const refs = shotExtraRefs[extraRefsKey] || []
@@ -6396,7 +6421,8 @@ function StoryboardPanel({
                               src={proxiedMediaUrl(asset.url)}
                               aspectRatio={cardRatio}
                               imageModel={cardModel}
-                              onRegenerate={(ar, m) => handleRegenerate(shot.shotId, ar, m, actNumber)}
+                              onRegenerate={readOnly ? undefined : (ar, m) => handleRegenerate(shot.shotId, ar, m, actNumber)}
+                              mobileDirectRetry
                               isRegenerating={isRegenerating}
                               anyRegenerating={!!regeneratingId || blocksGeneration}
                               wrapperClassName="absolute inset-0"
@@ -6497,7 +6523,7 @@ function StoryboardPanel({
 
               {/* 生图控制 */}
               {!readOnly && (
-                <div className="flex items-center gap-3 px-4 py-3 border-t border-stone-100 bg-stone-50">
+                <div className="aff-act-controls flex items-center gap-3 px-4 py-3 border-t border-stone-100 bg-stone-50">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-stone-600">比例</span>
                     <select
@@ -7038,16 +7064,17 @@ function CollapsibleSection({
   headerAction?: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  useEffect(() => { if (window.matchMedia('(max-width: 767px)').matches) setOpen(false) }, [])
 
   return (
-    <div className="rounded-lg border border-stone-200">
-      <button
+    <div className="aff-section rounded-lg border border-stone-200">
+      <div className="aff-section-head flex items-center gap-2">
+      <button type="button" aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-stone-50"
+        className="aff-section-toggle flex min-w-0 flex-1 items-center justify-between px-4 py-3 text-left transition hover:bg-stone-50"
       >
         <span className="text-sm font-semibold text-stone-800">{title}</span>
         <div className="flex items-center gap-2">
-          {headerAction}
           {open ? (
             <ChevronUp className="h-4 w-4 text-stone-400" />
           ) : (
@@ -7055,7 +7082,9 @@ function CollapsibleSection({
           )}
         </div>
       </button>
-      {open && <div className="border-t border-stone-100 px-4 py-3">{children}</div>}
+      {headerAction && <div className="aff-section-action shrink-0 pr-3">{headerAction}</div>}
+      </div>
+      {open && <div className="aff-section-body border-t border-stone-100 px-4 py-3">{children}</div>}
     </div>
   )
 }

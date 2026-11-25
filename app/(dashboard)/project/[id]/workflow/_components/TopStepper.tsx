@@ -69,8 +69,9 @@ export default function TopStepper({ steps, project, activeStepType, onStepClick
   })
 
   return (
-    <div className="mb-8 overflow-x-auto pb-2">
-      <div className="flex min-w-max items-center px-1">
+    <div className="aff-stage mb-8 overflow-x-auto pb-2">
+      <div className="aff-mobile-only aff-stage-caption">九阶段工作流 · {Math.max(1, visibleSteps.findIndex(step => step.isActive) + 1)} / {visibleSteps.length}</div>
+      <div className="aff-stage-list flex min-w-max items-center px-1">
         {visibleSteps.map((step, idx) => {
           const Icon = STEP_ICONS[step.stepId]
           const canClick = step.isDone || step.isFailed || step.isProcessing || step.isAvailable
@@ -80,6 +81,7 @@ export default function TopStepper({ steps, project, activeStepType, onStepClick
               <button
                 onClick={() => canClick && onStepClick(step.stepType)}
                 disabled={!canClick}
+                aria-current={step.isActive ? 'step' : undefined}
                 title={
                   !step.isUnlocked
                     ? '请先完成前置步骤'
