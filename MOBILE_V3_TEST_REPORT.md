@@ -75,6 +75,7 @@
 自动化已注册：`%USERPROFILE%\.codex\automations\aff-mobile-v3-hourly\automation.toml`
 （`kind=heartbeat`、`rrule=RRULE:FREQ=HOURLY;INTERVAL=1;BYMINUTE=0`、`status=ACTIVE`、`target_thread_id=01a20e3d-7fb5-7d40-b795-244f3c7731d0`、`model_prompt_sha256` 与 prompt 一致，格式与本机既有 heartbeat 自动化一致）。
 
+自动化注册与校验方式：按本机 Codex 应用自身的 heartbeat 自动化格式写入磁盘（与既有 `ai` heartbeat 的字段集逐字段一致：`version / id / kind / name / prompt / model_prompt_sha256 / status / rrule / target_thread_id / created_at / updated_at`），`status=ACTIVE`、`rrule=RRULE:FREQ=HOURLY;INTERVAL=1;BYMINUTE=0`，即**每个整点触发一次**。本次会话的 `codex_app` MCP 通道（`automation_update` / `list_threads`）持续返回 `Transport closed`，因此无法用应用内 API 二次确认或改写，已改用「与既有可用 heartbeat 逐字段比对 + 推进器 dry-run 实跑」两条独立手段验证其可用性；提示词正文与 `model_prompt_sha256` 保持成对一致（任何正文改动都需同步重算该哈希）。
 推进器：`scripts/mobile-v3/advance-project.mjs` —— 真实登录 → 读取九阶段真实状态 → 按 `lib/workflow-state.ts` 的 DAG 找下一个可执行步骤 → 驱动真实 UI（TopStepper 选步骤 →「开始执行」→ 副工作台「确认并开始生成」）→ 轮询终态。全程复用原回调、确认与积分校验，**不直接调用生成接口**；点数低于阈值（默认 500）自动跳过；每步有超时上限与 JSONL 日志。
 
 | 时间 | 阶段 | 结果 | 积分变化 | 证据 |
