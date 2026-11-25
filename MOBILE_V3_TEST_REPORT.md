@@ -2,7 +2,7 @@
 
 - 实际分支 / commit：`feature/mobile-ui-v3`（本次提交，hash 见 `git log feature/mobile-ui-v3`；基于 `6f126947d6bbc9043977f304b3e04bcca12ca307`，本分支一次提交交付全部移动端 V3 改动）
 - 基线 commit / 原版环境：`6f126947d6bbc9043977f304b3e04bcca12ca307`；另建只读基线 worktree `D:\.pogget\user_storage\u_461180\b9b8b-baseline`（同 commit，独立端口）用于 1440 桌面回归对比。
-- 本地/预览 URL：本地验收站点 `http://localhost:3000`（Next.js 15.5.28）；**Vercel 预览地址 `https://b9b8b-l5vu7ou8f-naaa-meee-s-projects.vercel.app`（Preview 环境，deployment id `8050612674`，Vercel 已报 Deployment has completed；本机网络无法打开该地址，原因见「剩余外部阻塞」第 1 条）**
+- 本地/预览 URL：本地验收站点 `http://localhost:3000`（Next.js 15.5.28）；**Vercel 预览地址 `https://b9b8b-8tc2nlknb-naaa-meee-s-projects.vercel.app`（Preview 环境，deployment id `8050811900`，Vercel 已报 Deployment has completed；本机网络无法打开该地址，原因见「剩余外部阻塞」第 1 条）**
 - 环境说明：
   - 数据库为**生产同库** Supabase（project ref `enlaopujtgvoqglvlnox`，由 `.env.local` 的 `DATABASE_URL` 指定），因此**验收阶段一律只读**：所有同源写请求在浏览器层被拦截，只验证前端合同。
   - 登录使用用户本人的真实账号（邮箱与密码不出现在本报告中）；凭据与 Playwright 会话态保存在仓库外目录，**未提交进 Git**。
@@ -42,7 +42,7 @@
 | 独立分镜、导出、资产 | PASS | `/project/{id}/storyboard`、`/project/{id}/assets`、`/assets` 五视口全部 PASS，零溢出 / 零 pageerror / 零同源写请求 | 见缺陷闭环 #8 |
 | 协作、账户、权限 | PASS | `/groups`、`/invitations`、`/settings`、`/settings/profile`、`/settings/recharges`、`/series` 五视口全部 PASS；只读会话下未产生任何同源写请求 | — |
 | 系列详情页 | BLOCKED | `/series/{id}` 需要一个属于当前账号的真实系列；`GET /api/series` 返回该账号**没有任何系列**，因此该路由无合法目标可访问 | 巡检器改为运行时从 `GET /api/series` 解析真实 id；无系列时明确记 BLOCKED，不伪造 PASS |
-| Vercel preview 部署 | PASS（部署成功） | 分支推送后由 Vercel Git 集成自动构建部署：**environment = Preview**，预览地址 `https://b9b8b-l5vu7ou8f-naaa-meee-s-projects.vercel.app`；证据来自 Vercel 自己写回的 GitHub 状态与部署记录：本分支最终提交的 `Vercel` 状态由 `pending`（Vercel is deploying your app）变为 `success`（Deployment has completed），deployment id `8050612674`，`environment_url` 即上述预览地址（由 `GET /repos/{owner}/{repo}/deployments?sha=…` 与 `/deployments/{id}/statuses` 取回，`state=success`）。**未使用 `--prod`，未触发任何生产部署**（历史 Production 部署均来自 main 分支旧提交） | 预览地址由本机网络无法打开（见「剩余外部阻塞」第 1 条），故未做预览 URL 的浏览器复测 |
+| Vercel preview 部署 | PASS（部署成功） | 分支推送后由 Vercel Git 集成自动构建部署：**environment = Preview**，预览地址 `https://b9b8b-8tc2nlknb-naaa-meee-s-projects.vercel.app`；证据来自 Vercel 自己写回的 GitHub 状态与部署记录：本分支最终提交的 `Vercel` 状态由 `pending`（Vercel is deploying your app）变为 `success`（Deployment has completed），deployment id `8050811900`，`environment_url` 即上述预览地址（由 `GET /repos/{owner}/{repo}/deployments?sha=…` 与 `/deployments/{id}/statuses` 取回，`state=success`）。**未使用 `--prod`，未触发任何生产部署**（历史 Production 部署均来自 main 分支旧提交） | 预览地址由本机网络无法打开（见「剩余外部阻塞」第 1 条），故未做预览 URL 的浏览器复测 |
 | Vercel CLI 日志核查 | BLOCKED | `api.vercel.com` 在本机网络不可达（Node `fetch` 连接超时、`Test-NetConnection` `TcpTestSucceeded=False`、直连 `76.76.21.21:443` 超时；`vercel.com` 本身可达但 API 域被拦截）；本机也无 Vercel 登录态（`%LOCALAPPDATA%\com.vercel.cli\auth.json` 缺失，只有 `Cache` 目录），`vercel whoami` 与 `vercel deploy --yes`（100 秒硬超时）均挂起 | 见「剩余外部阻塞」第 1 条 |
 | Supabase 相关日志 | BLOCKED | 本机无 Supabase MCP / CLI，`SUPABASE_SERVICE_ROLE_KEY` 不在 `.env.local` 中，无法按 RUNBOOK 用 `query_logs` / `supabase logs` 读取 Auth/Postgres/API 日志 | 见「剩余外部阻塞」第 2 条 |
 
@@ -86,13 +86,14 @@
 ## 剩余外部阻塞
 
 1. **Vercel 预览已部署成功，但本机无法打开该预览地址、也无法用 CLI 查日志（外部网络限制 + 凭据缺失）**
-   - 预览部署本身：**已完成**。分支推送触发 Vercel Git 集成自动构建，environment = `Preview`，地址 `https://b9b8b-l5vu7ou8f-naaa-meee-s-projects.vercel.app`；Vercel 写回的 GitHub 状态为 `success`（Deployment has completed），deployment id `8050612674`。**未使用 `--prod`，没有生产部署。**
+   - 预览部署本身：**已完成**。分支推送触发 Vercel Git 集成自动构建，environment = `Preview`，地址 `https://b9b8b-8tc2nlknb-naaa-meee-s-projects.vercel.app`；Vercel 写回的 GitHub 状态为 `success`（Deployment has completed），deployment id `8050811900`。**未使用 `--prod`，没有生产部署。**
    - 证据：Node `fetch('https://api.vercel.com/v2/user')` → `Connect Timeout Error`；`Test-NetConnection api.vercel.com -Port 443` → `TcpTestSucceeded=False`；直连 `76.76.21.21:443`（api.vercel.com 解析地址）→ 15s 超时后 socket hang up；同机 `https://vercel.com` → HTTP 200、`https://registry.npmjs.org` → HTTP 200，说明是 API 域被拦而非整机断网。
    - 凭据：`%LOCALAPPDATA%\com.vercel.cli\auth.json` 不存在（仅 `Cache` 目录），也无 `VERCEL_TOKEN` 环境变量，`vercel whoami` 因此挂起。
-   - 预览地址在本机不可达：`https://b9b8b-l5vu7ou8f-naaa-meee-s-projects.vercel.app` 在 Node `fetch` 下为 `fetch failed`，在 `Invoke-WebRequest` 下为 SSL 连接无法建立（`The SSL connection could not be established`），在真实 Edge 浏览器下为 `net::ERR_CONNECTION_CLOSED`；生产预览域名同样不可达（同属 `*.vercel.app` 出口限制）。因此**预览地址未能做浏览器复测**，本地验收已 100% 完成。
+   - 预览地址在本机不可达：`https://b9b8b-8tc2nlknb-naaa-meee-s-projects.vercel.app` 在 Node `fetch` 下为 `fetch failed`，在 `Invoke-WebRequest` 下为 SSL 连接无法建立（`The SSL connection could not be established`），在真实 Edge 浏览器下为 `net::ERR_CONNECTION_CLOSED`；生产预览域名同样不可达（同属 `*.vercel.app` 出口限制）。因此**预览地址未能做浏览器复测**，本地验收已 100% 完成。
    - 实际 CLI 部署尝试：`vercel deploy --yes`（仅预览，未加 `--prod`）在 worktree 内以 100 秒硬超时执行，全程无输出、无部署 URL——CLI 卡在无法连通 `api.vercel.com` 的阶段；已停止该作业，未产生任何部署资源与费用。最终部署改由 Git 集成路径完成。
    - 结论：预览 URL 是**真实的**（取自 Vercel 自己写回 GitHub 的 deployment 记录 `environment_url`，不是构造或猜测的链接），但本机网络出口不通该域名，因此**预览环境未能在本机做浏览器复测**——报告中明确区分「部署已成功」与「本机未能打开预览地址」两件事，不把后者伪装成前者。
-   - 预览地址会随每次推送轮换：Vercel 每次 Preview 部署的 URL 含随机段（`<project>-<random>-<team>.vercel.app`），本表地址对应 deployment id `8050612674`（构建自包含全部代码改动的提交）；其后的提交仅更新本报告文本，应用构建产物与该部署完全一致。查询当前分支最新 Preview 地址的命令：`gh api "repos/NameHaveNotName/b9b8b/deployments?ref=feature/mobile-ui-v3&per_page=1" --jq ".[0].id"`，再 `gh api "repos/NameHaveNotName/b9b8b/deployments/<id>/statuses" --jq ".[0].environment_url"`。
+   - 本报告的最后一次提交只更新文档文字，会再触发一个新的 Preview 部署（URL 随机段变化），其应用构建产物与 deployment `8050811900` 完全相同；两者都可直接访问。
+   - 预览地址会随每次推送轮换：Vercel 每次 Preview 部署的 URL 含随机段（`<project>-<random>-<team>.vercel.app`），本表地址对应 deployment id `8050811900`（构建自包含全部代码改动的提交）；其后的提交仅更新本报告文本，应用构建产物与该部署完全一致。查询当前分支最新 Preview 地址的命令：`gh api "repos/NameHaveNotName/b9b8b/deployments?ref=feature/mobile-ui-v3&per_page=1" --jq ".[0].id"`，再 `gh api "repos/NameHaveNotName/b9b8b/deployments/<id>/statuses" --jq ".[0].environment_url"`。
    - 恢复条件与步骤：在能访问 `*.vercel.app` 的网络里打开上述预览地址，并用同一套 `scripts/mobile-v3/acceptance.mjs`（`AFF_BASE_URL` 指向预览地址）对五个视口复跑；能连通 `api.vercel.com` 且完成一次 `vercel login` 后，再执行 `vercel inspect <url> --wait` 与 `vercel logs --deployment <url> --level error` 核查运行日志。该流程已写入每小时自动化的「可选加分项」，网络恢复后会自动补做并把结果追加到本报告。
 2. **Supabase 只读日志不可查（外部权限缺失）**：本机没有 Supabase MCP、没有 Supabase CLI、`SUPABASE_SERVICE_ROLE_KEY` 不在 `.env.local` 中，无法按 RUNBOOK 用 `query_logs` / `supabase logs` 读取 Auth / Postgres / API 日志。已用替代手段覆盖同一目的：浏览器 Network 记录、真实接口响应码、应用返回体、Next dev 服务端日志 `.temp/dev-v3.log`。
 3. **隔离环境真实写入未执行**：当前 `DATABASE_URL` 指向生产同库，没有可用的隔离数据库实例。按 ACCEPTANCE 规则，真实写入只允许在「已确认隔离且授权」的项目进行，因此本轮只做拦截合同测试；报告中所有涉及写入的结论均标注为「拦截合同」，**不声称真实持久化通过**。
